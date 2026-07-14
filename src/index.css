@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 215 28% 17%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+
+    --primary: 205 62% 27%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 152 41% 52%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 201 11% 41%;
+
+    --accent: 205 62% 27%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 355 78% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 205 62% 27%;
+
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+
+    --warning: 40 89% 61%;
+    --warning-foreground: 215 28% 17%;
+
+    --success: 152 41% 52%;
+    --success-foreground: 0 0% 100%;
+
+    --radius: 12px;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 12%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 12%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 205 62% 56%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 152 41% 52%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 205 62% 56%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 355 78% 56%;
+    --destructive-foreground: 222 47% 11%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 205 62% 56%;
+
+    --info: 217 91% 60%;
+    --info-foreground: 222 47% 11%;
+
+    --warning: 40 89% 61%;
+    --warning-foreground: 222 47% 11%;
+
+    --success: 152 41% 52%;
+    --success-foreground: 222 47% 11%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    text-rendering: geometricPrecision;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-foreground;
+  }
+}
+
+@layer utilities {
+  .text-display {
+    @apply text-4xl font-semibold tracking-tight md:text-5xl;
+  }
+
+  .text-h1 {
+    @apply text-3xl font-semibold tracking-tight md:text-4xl;
+  }
+
+  .text-h2 {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+
+  .text-h3 {
+    @apply text-xl font-semibold;
+  }
+
+  .text-h4 {
+    @apply text-lg font-semibold;
+  }
+
+  .text-body-lg {
+    @apply text-base leading-7;
+  }
+
+  .text-body {
+    @apply text-sm leading-6;
+  }
+
+  .text-small {
+    @apply text-sm leading-5;
+  }
+
+  .text-caption {
+    @apply text-xs leading-4 text-muted-foreground;
+  }
+}
