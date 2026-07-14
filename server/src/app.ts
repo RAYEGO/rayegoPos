@@ -2,7 +2,7 @@ import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import Fastify from 'fastify'
 import { ZodError } from 'zod'
-import { serverConfig } from './config.js'
+import { isAllowedOrigin, serverConfig } from './config.js'
 import { authRoutes } from './routes/auth.js'
 
 export function createApp() {
@@ -11,7 +11,14 @@ export function createApp() {
   })
 
   app.register(cors, {
-    origin: serverConfig.frontendOrigin,
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) {
+        callback(null, true)
+        return
+      }
+
+      callback(new Error('Origin not allowed'), false)
+    },
     credentials: true,
   })
 

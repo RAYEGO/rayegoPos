@@ -3,11 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "dev:server": "tsx watch server/src/index.ts",
+    "start:server": "node server/dist/index.js",
+    "start:railway": "npm run prisma:migrate:deploy && npm run start:server",
+    "railway:build": "npm run prisma:generate && npm run build:server",
     "lint": "oxlint",
     "preview": "vite preview",
     "prisma:format": "prisma format",

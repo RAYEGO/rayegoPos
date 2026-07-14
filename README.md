@@ -26,6 +26,7 @@ Usa `.env.example` como punto de partida.
 Variables importantes:
 
 - `DATABASE_URL`
+- `DIRECT_URL`
 - `JWT_SECRET`
 - `PORT`
 - `FRONTEND_ORIGIN`
@@ -65,3 +66,28 @@ Credenciales:
 - `admin@rayego.pe` / `RayegoPOS2026!`
 - `supervisor@rayego.pe` / `RayegoSupervisor2026!`
 - `caja@rayego.pe` / `RayegoCaja2026!`
+
+## Deploy del backend en Railway
+
+El repositorio incluye `railway.json` para desplegar solo la API Fastify.
+
+Variables requeridas en Railway:
+
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `JWT_SECRET`
+- `PORT`
+- `HOST=0.0.0.0`
+- `FRONTEND_ORIGIN`
+
+Ejemplo de `FRONTEND_ORIGIN`:
+
+```bash
+FRONTEND_ORIGIN="https://tu-app.vercel.app,https://*.vercel.app"
+```
+
+Comportamiento en Railway:
+
+- build: `npm run railway:build`
+- start: `npm run start:railway`
+- healthcheck: `/health`
