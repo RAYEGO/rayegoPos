@@ -79,7 +79,6 @@ const createProductSchema = z.object({
   esControlado: z.boolean(),
   precioVenta: z.number().nonnegative('El precio debe ser mayor o igual a 0.'),
   costoReferencia: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
-  observaciones: z.string().max(500).optional(),
 })
 
 type CreateProductFormValues = z.infer<typeof createProductSchema>
@@ -101,7 +100,6 @@ const defaultFormValues: CreateProductFormValues = {
   esControlado: false,
   precioVenta: 0,
   costoReferencia: 0,
-  observaciones: '',
 }
 
 function getProductStatusVariant(status: ProductStatus) {
@@ -157,7 +155,7 @@ function FieldError({ message }: { message?: string }) {
 }
 
 export function ProductosPage() {
-  const { session } = useAuth()
+  const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | ProductStatus>('TODOS')
@@ -272,7 +270,6 @@ export function ProductosPage() {
       descripcion: values.descripcion?.trim() || undefined,
       concentracion: values.concentracion?.trim() || undefined,
       registroSanitario: values.registroSanitario?.trim() || undefined,
-      observaciones: values.observaciones?.trim() || undefined,
     }
 
     setIsSubmitting(true)
@@ -284,6 +281,12 @@ export function ProductosPage() {
       form.reset(defaultFormValues)
       await Promise.all([loadProducts(), loadOptions()])
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        toast.error('Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para guardar productos.')
+        await logout()
+        return
+      }
+
       toast.error(getApiErrorMessage(error))
     } finally {
       setIsSubmitting(false)
@@ -734,7 +737,7 @@ export function ProductosPage() {
       </Tabs>
 
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Registrar producto</DialogTitle>
             <DialogDescription>
@@ -746,7 +749,7 @@ export function ProductosPage() {
             className="grid gap-6"
             onSubmit={form.handleSubmit(handleCreateProduct)}
           >
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">SKU</label>
                 <Input {...form.register('sku')} placeholder="MED-0001" />
@@ -765,7 +768,7 @@ export function ProductosPage() {
                 <FieldError message={form.formState.errors.codigoBarras?.message} />
               </div>
 
-              <div className="space-y-2 md:col-span-2 xl:col-span-3">
+              <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium">Nombre comercial</label>
                 <Input {...form.register('nombre')} placeholder="Paracetamol 500 mg tabletas" />
                 <FieldError message={form.formState.errors.nombre?.message} />
@@ -927,22 +930,14 @@ export function ProductosPage() {
                 <FieldError message={form.formState.errors.costoReferencia?.message} />
               </div>
 
-              <div className="space-y-2 md:col-span-2 xl:col-span-3">
+              <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium">Descripción</label>
                 <Textarea
                   {...form.register('descripcion')}
                   placeholder="Detalle comercial o farmacéutico relevante"
+                  className="min-h-24"
                 />
                 <FieldError message={form.formState.errors.descripcion?.message} />
-              </div>
-
-              <div className="space-y-2 md:col-span-2 xl:col-span-3">
-                <label className="text-sm font-medium">Observaciones</label>
-                <Textarea
-                  {...form.register('observaciones')}
-                  placeholder="Observaciones internas del catálogo"
-                />
-                <FieldError message={form.formState.errors.observaciones?.message} />
               </div>
             </div>
 
