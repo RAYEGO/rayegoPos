@@ -1,5 +1,11 @@
 import { hash } from 'bcryptjs'
-import { PrismaClient, TipoDocumentoIdentidad } from '@prisma/client'
+import {
+  EstadoLote,
+  OrigenMovimientoInventario,
+  PrismaClient,
+  TipoDocumentoIdentidad,
+  TipoMovimientoInventario,
+} from '@prisma/client'
 
 const prisma = new PrismaClient()
 
@@ -199,6 +205,53 @@ const productCatalog = {
   ],
 } as const
 
+const inventorySeed = [
+  {
+    sku: 'MED-0001',
+    warehouseName: 'Mostrador principal',
+    lotCode: 'PARA-500-0726',
+    manufacturedAt: '2026-01-10',
+    expiryDate: '2026-12-31',
+    unitCost: 2.8,
+    initialStock: 120,
+    reservedStock: 12,
+    blockedStock: 0,
+  },
+  {
+    sku: 'MED-0002',
+    warehouseName: 'Controlados',
+    lotCode: 'AMOX-500-0926',
+    manufacturedAt: '2026-02-05',
+    expiryDate: '2026-10-20',
+    unitCost: 11.2,
+    initialStock: 64,
+    reservedStock: 8,
+    blockedStock: 6,
+  },
+  {
+    sku: 'MED-0003',
+    warehouseName: 'Cadena de frío',
+    lotCode: 'LORA-JBE-0826',
+    manufacturedAt: '2026-03-01',
+    expiryDate: '2026-09-15',
+    unitCost: 10.4,
+    initialStock: 42,
+    reservedStock: 4,
+    blockedStock: 0,
+  },
+  {
+    sku: 'MED-0004',
+    warehouseName: 'Suplementos',
+    lotCode: 'VITC-1000-0127',
+    manufacturedAt: '2026-04-12',
+    expiryDate: '2027-01-30',
+    unitCost: 14.7,
+    initialStock: 80,
+    reservedStock: 0,
+    blockedStock: 0,
+  },
+] as const
+
 async function main() {
   const passwordHashes = await Promise.all([
     hash('RayegoPOS2026!', 10),
@@ -238,6 +291,33 @@ async function main() {
       telefono: '014001122',
       email: 'principal@rayego.pe',
       esPrincipal: true,
+    },
+  })
+
+  await prisma.sucursal.upsert({
+    where: {
+      empresaId_codigo: {
+        empresaId: company.id,
+        codigo: 'SECUNDARIA',
+      },
+    },
+    update: {
+      nombre: 'Sucursal San Miguel',
+      direccion: 'Av. La Marina 845 - San Miguel',
+      telefono: '014002233',
+      email: 'sanmiguel@rayego.pe',
+      esPrincipal: false,
+      activo: true,
+    },
+    create: {
+      empresaId: company.id,
+      codigo: 'SECUNDARIA',
+      nombre: 'Sucursal San Miguel',
+      direccion: 'Av. La Marina 845 - San Miguel',
+      telefono: '014002233',
+      email: 'sanmiguel@rayego.pe',
+      esPrincipal: false,
+      activo: true,
     },
   })
 
@@ -573,6 +653,234 @@ async function main() {
         updatedById: adminUserId,
       },
     })
+  }
+
+  const supplier = await prisma.proveedor.upsert({
+    where: {
+      numeroDocumento: '20654321987',
+    },
+    update: {
+      razonSocial: 'Droguería Distribuidora Peruana SAC',
+      nombreComercial: 'DDP',
+      activo: true,
+      updatedById: adminUserId,
+    },
+    create: {
+      tipoDocumento: TipoDocumentoIdentidad.RUC,
+      numeroDocumento: '20654321987',
+      razonSocial: 'Droguería Distribuidora Peruana SAC',
+      nombreComercial: 'DDP',
+      email: 'abastecimiento@ddp.pe',
+      contactoTelefono: '014210987',
+      direccion: 'Av. Industrial 456 - Lima',
+      activo: true,
+      createdById: adminUserId,
+      updatedById: adminUserId,
+    },
+  })
+
+  const openingReason = await prisma.motivoMovimientoInventario.upsert({
+    where: {
+      codigo: 'APERTURA_LOTE',
+    },
+    update: {
+      nombre: 'Apertura de lote',
+      tipo: TipoMovimientoInventario.ENTRADA,
+      activo: true,
+      updatedById: adminUserId,
+    },
+    create: {
+      codigo: 'APERTURA_LOTE',
+      nombre: 'Apertura de lote',
+      descripcion: 'Ingreso inicial de un lote al inventario.',
+      tipo: TipoMovimientoInventario.ENTRADA,
+      activo: true,
+      createdById: adminUserId,
+      updatedById: adminUserId,
+    },
+  })
+
+  const reserveReason = await prisma.motivoMovimientoInventario.upsert({
+    where: {
+      codigo: 'RESERVA_INICIAL',
+    },
+    update: {
+      nombre: 'Reserva inicial',
+      tipo: TipoMovimientoInventario.RESERVA,
+      activo: true,
+      updatedById: adminUserId,
+    },
+    create: {
+      codigo: 'RESERVA_INICIAL',
+      nombre: 'Reserva inicial',
+      descripcion: 'Reserva registrada durante la apertura del lote.',
+      tipo: TipoMovimientoInventario.RESERVA,
+      activo: true,
+      createdById: adminUserId,
+      updatedById: adminUserId,
+    },
+  })
+
+  const blockReason = await prisma.motivoMovimientoInventario.upsert({
+    where: {
+      codigo: 'BLOQUEO_INICIAL',
+    },
+    update: {
+      nombre: 'Bloqueo inicial',
+      tipo: TipoMovimientoInventario.AJUSTE,
+      activo: true,
+      updatedById: adminUserId,
+    },
+    create: {
+      codigo: 'BLOQUEO_INICIAL',
+      nombre: 'Bloqueo inicial',
+      descripcion: 'Bloqueo registrado durante la apertura del lote.',
+      tipo: TipoMovimientoInventario.AJUSTE,
+      activo: true,
+      createdById: adminUserId,
+      updatedById: adminUserId,
+    },
+  })
+
+  for (const entry of inventorySeed) {
+    const product = await prisma.producto.findUniqueOrThrow({
+      where: {
+        sku: entry.sku,
+      },
+      select: {
+        id: true,
+        sku: true,
+      },
+    })
+
+    const availableStock =
+      entry.initialStock - entry.reservedStock - entry.blockedStock
+
+    await prisma.inventario.upsert({
+      where: {
+        sucursalId_productoId: {
+          sucursalId: branch.id,
+          productoId: product.id,
+        },
+      },
+      update: {
+        ubicacion: entry.warehouseName,
+        updatedById: adminUserId,
+      },
+      create: {
+        sucursalId: branch.id,
+        productoId: product.id,
+        ubicacion: entry.warehouseName,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+
+    const lot = await prisma.lote.upsert({
+      where: {
+        sucursalId_productoId_numeroLote: {
+          sucursalId: branch.id,
+          productoId: product.id,
+          numeroLote: entry.lotCode,
+        },
+      },
+      update: {
+        proveedorId: supplier.id,
+        fechaFabricacion: new Date(`${entry.manufacturedAt}T00:00:00`),
+        fechaVencimiento: new Date(`${entry.expiryDate}T00:00:00`),
+        costoUnitario: entry.unitCost,
+        stockInicial: entry.initialStock,
+        stockDisponible: availableStock,
+        stockReservado: entry.reservedStock,
+        stockBloqueado: entry.blockedStock,
+        estado:
+          availableStock <= 0 && entry.blockedStock > 0
+            ? EstadoLote.BLOQUEADO
+            : EstadoLote.ACTIVO,
+        updatedById: adminUserId,
+      },
+      create: {
+        sucursalId: branch.id,
+        productoId: product.id,
+        proveedorId: supplier.id,
+        numeroLote: entry.lotCode,
+        fechaFabricacion: new Date(`${entry.manufacturedAt}T00:00:00`),
+        fechaVencimiento: new Date(`${entry.expiryDate}T00:00:00`),
+        costoUnitario: entry.unitCost,
+        stockInicial: entry.initialStock,
+        stockDisponible: availableStock,
+        stockReservado: entry.reservedStock,
+        stockBloqueado: entry.blockedStock,
+        estado:
+          availableStock <= 0 && entry.blockedStock > 0
+            ? EstadoLote.BLOQUEADO
+            : EstadoLote.ACTIVO,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+
+    await prisma.movimientoInventario.deleteMany({
+      where: {
+        loteId: lot.id,
+        origen: OrigenMovimientoInventario.APERTURA,
+      },
+    })
+
+    await prisma.movimientoInventario.create({
+      data: {
+        sucursalId: branch.id,
+        productoId: product.id,
+        loteId: lot.id,
+        motivoId: openingReason.id,
+        tipo: TipoMovimientoInventario.ENTRADA,
+        origen: OrigenMovimientoInventario.APERTURA,
+        cantidad: entry.initialStock,
+        costoUnitario: entry.unitCost,
+        stockResultante: entry.initialStock,
+        referencia: `Alta inicial lote ${entry.lotCode}`,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+
+    if (entry.reservedStock > 0) {
+      await prisma.movimientoInventario.create({
+        data: {
+          sucursalId: branch.id,
+          productoId: product.id,
+          loteId: lot.id,
+          motivoId: reserveReason.id,
+          tipo: TipoMovimientoInventario.RESERVA,
+          origen: OrigenMovimientoInventario.APERTURA,
+          cantidad: -entry.reservedStock,
+          costoUnitario: entry.unitCost,
+          stockResultante: entry.initialStock - entry.reservedStock,
+          referencia: `Reserva inicial lote ${entry.lotCode}`,
+          createdById: adminUserId,
+          updatedById: adminUserId,
+        },
+      })
+    }
+
+    if (entry.blockedStock > 0) {
+      await prisma.movimientoInventario.create({
+        data: {
+          sucursalId: branch.id,
+          productoId: product.id,
+          loteId: lot.id,
+          motivoId: blockReason.id,
+          tipo: TipoMovimientoInventario.AJUSTE,
+          origen: OrigenMovimientoInventario.APERTURA,
+          cantidad: -entry.blockedStock,
+          costoUnitario: entry.unitCost,
+          stockResultante: availableStock,
+          referencia: `Bloqueo inicial lote ${entry.lotCode}`,
+          createdById: adminUserId,
+          updatedById: adminUserId,
+        },
+      })
+    }
   }
 }
 

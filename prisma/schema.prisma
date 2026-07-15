@@ -653,6 +653,7 @@ model Lote {
   stockInicial     Decimal    @default(0) @map("stock_inicial") @db.Decimal(18, 4)
   stockDisponible  Decimal    @default(0) @map("stock_disponible") @db.Decimal(18, 4)
   stockReservado   Decimal    @default(0) @map("stock_reservado") @db.Decimal(18, 4)
+  stockBloqueado   Decimal    @default(0) @map("stock_bloqueado") @db.Decimal(18, 4)
   estado           EstadoLote @default(ACTIVO)
   observaciones    String?    @db.VarChar(255)
   createdAt        DateTime   @default(now()) @map("created_at")

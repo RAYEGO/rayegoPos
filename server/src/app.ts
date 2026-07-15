@@ -4,6 +4,8 @@ import Fastify from 'fastify'
 import { ZodError } from 'zod'
 import { isAllowedOrigin, serverConfig } from './config.js'
 import { authRoutes } from './routes/auth.js'
+import { inventoryRoutes } from './routes/inventory.js'
+import { purchaseRoutes } from './routes/purchases.js'
 import { productRoutes } from './routes/products.js'
 
 export function createApp() {
@@ -39,6 +41,14 @@ export function createApp() {
 
     instance.register(productRoutes, {
       prefix: '/api/products',
+    })
+
+    instance.register(inventoryRoutes, {
+      prefix: '/api/inventory',
+    })
+
+    instance.register(purchaseRoutes, {
+      prefix: '/api/purchases',
     })
   })
 
