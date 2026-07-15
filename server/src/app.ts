@@ -4,6 +4,7 @@ import Fastify from 'fastify'
 import { ZodError } from 'zod'
 import { isAllowedOrigin, serverConfig } from './config.js'
 import { authRoutes } from './routes/auth.js'
+import { productRoutes } from './routes/products.js'
 
 export function createApp() {
   const app = Fastify({
@@ -28,12 +29,16 @@ export function createApp() {
 
   app.get('/health', async () => ({
     status: 'ok',
-    service: 'rayego-auth-api',
+    service: 'rayego-api',
   }))
 
   app.register(async (instance) => {
     instance.register(authRoutes, {
       prefix: '/api/auth',
+    })
+
+    instance.register(productRoutes, {
+      prefix: '/api/products',
     })
   })
 

@@ -1,5 +1,5 @@
 import { RoleBadge } from '@/components/auth/RoleBadge'
-import { Bell, LogOut, Search, UserCircle2 } from 'lucide-react'
+import { Bell, LogOut, Menu, Search, UserCircle2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,11 @@ import { Input } from '@/components/ui/input'
 import { useAuth } from '@/hooks/useAuth'
 import { paths } from '@/routes/paths'
 
-export function Topbar() {
+type TopbarProps = {
+  onOpenNavigation: () => void
+}
+
+export function Topbar({ onOpenNavigation }: TopbarProps) {
   const navigate = useNavigate()
   const { session, logout } = useAuth()
 
@@ -20,8 +24,24 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
-      <div className="mx-auto flex h-16 w-full max-w-[1400px] items-center gap-4 px-6">
-        <div className="min-w-0 flex-1" />
+      <div className="mx-auto flex h-16 w-full max-w-[1400px] items-center gap-3 px-4 sm:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            aria-label="Abrir menú principal"
+            onClick={onOpenNavigation}
+          >
+            <Menu />
+          </Button>
+
+          <div className="lg:hidden leading-tight">
+            <div className="text-sm font-semibold text-foreground">Rayego POS</div>
+            <div className="text-xs text-muted-foreground">Botica &amp; Farmacia</div>
+          </div>
+        </div>
 
         <div className="hidden w-[420px] max-w-[42vw] items-center lg:flex">
           <div className="relative w-full">
@@ -37,7 +57,7 @@ export function Topbar() {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" className="gap-2">
+              <Button type="button" variant="ghost" className="gap-2 px-2 sm:px-3">
                 <UserCircle2 />
                 <span className="hidden text-sm font-medium md:inline">
                   {session?.user.fullName ?? 'Usuario'}

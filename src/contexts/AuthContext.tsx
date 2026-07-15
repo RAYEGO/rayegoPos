@@ -95,9 +95,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
-    await authService.logout(session)
-    setSession(null)
-    clearStoredSession()
+    try {
+      await authService.logout(session)
+    } catch (error) {
+      console.warn('No se pudo confirmar el cierre de sesión en la API.', error)
+    } finally {
+      setSession(null)
+      clearStoredSession()
+    }
   }, [session])
 
   const requestPasswordReset = useCallback(

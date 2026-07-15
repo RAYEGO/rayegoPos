@@ -59,6 +59,146 @@ const roleCatalog = [
   },
 ] as const
 
+const productCatalog = {
+  categories: [
+    {
+      name: 'Analgésicos',
+      description: 'Medicamentos para alivio del dolor y fiebre.',
+    },
+    {
+      name: 'Antibióticos',
+      description: 'Tratamientos antimicrobianos de uso controlado.',
+    },
+    {
+      name: 'Vitaminas y suplementos',
+      description: 'Suplementación nutricional y preventiva.',
+    },
+    {
+      name: 'Cuidado respiratorio',
+      description: 'Línea respiratoria y alivio sintomático.',
+    },
+  ],
+  laboratories: [
+    {
+      name: 'AC Farma',
+      country: 'Perú',
+    },
+    {
+      name: 'Medifarma',
+      country: 'Perú',
+    },
+    {
+      name: 'Bayer',
+      country: 'Alemania',
+    },
+    {
+      name: 'MK',
+      country: 'Colombia',
+    },
+  ],
+  presentations: [
+    'Tabletas',
+    'Cápsulas',
+    'Jarabe',
+    'Suspensión',
+    'Ampolla',
+  ],
+  units: [
+    {
+      code: 'TAB',
+      name: 'Tableta',
+      symbol: 'tab',
+    },
+    {
+      code: 'CAP',
+      name: 'Cápsula',
+      symbol: 'cap',
+    },
+    {
+      code: 'FRA',
+      name: 'Frasco',
+      symbol: 'fra',
+    },
+    {
+      code: 'AMP',
+      name: 'Ampolla',
+      symbol: 'amp',
+    },
+  ],
+  activePrinciples: [
+    'Paracetamol',
+    'Amoxicilina',
+    'Loratadina',
+    'Vitamina C',
+  ],
+  products: [
+    {
+      sku: 'MED-0001',
+      name: 'Paracetamol 500 mg',
+      categoryName: 'Analgésicos',
+      laboratoryName: 'AC Farma',
+      presentationName: 'Tabletas',
+      unitCode: 'TAB',
+      activePrincipleName: 'Paracetamol',
+      concentration: '500 mg',
+      salePrice: 4.5,
+      costPrice: 2.8,
+      requiresPrescription: false,
+      isControlled: false,
+      barcode: '7750000000011',
+      sanitaryRegistration: 'RS-PARA-500',
+    },
+    {
+      sku: 'MED-0002',
+      name: 'Amoxicilina 500 mg',
+      categoryName: 'Antibióticos',
+      laboratoryName: 'Medifarma',
+      presentationName: 'Cápsulas',
+      unitCode: 'CAP',
+      activePrincipleName: 'Amoxicilina',
+      concentration: '500 mg',
+      salePrice: 18.9,
+      costPrice: 11.2,
+      requiresPrescription: true,
+      isControlled: false,
+      barcode: '7750000000028',
+      sanitaryRegistration: 'RS-AMOX-500',
+    },
+    {
+      sku: 'MED-0003',
+      name: 'Loratadina Jarabe',
+      categoryName: 'Cuidado respiratorio',
+      laboratoryName: 'Bayer',
+      presentationName: 'Jarabe',
+      unitCode: 'FRA',
+      activePrincipleName: 'Loratadina',
+      concentration: '5 mg / 5 mL',
+      salePrice: 16.5,
+      costPrice: 10.4,
+      requiresPrescription: false,
+      isControlled: false,
+      barcode: '7750000000035',
+      sanitaryRegistration: 'RS-LORA-JBE',
+    },
+    {
+      sku: 'MED-0004',
+      name: 'Vitamina C 1 g',
+      categoryName: 'Vitaminas y suplementos',
+      laboratoryName: 'MK',
+      presentationName: 'Tabletas',
+      unitCode: 'TAB',
+      activePrincipleName: 'Vitamina C',
+      concentration: '1 g',
+      salePrice: 22.9,
+      costPrice: 14.7,
+      requiresPrescription: false,
+      isControlled: false,
+      barcode: '7750000000042',
+      sanitaryRegistration: 'RS-VITC-1000',
+    },
+  ],
+} as const
+
 async function main() {
   const passwordHashes = await Promise.all([
     hash('RayegoPOS2026!', 10),
@@ -190,6 +330,8 @@ async function main() {
     },
   ] as const
 
+  const createdUsers = new Map<string, string>()
+
   for (const userData of users) {
     const user = await prisma.usuario.upsert({
       where: {
@@ -235,6 +377,200 @@ async function main() {
         usuarioId: user.id,
         rolId: role.id,
         activo: true,
+      },
+    })
+
+    createdUsers.set(userData.roleCode, user.id)
+  }
+
+  const adminUserId = createdUsers.get('ADMIN') ?? null
+
+  for (const category of productCatalog.categories) {
+    await prisma.categoria.upsert({
+      where: {
+        nombre: category.name,
+      },
+      update: {
+        descripcion: category.description,
+        activo: true,
+        updatedById: adminUserId,
+      },
+      create: {
+        nombre: category.name,
+        descripcion: category.description,
+        activo: true,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+  }
+
+  for (const laboratory of productCatalog.laboratories) {
+    await prisma.laboratorio.upsert({
+      where: {
+        nombre: laboratory.name,
+      },
+      update: {
+        pais: laboratory.country,
+        activo: true,
+        updatedById: adminUserId,
+      },
+      create: {
+        nombre: laboratory.name,
+        pais: laboratory.country,
+        activo: true,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+  }
+
+  for (const presentationName of productCatalog.presentations) {
+    await prisma.presentacion.upsert({
+      where: {
+        nombre: presentationName,
+      },
+      update: {
+        activo: true,
+        updatedById: adminUserId,
+      },
+      create: {
+        nombre: presentationName,
+        activo: true,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+  }
+
+  for (const unit of productCatalog.units) {
+    await prisma.unidadMedida.upsert({
+      where: {
+        codigo: unit.code,
+      },
+      update: {
+        nombre: unit.name,
+        simbolo: unit.symbol,
+        activo: true,
+        updatedById: adminUserId,
+      },
+      create: {
+        codigo: unit.code,
+        nombre: unit.name,
+        simbolo: unit.symbol,
+        activo: true,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+  }
+
+  for (const activePrincipleName of productCatalog.activePrinciples) {
+    await prisma.principioActivo.upsert({
+      where: {
+        nombre: activePrincipleName,
+      },
+      update: {
+        activo: true,
+        updatedById: adminUserId,
+      },
+      create: {
+        nombre: activePrincipleName,
+        activo: true,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+  }
+
+  for (const product of productCatalog.products) {
+    const [category, laboratory, presentation, unit, activePrinciple] =
+      await Promise.all([
+        prisma.categoria.findUniqueOrThrow({
+          where: {
+            nombre: product.categoryName,
+          },
+        }),
+        prisma.laboratorio.findUniqueOrThrow({
+          where: {
+            nombre: product.laboratoryName,
+          },
+        }),
+        prisma.presentacion.findUniqueOrThrow({
+          where: {
+            nombre: product.presentationName,
+          },
+        }),
+        prisma.unidadMedida.findUniqueOrThrow({
+          where: {
+            codigo: product.unitCode,
+          },
+        }),
+        prisma.principioActivo.findUniqueOrThrow({
+          where: {
+            nombre: product.activePrincipleName,
+          },
+        }),
+      ])
+
+    const salePrice = product.salePrice
+    const costPrice = product.costPrice
+    const marginReference =
+      costPrice > 0 ? (salePrice - costPrice) / costPrice : null
+
+    const dbProduct = await prisma.producto.upsert({
+      where: {
+        sku: product.sku,
+      },
+      update: {
+        categoriaId: category.id,
+        laboratorioId: laboratory.id,
+        presentacionId: presentation.id,
+        unidadMedidaId: unit.id,
+        nombre: product.name,
+        concentracion: product.concentration,
+        registroSanitario: product.sanitaryRegistration,
+        requiereReceta: product.requiresPrescription,
+        esControlado: product.isControlled,
+        codigoBarras: product.barcode,
+        precioVenta: salePrice,
+        costoReferencia: costPrice,
+        margenReferencia: marginReference,
+        updatedById: adminUserId,
+      },
+      create: {
+        categoriaId: category.id,
+        laboratorioId: laboratory.id,
+        presentacionId: presentation.id,
+        unidadMedidaId: unit.id,
+        sku: product.sku,
+        nombre: product.name,
+        concentracion: product.concentration,
+        registroSanitario: product.sanitaryRegistration,
+        requiereReceta: product.requiresPrescription,
+        esControlado: product.isControlled,
+        codigoBarras: product.barcode,
+        precioVenta: salePrice,
+        costoReferencia: costPrice,
+        margenReferencia: marginReference,
+        createdById: adminUserId,
+        updatedById: adminUserId,
+      },
+    })
+
+    await prisma.productoPrincipioActivo.deleteMany({
+      where: {
+        productoId: dbProduct.id,
+      },
+    })
+
+    await prisma.productoPrincipioActivo.create({
+      data: {
+        productoId: dbProduct.id,
+        principioActivoId: activePrinciple.id,
+        concentracion: product.concentration,
+        createdById: adminUserId,
+        updatedById: adminUserId,
       },
     })
   }
