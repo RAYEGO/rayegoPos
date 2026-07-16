@@ -353,17 +353,17 @@ export function ComprasPage() {
     void loadDashboard()
   }, [loadDashboard])
 
-  const purchaseMetrics = dashboard?.summary ?? {
-    totalOrders: 0,
-    activeOrders: 0,
-    scheduledReceipts: 0,
-    observedReceipts: 0,
-    activeSpend: 0,
-    returnedAmount: 0,
-    netSpend: 0,
-    totalPaid: 0,
-    pendingPayables: 0,
-    supplierCount: 0,
+  const purchaseMetrics = {
+    totalOrders: dashboard?.summary?.totalOrders ?? 0,
+    activeOrders: dashboard?.summary?.activeOrders ?? 0,
+    scheduledReceipts: dashboard?.summary?.scheduledReceipts ?? 0,
+    observedReceipts: dashboard?.summary?.observedReceipts ?? 0,
+    activeSpend: dashboard?.summary?.activeSpend ?? 0,
+    returnedAmount: dashboard?.summary?.returnedAmount ?? 0,
+    netSpend: dashboard?.summary?.netSpend ?? 0,
+    totalPaid: dashboard?.summary?.totalPaid ?? 0,
+    pendingPayables: dashboard?.summary?.pendingPayables ?? 0,
+    supplierCount: dashboard?.summary?.supplierCount ?? 0,
   }
 
   const orders = dashboard?.orders ?? []
@@ -379,11 +379,11 @@ export function ComprasPage() {
     orders.find((order) => order.id === selectedPaymentOrderId) ?? null
   const selectedSummaryOrder =
     orders.find((order) => order.id === selectedSummaryOrderId) ?? null
-  const options = dashboard?.options ?? {
-    branches: [],
-    suppliers: [],
-    paymentMethods: [],
-    products: [],
+  const options = {
+    branches: dashboard?.options?.branches ?? [],
+    suppliers: dashboard?.options?.suppliers ?? [],
+    paymentMethods: dashboard?.options?.paymentMethods ?? [],
+    products: dashboard?.options?.products ?? [],
   }
 
   const canCreateOrders =
