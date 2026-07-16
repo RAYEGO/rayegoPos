@@ -4,10 +4,12 @@ import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   ClipboardCheck,
+  CreditCard,
   FileSpreadsheet,
   Loader2,
   PackageCheck,
   Plus,
+  RotateCcw,
   Search,
   ShoppingCart,
   Trash2,
@@ -58,6 +60,9 @@ import type {
   PurchaseOrderStatus,
   PurchaseReceiptStatus,
   PurchasesDashboardResponse,
+  RegisterPurchasePaymentPayload,
+  ReceivePurchaseItemPayload,
+  ReturnPurchaseItemPayload,
 } from '@/types/purchases'
 import { toast } from 'sonner'
 
@@ -85,6 +90,52 @@ const createPurchaseSchema = z.object({
 
 type CreatePurchaseFormValues = z.infer<typeof createPurchaseSchema>
 
+const receivePurchaseSchema = z.object({
+  numeroLote: z.string().min(1, 'Ingresa el número de lote.').max(80),
+  fechaFabricacion: z.string().optional(),
+  fechaVencimiento: z.string().min(1, 'Ingresa la fecha de vencimiento.'),
+  cantidadRecibida: z.number().positive('La cantidad recibida debe ser mayor a 0.'),
+  stockReservado: z.number().min(0, 'El stock reservado no puede ser negativo.'),
+  stockBloqueado: z.number().min(0, 'El stock bloqueado no puede ser negativo.'),
+  almacen: z.string().max(120).optional(),
+  observaciones: z.string().max(255).optional(),
+})
+
+type ReceivePurchaseFormValues = z.infer<typeof receivePurchaseSchema>
+
+const returnPurchaseSchema = z.object({
+  target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
+  quantity: z.number().positive('La cantidad a devolver debe ser mayor a 0.'),
+  observaciones: z.string().max(255).optional(),
+})
+
+type ReturnPurchaseFormValues = z.infer<typeof returnPurchaseSchema>
+
+const registerPaymentSchema = z.object({
+  formaPagoId: z.string().uuid({ message: 'Selecciona una forma de pago.' }),
+  fechaPago: z.string().min(1, 'Ingresa la fecha de pago.'),
+  monto: z.number().positive('El monto debe ser mayor a 0.'),
+  referenciaExterna: z.string().max(120).optional(),
+  observaciones: z.string().max(255).optional(),
+})
+
+type RegisterPaymentFormValues = z.infer<typeof registerPaymentSchema>
+
+type OrderReceiptDraft = {
+  detailId: string
+  productName: string
+  pendingUnits: number
+  include: boolean
+  numeroLote: string
+  fechaFabricacion: string
+  fechaVencimiento: string
+  cantidadRecibida: number
+  stockReservado: number
+  stockBloqueado: number
+  almacen: string
+  observaciones: string
+}
+
 const today = new Date().toISOString().slice(0, 10)
 
 const defaultFormValues: CreatePurchaseFormValues = {
@@ -102,6 +153,31 @@ const defaultFormValues: CreatePurchaseFormValues = {
       porcentajeImpuesto: 18,
     },
   ],
+}
+
+const defaultReceiveFormValues: ReceivePurchaseFormValues = {
+  numeroLote: '',
+  fechaFabricacion: '',
+  fechaVencimiento: '',
+  cantidadRecibida: 1,
+  stockReservado: 0,
+  stockBloqueado: 0,
+  almacen: '',
+  observaciones: '',
+}
+
+const defaultReturnFormValues: ReturnPurchaseFormValues = {
+  target: 'DISPONIBLE',
+  quantity: 1,
+  observaciones: '',
+}
+
+const defaultPaymentFormValues: RegisterPaymentFormValues = {
+  formaPagoId: '',
+  fechaPago: new Date().toISOString().slice(0, 10),
+  monto: 0,
+  referenciaExterna: '',
+  observaciones: '',
 }
 
 function formatCurrency(value: number) {
@@ -182,10 +258,40 @@ export function ComprasPage() {
   const [error, setError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isReceiveDialogOpen, setIsReceiveDialogOpen] = useState(false)
+  const [isReceiving, setIsReceiving] = useState(false)
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null)
+  const [isReturnDialogOpen, setIsReturnDialogOpen] = useState(false)
+  const [isReturning, setIsReturning] = useState(false)
+  const [selectedReturnReceiptId, setSelectedReturnReceiptId] = useState<string | null>(null)
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
+  const [isPaying, setIsPaying] = useState(false)
+  const [selectedPaymentOrderId, setSelectedPaymentOrderId] = useState<string | null>(null)
+  const [isOrderReceiveDialogOpen, setIsOrderReceiveDialogOpen] = useState(false)
+  const [isClosingOrderReceipt, setIsClosingOrderReceipt] = useState(false)
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [orderReceiptDrafts, setOrderReceiptDrafts] = useState<OrderReceiptDraft[]>([])
+  const [isOrderSummaryDialogOpen, setIsOrderSummaryDialogOpen] = useState(false)
+  const [selectedSummaryOrderId, setSelectedSummaryOrderId] = useState<string | null>(null)
 
   const form = useForm<CreatePurchaseFormValues>({
     resolver: zodResolver(createPurchaseSchema),
     defaultValues: defaultFormValues,
+  })
+
+  const receiveForm = useForm<ReceivePurchaseFormValues>({
+    resolver: zodResolver(receivePurchaseSchema),
+    defaultValues: defaultReceiveFormValues,
+  })
+
+  const returnForm = useForm<ReturnPurchaseFormValues>({
+    resolver: zodResolver(returnPurchaseSchema),
+    defaultValues: defaultReturnFormValues,
+  })
+
+  const paymentForm = useForm<RegisterPaymentFormValues>({
+    resolver: zodResolver(registerPaymentSchema),
+    defaultValues: defaultPaymentFormValues,
   })
 
   const { fields, append, remove } = useFieldArray({
@@ -194,6 +300,13 @@ export function ComprasPage() {
   })
 
   const watchedItems = form.watch('items')
+  const watchedReceivedUnits = Number(receiveForm.watch('cantidadRecibida')) || 0
+  const watchedReservedUnits = Number(receiveForm.watch('stockReservado')) || 0
+  const watchedBlockedUnits = Number(receiveForm.watch('stockBloqueado')) || 0
+  const watchedReturnTarget = returnForm.watch('target')
+  const watchedReturnQuantity = Number(returnForm.watch('quantity')) || 0
+  const watchedPaymentMethodId = paymentForm.watch('formaPagoId')
+  const watchedPaymentAmount = Number(paymentForm.watch('monto')) || 0
 
   const draftTotals = useMemo(() => {
     return watchedItems.reduce(
@@ -246,15 +359,30 @@ export function ComprasPage() {
     scheduledReceipts: 0,
     observedReceipts: 0,
     activeSpend: 0,
+    returnedAmount: 0,
+    netSpend: 0,
+    totalPaid: 0,
+    pendingPayables: 0,
     supplierCount: 0,
   }
 
   const orders = dashboard?.orders ?? []
   const receipts = dashboard?.receipts ?? []
   const suppliers = dashboard?.supplierSummary ?? []
+  const payments = dashboard?.payments ?? []
+  const selectedReceipt =
+    receipts.find((receipt) => receipt.id === selectedReceiptId) ?? null
+  const selectedReturnReceipt =
+    receipts.find((receipt) => receipt.id === selectedReturnReceiptId) ?? null
+  const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null
+  const selectedPaymentOrder =
+    orders.find((order) => order.id === selectedPaymentOrderId) ?? null
+  const selectedSummaryOrder =
+    orders.find((order) => order.id === selectedSummaryOrderId) ?? null
   const options = dashboard?.options ?? {
     branches: [],
     suppliers: [],
+    paymentMethods: [],
     products: [],
   }
 
@@ -262,6 +390,86 @@ export function ComprasPage() {
     options.branches.length > 0 &&
     options.suppliers.length > 0 &&
     options.products.length > 0
+
+  const receiveAvailableUnits = Math.max(
+    0,
+    watchedReceivedUnits - watchedReservedUnits - watchedBlockedUnits,
+  )
+
+  const receiptGroupsByOrder = useMemo(() => {
+    return orders.reduce(
+      (groups, order) => {
+        const orderReceipts = receipts.filter((receipt) => receipt.purchaseId === order.id)
+        const pendingReceipts = orderReceipts.filter((receipt) => receipt.pendingUnits > 0)
+
+        groups[order.id] = {
+          totalLines: orderReceipts.length,
+          pendingLines: pendingReceipts.length,
+          pendingUnits: pendingReceipts.reduce((sum, receipt) => sum + receipt.pendingUnits, 0),
+          receipts: orderReceipts,
+          pendingReceipts,
+        }
+
+        return groups
+      },
+      {} as Record<
+        string,
+        {
+          totalLines: number
+          pendingLines: number
+          pendingUnits: number
+          receipts: PurchasesDashboardResponse['receipts']
+          pendingReceipts: PurchasesDashboardResponse['receipts']
+        }
+      >,
+    )
+  }, [orders, receipts])
+
+  const selectedOrderReceiptGroup = selectedOrderId
+    ? receiptGroupsByOrder[selectedOrderId]
+    : null
+  const selectedSummaryReceiptGroup = selectedSummaryOrderId
+    ? receiptGroupsByOrder[selectedSummaryOrderId]
+    : null
+
+  const selectedOrderAvailableUnits = orderReceiptDrafts.reduce((sum, item) => {
+    if (!item.include) {
+      return sum
+    }
+
+    return sum + Math.max(0, item.cantidadRecibida - item.stockReservado - item.stockBloqueado)
+  }, 0)
+
+  const selectedSummaryTotals = selectedSummaryReceiptGroup
+    ? {
+        receivedUnits: selectedSummaryReceiptGroup.receipts.reduce(
+          (sum, item) => sum + item.receivedUnits,
+          0,
+        ),
+        pendingUnits: selectedSummaryReceiptGroup.pendingUnits,
+        returnedUnits: selectedSummaryReceiptGroup.receipts.reduce(
+          (sum, item) => sum + item.returnedUnits,
+          0,
+        ),
+        returnedAmount: selectedSummaryReceiptGroup.receipts.reduce(
+          (sum, item) => sum + item.returnedAmount,
+          0,
+        ),
+        observedLines: selectedSummaryReceiptGroup.receipts.filter(
+          (item) => item.status === 'OBSERVADA',
+        ).length,
+      }
+    : null
+
+  const selectedReturnStock = selectedReturnReceipt
+    ? watchedReturnTarget === 'RESERVADO'
+      ? selectedReturnReceipt.reservedUnits
+      : watchedReturnTarget === 'BLOQUEADO'
+        ? selectedReturnReceipt.blockedUnits
+        : selectedReturnReceipt.availableUnits
+    : 0
+  const selectedPaymentMethod =
+    options.paymentMethods.find((method) => method.id === watchedPaymentMethodId) ?? null
 
   async function handleCreateOrder(values: CreatePurchaseFormValues) {
     if (!accessToken) {
@@ -305,6 +513,312 @@ export function ComprasPage() {
       toast.error(getApiErrorMessage(nextError))
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  function openReceiveDialog(receipt: PurchasesDashboardResponse['receipts'][number]) {
+    setSelectedReceiptId(receipt.id)
+    receiveForm.reset({
+      ...defaultReceiveFormValues,
+      cantidadRecibida: Number(receipt.pendingUnits.toFixed(2)) || 1,
+    })
+    setIsReceiveDialogOpen(true)
+  }
+
+  async function handleReceiveItem(values: ReceivePurchaseFormValues) {
+    if (!accessToken || !selectedReceipt) {
+      toast.error('La recepción seleccionada no está disponible.')
+      return
+    }
+
+    const payload: ReceivePurchaseItemPayload = {
+      detalleCompraId: selectedReceipt.id,
+      numeroLote: values.numeroLote.trim(),
+      fechaFabricacion: values.fechaFabricacion?.trim() || undefined,
+      fechaVencimiento: values.fechaVencimiento,
+      cantidadRecibida: Number(values.cantidadRecibida),
+      stockReservado: Number(values.stockReservado),
+      stockBloqueado: Number(values.stockBloqueado),
+      almacen: values.almacen?.trim() || undefined,
+      observaciones: values.observaciones?.trim() || undefined,
+    }
+
+    setIsReceiving(true)
+
+    try {
+      await purchasesService.receiveItem(accessToken, payload)
+      toast.success('Recepción registrada y lote creado correctamente.')
+      setIsReceiveDialogOpen(false)
+      setSelectedReceiptId(null)
+      receiveForm.reset(defaultReceiveFormValues)
+      await loadDashboard()
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error(
+          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para recepcionar compras.',
+        )
+        await logout()
+        return
+      }
+
+      toast.error(getApiErrorMessage(nextError))
+    } finally {
+      setIsReceiving(false)
+    }
+  }
+
+  function openReturnDialog(receipt: PurchasesDashboardResponse['receipts'][number]) {
+    if (!receipt.lotId) {
+      toast.error('La línea seleccionada todavía no tiene un lote válido para devolución.')
+      return
+    }
+
+    const defaultTarget =
+      receipt.availableUnits > 0
+        ? 'DISPONIBLE'
+        : receipt.reservedUnits > 0
+          ? 'RESERVADO'
+          : 'BLOQUEADO'
+
+    const defaultQuantity =
+      defaultTarget === 'RESERVADO'
+        ? receipt.reservedUnits
+        : defaultTarget === 'BLOQUEADO'
+          ? receipt.blockedUnits
+          : receipt.availableUnits
+
+    setSelectedReturnReceiptId(receipt.id)
+    returnForm.reset({
+      target: defaultTarget,
+      quantity: Number(defaultQuantity.toFixed(2)) || 1,
+      observaciones: '',
+    })
+    setIsReturnDialogOpen(true)
+  }
+
+  async function handleReturnItem(values: ReturnPurchaseFormValues) {
+    if (!accessToken || !selectedReturnReceipt?.lotId) {
+      toast.error('La devolución seleccionada no está disponible.')
+      return
+    }
+
+    const payload: ReturnPurchaseItemPayload = {
+      lotId: selectedReturnReceipt.lotId,
+      target: values.target,
+      quantity: Number(values.quantity),
+      observaciones: values.observaciones?.trim() || undefined,
+    }
+
+    setIsReturning(true)
+
+    try {
+      await purchasesService.returnItem(accessToken, payload)
+      toast.success('Devolución registrada correctamente en compras e inventario.')
+      setIsReturnDialogOpen(false)
+      setSelectedReturnReceiptId(null)
+      returnForm.reset(defaultReturnFormValues)
+      await loadDashboard()
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error(
+          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar devoluciones.',
+        )
+        await logout()
+        return
+      }
+
+      toast.error(getApiErrorMessage(nextError))
+    } finally {
+      setIsReturning(false)
+    }
+  }
+
+  function openPaymentDialog(order: PurchasesDashboardResponse['orders'][number]) {
+    setSelectedPaymentOrderId(order.id)
+    paymentForm.reset({
+      ...defaultPaymentFormValues,
+      monto: Number(order.adjustedPendingAmount.toFixed(2)),
+      fechaPago: new Date().toISOString().slice(0, 10),
+    })
+    setIsPaymentDialogOpen(true)
+  }
+
+  async function handleRegisterPayment(values: RegisterPaymentFormValues) {
+    if (!accessToken || !selectedPaymentOrder) {
+      toast.error('La orden seleccionada no está disponible para pago.')
+      return
+    }
+
+    const payload: RegisterPurchasePaymentPayload = {
+      compraId: selectedPaymentOrder.id,
+      formaPagoId: values.formaPagoId,
+      fechaPago: values.fechaPago,
+      monto: Number(values.monto),
+      referenciaExterna: values.referenciaExterna?.trim() || undefined,
+      observaciones: values.observaciones?.trim() || undefined,
+    }
+
+    setIsPaying(true)
+
+    try {
+      await purchasesService.registerPayment(accessToken, payload)
+      toast.success('Pago registrado correctamente en cuentas por pagar.')
+      setIsPaymentDialogOpen(false)
+      setSelectedPaymentOrderId(null)
+      paymentForm.reset(defaultPaymentFormValues)
+      await loadDashboard()
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error(
+          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar pagos.',
+        )
+        await logout()
+        return
+      }
+
+      toast.error(getApiErrorMessage(nextError))
+    } finally {
+      setIsPaying(false)
+    }
+  }
+
+  function updateOrderReceiptDraft(
+    detailId: string,
+    patch: Partial<OrderReceiptDraft>,
+  ) {
+    setOrderReceiptDrafts((current) =>
+      current.map((item) =>
+        item.detailId === detailId ? { ...item, ...patch } : item,
+      ),
+    )
+  }
+
+  function openOrderReceiveDialog(orderId: string) {
+    const order = orders.find((entry) => entry.id === orderId)
+    const pendingReceipts =
+      receiptGroupsByOrder[orderId]?.pendingReceipts ?? []
+
+    if (!order || pendingReceipts.length === 0) {
+      toast.error('La orden seleccionada ya no tiene líneas pendientes por recepcionar.')
+      return
+    }
+
+    const nextDrafts: OrderReceiptDraft[] = pendingReceipts.map((receipt, index) => ({
+      detailId: receipt.id,
+      productName: receipt.productName,
+      pendingUnits: receipt.pendingUnits,
+      include: true,
+      numeroLote: `${receipt.purchaseCode.replace('CMP-', 'RCP-')}-${index + 1}`,
+      fechaFabricacion: '',
+      fechaVencimiento: '',
+      cantidadRecibida: Number(receipt.pendingUnits.toFixed(2)),
+      stockReservado: 0,
+      stockBloqueado: 0,
+      almacen: receipt.branchName === 'Sucursal Principal' ? 'Mostrador principal' : '',
+      observaciones: '',
+    }))
+
+    setSelectedOrderId(orderId)
+    setOrderReceiptDrafts(nextDrafts)
+    setIsOrderReceiveDialogOpen(true)
+  }
+
+  function openOrderSummaryDialog(orderId: string) {
+    setSelectedSummaryOrderId(orderId)
+    setIsOrderSummaryDialogOpen(true)
+  }
+
+  async function handleCloseOrderReceipt() {
+    if (!accessToken || !selectedOrder || !selectedOrderReceiptGroup) {
+      toast.error('La orden seleccionada no está disponible.')
+      return
+    }
+
+    const linesToReceive = orderReceiptDrafts.filter((item) => item.include)
+
+    if (linesToReceive.length === 0) {
+      toast.error('Selecciona al menos una línea pendiente para recepcionar.')
+      return
+    }
+
+    for (const line of linesToReceive) {
+      if (!line.numeroLote.trim()) {
+        toast.error(`Ingresa el lote para ${line.productName}.`)
+        return
+      }
+
+      if (!line.fechaVencimiento.trim()) {
+        toast.error(`Ingresa el vencimiento para ${line.productName}.`)
+        return
+      }
+
+      if (!Number.isFinite(line.cantidadRecibida) || line.cantidadRecibida <= 0) {
+        toast.error(`La cantidad recibida de ${line.productName} debe ser mayor a 0.`)
+        return
+      }
+
+      if (line.cantidadRecibida - line.pendingUnits > 0.0001) {
+        toast.error(`La cantidad de ${line.productName} supera el saldo pendiente.`)
+        return
+      }
+
+      if (line.stockReservado < 0 || line.stockBloqueado < 0) {
+        toast.error(`Los stocks reservados o bloqueados de ${line.productName} no son válidos.`)
+        return
+      }
+
+      if (line.stockReservado + line.stockBloqueado - line.cantidadRecibida > 0.0001) {
+        toast.error(`La reserva y bloqueo de ${line.productName} superan lo recibido.`)
+        return
+      }
+    }
+
+    setIsClosingOrderReceipt(true)
+
+    try {
+      const closedOrderId = selectedOrder.id
+
+      for (const line of linesToReceive) {
+        const payload: ReceivePurchaseItemPayload = {
+          detalleCompraId: line.detailId,
+          numeroLote: line.numeroLote.trim(),
+          fechaFabricacion: line.fechaFabricacion.trim() || undefined,
+          fechaVencimiento: line.fechaVencimiento,
+          cantidadRecibida: Number(line.cantidadRecibida),
+          stockReservado: Number(line.stockReservado),
+          stockBloqueado: Number(line.stockBloqueado),
+          almacen: line.almacen.trim() || undefined,
+          observaciones: line.observaciones.trim() || undefined,
+        }
+
+        await purchasesService.receiveItem(accessToken, payload)
+      }
+
+      await loadDashboard()
+
+      setIsOrderReceiveDialogOpen(false)
+      setSelectedOrderId(null)
+      setOrderReceiptDrafts([])
+      setSelectedSummaryOrderId(closedOrderId)
+      setIsOrderSummaryDialogOpen(true)
+
+      toast.success(
+        selectedOrderReceiptGroup.pendingLines === linesToReceive.length
+          ? 'Recepción completa registrada. La orden quedó actualizada.'
+          : 'Recepción parcial registrada para la orden.',
+      )
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error(
+          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para cerrar la recepción.',
+        )
+        await logout()
+        return
+      }
+
+      toast.error(getApiErrorMessage(nextError))
+    } finally {
+      setIsClosingOrderReceipt(false)
     }
   }
 
@@ -363,6 +877,50 @@ export function ComprasPage() {
                 ordenes no anuladas
               </p>
             </div>
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                Devuelto
+              </p>
+              <p className="mt-2 text-base font-semibold text-foreground">
+                {formatCurrency(purchaseMetrics.returnedAmount)}
+              </p>
+              <p className="text-small text-muted-foreground">
+                nota de credito operativa
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                Neto compras
+              </p>
+              <p className="mt-2 text-base font-semibold text-foreground">
+                {formatCurrency(purchaseMetrics.netSpend)}
+              </p>
+              <p className="text-small text-muted-foreground">
+                despues de devoluciones
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                Pagado
+              </p>
+              <p className="mt-2 text-base font-semibold text-foreground">
+                {formatCurrency(purchaseMetrics.totalPaid)}
+              </p>
+              <p className="text-small text-muted-foreground">
+                abonos a proveedor
+              </p>
+            </div>
+            <div className="rounded-2xl border bg-muted/20 p-4">
+              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                Cuentas por pagar
+              </p>
+              <p className="mt-2 text-base font-semibold text-foreground">
+                {formatCurrency(purchaseMetrics.pendingPayables)}
+              </p>
+              <p className="text-small text-muted-foreground">
+                saldo vivo pendiente
+              </p>
+            </div>
           </CardContent>
         </Card>
 
@@ -397,9 +955,10 @@ export function ComprasPage() {
       </div>
 
       <Tabs defaultValue="ordenes">
-        <TabsList className="grid w-full grid-cols-3 lg:w-fit">
+        <TabsList className="grid w-full grid-cols-4 lg:w-fit">
           <TabsTrigger value="ordenes">Ordenes</TabsTrigger>
           <TabsTrigger value="recepciones">Recepciones</TabsTrigger>
+          <TabsTrigger value="pagos">Pagos</TabsTrigger>
           <TabsTrigger value="proveedores">Proveedores</TabsTrigger>
         </TabsList>
 
@@ -504,6 +1063,7 @@ export function ComprasPage() {
                       <TableHead>Entrega esperada</TableHead>
                       <TableHead>Total</TableHead>
                       <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Acción</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -539,15 +1099,89 @@ export function ComprasPage() {
                             <p className="font-medium text-foreground">
                               {formatCurrency(order.totalAmount)}
                             </p>
+                            {order.returnedAmount > 0 ? (
+                              <p className="text-small text-amber-700">
+                                devuelto {formatCurrency(order.returnedAmount)}
+                              </p>
+                            ) : null}
                             <p className="text-small text-muted-foreground">
-                              saldo {formatCurrency(order.pendingAmount)}
+                              neto {formatCurrency(order.netAmount)}
+                            </p>
+                            <p className="text-small text-emerald-700">
+                              pagado {formatCurrency(order.paidAmount)}
+                            </p>
+                            <p className="text-small text-muted-foreground">
+                              saldo ajustado {formatCurrency(order.adjustedPendingAmount)}
                             </p>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={getOrderStatusVariant(order.status)}>
-                            {order.status}
-                          </Badge>
+                          <div className="space-y-1">
+                            <Badge variant={getOrderStatusVariant(order.status)}>
+                              {order.status}
+                            </Badge>
+                            {receiptGroupsByOrder[order.id]?.pendingLines ? (
+                              <p className="text-small text-muted-foreground">
+                                {receiptGroupsByOrder[order.id].pendingLines} líneas pendientes
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {receiptGroupsByOrder[order.id]?.pendingLines > 0 &&
+                          order.status !== 'BORRADOR' &&
+                          order.status !== 'ANULADA' ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openOrderSummaryDialog(order.id)}
+                              >
+                                Ver detalle
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openPaymentDialog(order)}
+                                disabled={order.adjustedPendingAmount <= 0}
+                              >
+                                Registrar pago
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openOrderReceiveDialog(order.id)}
+                              >
+                                Cerrar recepción
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openPaymentDialog(order)}
+                                disabled={order.adjustedPendingAmount <= 0}
+                              >
+                                {order.adjustedPendingAmount > 0 ? 'Registrar pago' : 'Sin saldo'}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openOrderSummaryDialog(order.id)}
+                              >
+                                {order.status === 'PAGADA' ? 'Ver cierre' : 'Ver detalle'}
+                              </Button>
+                              <span className="self-center text-small text-muted-foreground">
+                                {order.status === 'PAGADA' ? 'Finalizada' : 'Sin pendientes'}
+                              </span>
+                            </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -594,6 +1228,7 @@ export function ComprasPage() {
                         <TableHead>Ingreso</TableHead>
                         <TableHead>Vencimiento</TableHead>
                         <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Acción</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -637,7 +1272,76 @@ export function ComprasPage() {
                               {receipt.coldChain ? (
                                 <Badge variant="info">Cadena de frio</Badge>
                               ) : null}
+                              {receipt.returnedUnits > 0 ? (
+                                <Badge variant="warning">
+                                  Dev. {receipt.returnedUnits.toFixed(2)}
+                                </Badge>
+                              ) : null}
+                              {receipt.availableUnits > 0 ? (
+                                <Badge variant="outline">
+                                  Disp. {receipt.availableUnits.toFixed(2)}
+                                </Badge>
+                              ) : null}
+                              {receipt.reservedUnits > 0 ? (
+                                <Badge variant="outline">
+                                  Res. {receipt.reservedUnits.toFixed(2)}
+                                </Badge>
+                              ) : null}
+                              {receipt.blockedUnits > 0 ? (
+                                <Badge variant="outline">
+                                  Bloq. {receipt.blockedUnits.toFixed(2)}
+                                </Badge>
+                              ) : null}
                             </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {receipt.pendingUnits > 0 ? (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openOrderSummaryDialog(receipt.purchaseId)}
+                                >
+                                  Ver orden
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openReceiveDialog(receipt)}
+                                >
+                                  Recepcionar
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end gap-2">
+                                {receipt.lotId &&
+                                (receipt.availableUnits > 0 ||
+                                  receipt.reservedUnits > 0 ||
+                                  receipt.blockedUnits > 0) ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openReturnDialog(receipt)}
+                                  >
+                                    Devolver
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openOrderSummaryDialog(receipt.purchaseId)}
+                                >
+                                  Ver cierre
+                                </Button>
+                                <span className="self-center text-small text-muted-foreground">
+                                  Completa
+                                </span>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -674,6 +1378,125 @@ export function ComprasPage() {
                   <p className="font-medium text-foreground">Alta en inventario</p>
                   <p className="mt-1 text-small text-muted-foreground">
                     Cada recepcion aceptada genera lote y prioridad FIFO para ventas futuras.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="pagos" className="space-y-6">
+          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-primary" />
+                  Pagos a proveedor
+                </CardTitle>
+                <CardDescription>
+                  Historial de abonos y seguimiento del saldo vivo por orden de compra.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="flex min-h-56 items-center justify-center rounded-2xl border">
+                    <Loader className="h-7 w-7" />
+                  </div>
+                ) : payments.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-10 text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      Aún no hay pagos registrados a proveedores.
+                    </p>
+                    <p className="mt-1 text-small text-muted-foreground">
+                      Desde una orden con saldo pendiente podrás registrar abonos reales.
+                    </p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Compra</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead>Forma</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Monto</TableHead>
+                        <TableHead>Referencia</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {payments.map((payment) => (
+                        <TableRow key={payment.id}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{payment.purchaseCode}</p>
+                              <p className="text-small text-muted-foreground">
+                                {payment.observations || 'Sin observaciones'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {payment.supplierName}
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">
+                                {payment.formPaymentName}
+                              </p>
+                              <p className="text-small text-muted-foreground">
+                                {payment.formPaymentCode}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatDateTime(payment.paidAt)}
+                          </TableCell>
+                          <TableCell className="font-medium text-foreground">
+                            {formatCurrency(payment.amount)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {payment.reference || 'Sin referencia'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Lectura financiera</CardTitle>
+                <CardDescription>
+                  Resumen rápido del estado de cuentas por pagar del abastecimiento.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="rounded-2xl border p-4">
+                  <p className="font-medium text-foreground">Saldo pendiente real</p>
+                  <p className="mt-1 text-small text-muted-foreground">
+                    Considera devoluciones y abonos registrados a proveedores.
+                  </p>
+                  <p className="mt-3 text-base font-semibold text-foreground">
+                    {formatCurrency(purchaseMetrics.pendingPayables)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="font-medium text-foreground">Abonos registrados</p>
+                  <p className="mt-1 text-small text-muted-foreground">
+                    Pagos confirmados sobre órdenes activas y recibidas.
+                  </p>
+                  <p className="mt-3 text-base font-semibold text-foreground">
+                    {formatCurrency(purchaseMetrics.totalPaid)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="font-medium text-foreground">Compra neta</p>
+                  <p className="mt-1 text-small text-muted-foreground">
+                    Total comprometido después de devoluciones operativas.
+                  </p>
+                  <p className="mt-3 text-base font-semibold text-foreground">
+                    {formatCurrency(purchaseMetrics.netSpend)}
                   </p>
                 </div>
               </CardContent>
@@ -1076,6 +1899,970 @@ export function ComprasPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isReceiveDialogOpen}
+        onOpenChange={(open) => {
+          setIsReceiveDialogOpen(open)
+
+          if (!open) {
+            setSelectedReceiptId(null)
+            receiveForm.reset(defaultReceiveFormValues)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Recepcionar compra</DialogTitle>
+            <DialogDescription>
+              {selectedReceipt
+                ? `${selectedReceipt.productName} · ${selectedReceipt.purchaseCode} · pendiente ${selectedReceipt.pendingUnits.toFixed(2)}`
+                : 'Registra el lote y define cómo ingresa el stock al inventario.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-6" onSubmit={receiveForm.handleSubmit(handleReceiveItem)}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Número de lote</label>
+                <Input {...receiveForm.register('numeroLote')} placeholder="Ej. LT-250715-A" />
+                <FieldError message={receiveForm.formState.errors.numeroLote?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cantidad recibida</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  {...receiveForm.register('cantidadRecibida', {
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError
+                  message={receiveForm.formState.errors.cantidadRecibida?.message}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Fecha de fabricación</label>
+                <Input type="date" {...receiveForm.register('fechaFabricacion')} />
+                <FieldError
+                  message={receiveForm.formState.errors.fechaFabricacion?.message}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Fecha de vencimiento</label>
+                <Input type="date" {...receiveForm.register('fechaVencimiento')} />
+                <FieldError
+                  message={receiveForm.formState.errors.fechaVencimiento?.message}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Stock reservado</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  {...receiveForm.register('stockReservado', {
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError
+                  message={receiveForm.formState.errors.stockReservado?.message}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Stock bloqueado</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  {...receiveForm.register('stockBloqueado', {
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError
+                  message={receiveForm.formState.errors.stockBloqueado?.message}
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Almacén / ubicación</label>
+                <Input
+                  {...receiveForm.register('almacen')}
+                  placeholder="Ej. Mostrador principal o almacén frío"
+                />
+                <FieldError message={receiveForm.formState.errors.almacen?.message} />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Observaciones</label>
+                <Textarea
+                  {...receiveForm.register('observaciones')}
+                  placeholder="Notas sanitarias, cadena de frío o incidencias"
+                  className="min-h-24"
+                />
+                <FieldError
+                  message={receiveForm.formState.errors.observaciones?.message}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Recibido
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {watchedReceivedUnits.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Reservado + bloqueado
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {(watchedReservedUnits + watchedBlockedUnits).toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Disponible inicial
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {receiveAvailableUnits.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isReceiving}
+                onClick={() => {
+                  setIsReceiveDialogOpen(false)
+                  setSelectedReceiptId(null)
+                  receiveForm.reset(defaultReceiveFormValues)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isReceiving || !selectedReceipt}>
+                {isReceiving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Recepcionando...
+                  </>
+                ) : (
+                  <>
+                    <PackageCheck className="h-4 w-4" />
+                    Confirmar recepción
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isOrderReceiveDialogOpen}
+        onOpenChange={(open) => {
+          setIsOrderReceiveDialogOpen(open)
+
+          if (!open) {
+            setSelectedOrderId(null)
+            setOrderReceiptDrafts([])
+          }
+        }}
+      >
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Cerrar recepción por orden</DialogTitle>
+            <DialogDescription>
+              {selectedOrder && selectedOrderReceiptGroup
+                ? `${selectedOrder.code} · ${selectedOrder.supplierName} · ${selectedOrderReceiptGroup.pendingLines} líneas pendientes`
+                : 'Completa todas las líneas pendientes y la orden quedará finalizada.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {selectedOrderReceiptGroup ? (
+              <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-4">
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Líneas pendientes
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {selectedOrderReceiptGroup.pendingLines}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Unidades pendientes
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {selectedOrderReceiptGroup.pendingUnits.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Unidades disponibles
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {selectedOrderAvailableUnits.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Estado actual
+                  </p>
+                  <p className="mt-2">
+                    <Badge variant={selectedOrder ? getOrderStatusVariant(selectedOrder.status) : 'outline'}>
+                      {selectedOrder?.status ?? 'N/A'}
+                    </Badge>
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="space-y-4">
+              {orderReceiptDrafts.map((line) => {
+                const draftAvailableUnits = Math.max(
+                  0,
+                  line.cantidadRecibida - line.stockReservado - line.stockBloqueado,
+                )
+
+                return (
+                  <div key={line.detailId} className="space-y-4 rounded-2xl border p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p className="font-medium text-foreground">{line.productName}</p>
+                        <p className="text-small text-muted-foreground">
+                          Pendiente: {line.pendingUnits.toFixed(2)} und
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={line.include ? 'secondary' : 'outline'}
+                          onClick={() =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              include: !line.include,
+                            })
+                          }
+                        >
+                          {line.include ? 'Incluida' : 'Omitida'}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Lote</label>
+                        <Input
+                          value={line.numeroLote}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              numeroLote: event.target.value,
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Cantidad recibida</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={line.cantidadRecibida}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              cantidadRecibida: Number(event.target.value),
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Fecha fabricación</label>
+                        <Input
+                          type="date"
+                          value={line.fechaFabricacion}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              fechaFabricacion: event.target.value,
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Fecha vencimiento</label>
+                        <Input
+                          type="date"
+                          value={line.fechaVencimiento}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              fechaVencimiento: event.target.value,
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Reservado</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={line.stockReservado}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              stockReservado: Number(event.target.value),
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Bloqueado</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={line.stockBloqueado}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              stockBloqueado: Number(event.target.value),
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2 xl:col-span-2">
+                        <label className="text-sm font-medium">Almacén / ubicación</label>
+                        <Input
+                          value={line.almacen}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              almacen: event.target.value,
+                            })
+                          }
+                          disabled={!line.include}
+                        />
+                      </div>
+
+                      <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                        <label className="text-sm font-medium">Observaciones</label>
+                        <Textarea
+                          value={line.observaciones}
+                          onChange={(event) =>
+                            updateOrderReceiptDraft(line.detailId, {
+                              observaciones: event.target.value,
+                            })
+                          }
+                          className="min-h-20"
+                          disabled={!line.include}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
+                      <div>
+                        <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                          Pendiente
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-foreground">
+                          {line.pendingUnits.toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                          Recibido
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-foreground">
+                          {Number(line.cantidadRecibida || 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                          Disponible
+                        </p>
+                        <p className="mt-2 text-base font-semibold text-foreground">
+                          {draftAvailableUnits.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isClosingOrderReceipt}
+                onClick={() => {
+                  setIsOrderReceiveDialogOpen(false)
+                  setSelectedOrderId(null)
+                  setOrderReceiptDrafts([])
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleCloseOrderReceipt()}
+                disabled={isClosingOrderReceipt || orderReceiptDrafts.length === 0}
+              >
+                {isClosingOrderReceipt ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Cerrando recepción...
+                  </>
+                ) : (
+                  <>
+                    <PackageCheck className="h-4 w-4" />
+                    Confirmar recepción completa
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isReturnDialogOpen}
+        onOpenChange={(open) => {
+          setIsReturnDialogOpen(open)
+
+          if (!open) {
+            setSelectedReturnReceiptId(null)
+            returnForm.reset(defaultReturnFormValues)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Registrar devolución de compra</DialogTitle>
+            <DialogDescription>
+              {selectedReturnReceipt
+                ? `${selectedReturnReceipt.productName} · ${selectedReturnReceipt.lotCode} · ${selectedReturnReceipt.purchaseCode}`
+                : 'Selecciona el origen del stock que volverá al proveedor.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-6" onSubmit={returnForm.handleSubmit(handleReturnItem)}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Origen de devolución</label>
+                <Controller
+                  control={returnForm.control}
+                  name="target"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DISPONIBLE">Stock disponible</SelectItem>
+                        <SelectItem value="RESERVADO">Stock reservado</SelectItem>
+                        <SelectItem value="BLOQUEADO">Stock bloqueado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <FieldError message={returnForm.formState.errors.target?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cantidad a devolver</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  {...returnForm.register('quantity', {
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError message={returnForm.formState.errors.quantity?.message} />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Observaciones</label>
+                <Textarea
+                  {...returnForm.register('observaciones')}
+                  placeholder="Motivo sanitario, daño, error de despacho o no conformidad"
+                  className="min-h-24"
+                />
+                <FieldError message={returnForm.formState.errors.observaciones?.message} />
+              </div>
+            </div>
+
+            <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Stock origen
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {selectedReturnStock.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  A devolver
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {watchedReturnQuantity.toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Saldo estimado
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {Math.max(0, selectedReturnStock - watchedReturnQuantity).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isReturning}
+                onClick={() => {
+                  setIsReturnDialogOpen(false)
+                  setSelectedReturnReceiptId(null)
+                  returnForm.reset(defaultReturnFormValues)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isReturning || !selectedReturnReceipt?.lotId}>
+                {isReturning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Registrando devolución...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="h-4 w-4" />
+                    Confirmar devolución
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isPaymentDialogOpen}
+        onOpenChange={(open) => {
+          setIsPaymentDialogOpen(open)
+
+          if (!open) {
+            setSelectedPaymentOrderId(null)
+            paymentForm.reset(defaultPaymentFormValues)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Registrar pago a proveedor</DialogTitle>
+            <DialogDescription>
+              {selectedPaymentOrder
+                ? `${selectedPaymentOrder.code} · ${selectedPaymentOrder.supplierName} · saldo ${formatCurrency(selectedPaymentOrder.adjustedPendingAmount)}`
+                : 'Registra un abono real para actualizar cuentas por pagar.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-6" onSubmit={paymentForm.handleSubmit(handleRegisterPayment)}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Forma de pago</label>
+                <Controller
+                  control={paymentForm.control}
+                  name="formaPagoId"
+                  render={({ field }) => (
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona forma de pago" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {options.paymentMethods.map((method) => (
+                          <SelectItem key={method.id} value={method.id}>
+                            {method.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <FieldError message={paymentForm.formState.errors.formaPagoId?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Fecha de pago</label>
+                <Input type="date" {...paymentForm.register('fechaPago')} />
+                <FieldError message={paymentForm.formState.errors.fechaPago?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Monto</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  {...paymentForm.register('monto', {
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError message={paymentForm.formState.errors.monto?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Referencia</label>
+                <Input
+                  {...paymentForm.register('referenciaExterna')}
+                  placeholder={
+                    selectedPaymentMethod?.requiresReference
+                      ? 'Operación, voucher o nro. de transferencia'
+                      : 'Opcional'
+                  }
+                />
+                <FieldError
+                  message={paymentForm.formState.errors.referenciaExterna?.message}
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Observaciones</label>
+                <Textarea
+                  {...paymentForm.register('observaciones')}
+                  placeholder="Notas del abono, conciliación o compromiso con proveedor"
+                  className="min-h-24"
+                />
+                <FieldError message={paymentForm.formState.errors.observaciones?.message} />
+              </div>
+            </div>
+
+            <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Saldo actual
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {formatCurrency(selectedPaymentOrder?.adjustedPendingAmount ?? 0)}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Pago a registrar
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {formatCurrency(watchedPaymentAmount)}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                  Saldo estimado
+                </p>
+                <p className="mt-2 text-base font-semibold text-foreground">
+                  {formatCurrency(
+                    Math.max(0, (selectedPaymentOrder?.adjustedPendingAmount ?? 0) - watchedPaymentAmount),
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPaying}
+                onClick={() => {
+                  setIsPaymentDialogOpen(false)
+                  setSelectedPaymentOrderId(null)
+                  paymentForm.reset(defaultPaymentFormValues)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isPaying || !selectedPaymentOrder}>
+                {isPaying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Registrando pago...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="h-4 w-4" />
+                    Confirmar pago
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isOrderSummaryDialogOpen}
+        onOpenChange={(open) => {
+          setIsOrderSummaryDialogOpen(open)
+
+          if (!open) {
+            setSelectedSummaryOrderId(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Detalle de recepción por orden</DialogTitle>
+            <DialogDescription>
+              {selectedSummaryOrder && selectedSummaryReceiptGroup
+                ? `${selectedSummaryOrder.code} · ${selectedSummaryOrder.supplierName} · ${selectedSummaryReceiptGroup.totalLines} líneas`
+                : 'Revisa el historial de recepciones, lotes y saldos de la orden.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedSummaryOrder && selectedSummaryReceiptGroup && selectedSummaryTotals ? (
+            <div className="space-y-6">
+              <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-5">
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Estado
+                  </p>
+                  <div className="mt-2">
+                    <Badge variant={getOrderStatusVariant(selectedSummaryOrder.status)}>
+                      {selectedSummaryOrder.status}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Recibido acumulado
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {selectedSummaryTotals.receivedUnits.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Pendiente
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {selectedSummaryTotals.pendingUnits.toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Observadas
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {selectedSummaryTotals.observedLines}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Devuelto
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-foreground">
+                    {formatCurrency(selectedSummaryTotals.returnedAmount)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border p-4">
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Proveedor
+                  </p>
+                  <p className="mt-2 font-medium text-foreground">
+                    {selectedSummaryOrder.supplierName}
+                  </p>
+                  <p className="text-small text-muted-foreground">
+                    {selectedSummaryOrder.supplierDocument}
+                  </p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Sucursal
+                  </p>
+                  <p className="mt-2 font-medium text-foreground">
+                    {selectedSummaryOrder.branchName}
+                  </p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Creación
+                  </p>
+                  <p className="mt-2 font-medium text-foreground">
+                    {formatDate(selectedSummaryOrder.createdAt)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border p-4">
+                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                    Monto
+                  </p>
+                  <p className="mt-2 font-medium text-foreground">
+                    {formatCurrency(selectedSummaryOrder.totalAmount)}
+                  </p>
+                  <p className="text-small text-muted-foreground">
+                    devuelto {formatCurrency(selectedSummaryOrder.returnedAmount)}
+                  </p>
+                  <p className="text-small text-muted-foreground">
+                    neto {formatCurrency(selectedSummaryOrder.netAmount)}
+                  </p>
+                  <p className="text-small text-muted-foreground">
+                    saldo ajustado {formatCurrency(selectedSummaryOrder.adjustedPendingAmount)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Producto</TableHead>
+                      <TableHead>Lote</TableHead>
+                      <TableHead>Ingreso</TableHead>
+                      <TableHead>Vencimiento</TableHead>
+                      <TableHead>Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedSummaryReceiptGroup.receipts.map((receipt) => (
+                      <TableRow key={receipt.id}>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="font-medium text-foreground">{receipt.productName}</p>
+                            <p className="text-small text-muted-foreground">
+                              {receipt.branchName}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {receipt.lotCode || 'Pendiente'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="font-medium text-foreground">
+                              {receipt.receivedUnits.toFixed(2)} / {receipt.orderedUnits.toFixed(2)}
+                            </p>
+                            <p className="text-small text-muted-foreground">
+                              {formatDateTime(receipt.receivedAt)}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatDate(receipt.expiryDate)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={getReceiptStatusVariant(receipt.status)}>
+                              {receipt.status}
+                            </Badge>
+                            {receipt.pendingUnits > 0 ? (
+                              <Badge variant="warning">
+                                Pendiente {receipt.pendingUnits.toFixed(2)}
+                              </Badge>
+                            ) : null}
+                            {receipt.returnedUnits > 0 ? (
+                              <Badge variant="warning">
+                                Dev. {receipt.returnedUnits.toFixed(2)}
+                              </Badge>
+                            ) : null}
+                            {receipt.coldChain ? (
+                              <Badge variant="info">Cadena de frio</Badge>
+                            ) : null}
+                            {receipt.availableUnits > 0 ? (
+                              <Badge variant="outline">
+                                Disp. {receipt.availableUnits.toFixed(2)}
+                              </Badge>
+                            ) : null}
+                            {receipt.reservedUnits > 0 ? (
+                              <Badge variant="outline">
+                                Res. {receipt.reservedUnits.toFixed(2)}
+                              </Badge>
+                            ) : null}
+                            {receipt.blockedUnits > 0 ? (
+                              <Badge variant="outline">
+                                Bloq. {receipt.blockedUnits.toFixed(2)}
+                              </Badge>
+                            ) : null}
+                            {receipt.lotId &&
+                            (receipt.availableUnits > 0 ||
+                              receipt.reservedUnits > 0 ||
+                              receipt.blockedUnits > 0) ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setIsOrderSummaryDialogOpen(false)
+                                  openReturnDialog(receipt)
+                                }}
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                                Devolver
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsOrderSummaryDialogOpen(false)
+                    setSelectedSummaryOrderId(null)
+                  }}
+                >
+                  Cerrar
+                </Button>
+                {selectedSummaryReceiptGroup.pendingLines > 0 &&
+                selectedSummaryOrder.status !== 'BORRADOR' &&
+                selectedSummaryOrder.status !== 'ANULADA' ? (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setIsOrderSummaryDialogOpen(false)
+                      setSelectedSummaryOrderId(null)
+                      openOrderReceiveDialog(selectedSummaryOrder.id)
+                    }}
+                  >
+                    <PackageCheck className="h-4 w-4" />
+                    Continuar cierre
+                  </Button>
+                ) : null}
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed p-10 text-center">
+              <p className="text-sm font-medium text-foreground">
+                No se encontró información de recepción para esta orden.
+              </p>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

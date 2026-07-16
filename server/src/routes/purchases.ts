@@ -4,6 +4,9 @@ import { z } from 'zod'
 import {
   createPurchaseOrder,
   getPurchaseDashboard,
+  registerPurchasePayment,
+  receivePurchaseItem,
+  returnPurchaseItem,
 } from '../modules/purchases/purchases.service.js'
 
 const purchaseDashboardQuerySchema = z.object({
@@ -35,6 +38,34 @@ const createPurchaseOrderSchema = z.object({
     .min(1),
 })
 
+const receivePurchaseItemSchema = z.object({
+  detalleCompraId: z.string().uuid(),
+  numeroLote: z.string().min(1).max(80),
+  fechaFabricacion: z.string().optional(),
+  fechaVencimiento: z.string(),
+  cantidadRecibida: z.number().positive(),
+  stockReservado: z.number().min(0).optional(),
+  stockBloqueado: z.number().min(0).optional(),
+  almacen: z.string().max(120).optional(),
+  observaciones: z.string().max(255).optional(),
+})
+
+const returnPurchaseItemSchema = z.object({
+  lotId: z.string().uuid(),
+  target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
+  quantity: z.number().positive(),
+  observaciones: z.string().max(255).optional(),
+})
+
+const registerPurchasePaymentSchema = z.object({
+  compraId: z.string().uuid(),
+  formaPagoId: z.string().uuid(),
+  monto: z.number().positive(),
+  fechaPago: z.string().optional(),
+  referenciaExterna: z.string().max(120).optional(),
+  observaciones: z.string().max(255).optional(),
+})
+
 export async function purchaseRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = purchaseDashboardQuerySchema.parse(request.query)
@@ -44,5 +75,20 @@ export async function purchaseRoutes(app: FastifyInstance) {
   app.post('/orders', async (request) => {
     const body = createPurchaseOrderSchema.parse(request.body)
     return createPurchaseOrder(body, request)
+  })
+
+  app.post('/receipts', async (request) => {
+    const body = receivePurchaseItemSchema.parse(request.body)
+    return receivePurchaseItem(body, request)
+  })
+
+  app.post('/returns', async (request) => {
+    const body = returnPurchaseItemSchema.parse(request.body)
+    return returnPurchaseItem(body, request)
+  })
+
+  app.post('/payments', async (request) => {
+    const body = registerPurchasePaymentSchema.parse(request.body)
+    return registerPurchasePayment(body, request)
   })
 }

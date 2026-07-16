@@ -292,6 +292,8 @@ model Usuario {
   comprasActualizadas               Compra[]                     @relation("CompraUpdatedBy")
   detalleComprasCreados             DetalleCompra[]              @relation("DetalleCompraCreatedBy")
   detalleComprasActualizados        DetalleCompra[]              @relation("DetalleCompraUpdatedBy")
+  compraPagosCreados                CompraPago[]                 @relation("CompraPagoCreatedBy")
+  compraPagosActualizados           CompraPago[]                 @relation("CompraPagoUpdatedBy")
   clientesCreados                   Cliente[]                    @relation("ClienteCreatedBy")
   clientesActualizados              Cliente[]                    @relation("ClienteUpdatedBy")
   ventasCreadas                     Venta[]                      @relation("VentaCreatedBy")
@@ -803,6 +805,7 @@ model Compra {
   createdBy          Usuario?        @relation("CompraCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy          Usuario?        @relation("CompraUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   detalles           DetalleCompra[]
+  pagos              CompraPago[]
 
   @@index([sucursalId, fechaEmision])
   @@index([proveedorId, fechaEmision])
@@ -839,6 +842,32 @@ model DetalleCompra {
   @@index([productoId])
   @@index([deletedAt])
   @@map("detalle_compra")
+}
+
+/// Una compra puede dividirse en múltiples abonos al proveedor.
+model CompraPago {
+  id                String    @id @default(uuid()) @db.Uuid
+  compraId          String    @map("compra_id") @db.Uuid
+  formaPagoId       String    @map("forma_pago_id") @db.Uuid
+  monto             Decimal   @db.Decimal(14, 2)
+  referenciaExterna String?   @map("referencia_externa") @db.VarChar(120)
+  fechaPago         DateTime  @default(now()) @map("fecha_pago")
+  observaciones     String?   @db.VarChar(255)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+  createdById       String?   @map("created_by") @db.Uuid
+  updatedById       String?   @map("updated_by") @db.Uuid
+
+  compra     Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  formaPago  FormaPago @relation(fields: [formaPagoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy  Usuario?  @relation("CompraPagoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy  Usuario?  @relation("CompraPagoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([compraId, fechaPago])
+  @@index([formaPagoId])
+  @@index([deletedAt])
+  @@map("compra_pagos")
 }
 
 /// Módulo: Ventas
@@ -987,6 +1016,7 @@ model FormaPago {
 
   createdBy       Usuario?         @relation("FormaPagoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy       Usuario?         @relation("FormaPagoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  compraPagos     CompraPago[]
   ventaPagos      VentaPago[]
   movimientosCaja MovimientoCaja[]
 

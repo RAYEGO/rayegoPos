@@ -14,6 +14,10 @@ export type PurchasesDashboardResponse = {
     scheduledReceipts: number
     observedReceipts: number
     activeSpend: number
+    returnedAmount: number
+    netSpend: number
+    totalPaid: number
+    pendingPayables: number
     supplierCount: number
   }
   orders: Array<{
@@ -33,6 +37,11 @@ export type PurchasesDashboardResponse = {
     subtotalAmount: number
     taxAmount: number
     pendingAmount: number
+    adjustedPendingAmount: number
+    returnedAmount: number
+    netAmount: number
+    paidAmount: number
+    paymentCount: number
     status: PurchaseOrderStatus
     observations: string | null
   }>
@@ -44,14 +53,34 @@ export type PurchasesDashboardResponse = {
     productName: string
     supplierName: string
     receivedAt: string | null
+    lotId: string | null
     lotCode: string
     receivedUnits: number
     orderedUnits: number
+    pendingUnits: number
+    returnedUnits: number
+    returnedAmount: number
+    availableUnits: number
+    reservedUnits: number
+    blockedUnits: number
     expiryDate: string | null
     branchId: string
     branchName: string
     coldChain: boolean
     status: PurchaseReceiptStatus
+  }>
+  payments: Array<{
+    id: string
+    purchaseId: string
+    purchaseCode: string
+    supplierName: string
+    formPaymentId: string
+    formPaymentCode: string
+    formPaymentName: string
+    amount: number
+    paidAt: string | null
+    reference: string | null
+    observations: string | null
   }>
   supplierSummary: Array<{
     supplierId: string
@@ -72,6 +101,12 @@ export type PurchasesDashboardResponse = {
       id: string
       name: string
       documentNumber: string
+    }>
+    paymentMethods: Array<{
+      id: string
+      code: string
+      name: string
+      requiresReference: boolean
     }>
     products: Array<{
       id: string
@@ -96,4 +131,32 @@ export type CreatePurchaseOrderPayload = {
     costoUnitario: number
     porcentajeImpuesto?: number
   }>
+}
+
+export type ReceivePurchaseItemPayload = {
+  detalleCompraId: string
+  numeroLote: string
+  fechaFabricacion?: string
+  fechaVencimiento: string
+  cantidadRecibida: number
+  stockReservado?: number
+  stockBloqueado?: number
+  almacen?: string
+  observaciones?: string
+}
+
+export type ReturnPurchaseItemPayload = {
+  lotId: string
+  target: 'DISPONIBLE' | 'RESERVADO' | 'BLOQUEADO'
+  quantity: number
+  observaciones?: string
+}
+
+export type RegisterPurchasePaymentPayload = {
+  compraId: string
+  formaPagoId: string
+  monto: number
+  fechaPago?: string
+  referenciaExterna?: string
+  observaciones?: string
 }
