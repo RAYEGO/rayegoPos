@@ -33,10 +33,6 @@ const cashDrawerInclude = {
   cierre: true,
 } satisfies Prisma.AperturaCajaInclude
 
-type CashDrawerWithRelations = Prisma.AperturaCajaGetPayload<{
-  include: typeof cashDrawerInclude
-}>
-
 type AuthTokenPayload = {
   sub: string
   typ: 'access' | 'refresh' | 'reset-password'
@@ -63,10 +59,6 @@ function toDecimal(value: number, fractionDigits: number) {
 function toOptionalString(value?: string | null) {
   const normalized = value?.trim()
   return normalized ? normalized : undefined
-}
-
-function formatDate(value: Date | null | undefined) {
-  return value ? value.toISOString().slice(0, 10) : null
 }
 
 function formatDateTime(value: Date | null | undefined) {
@@ -146,6 +138,12 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
       ventaPago: {
         include: {
           venta: true,
+        },
+      },
+      createdBy: {
+        select: {
+          nombres: true,
+          apellidos: true,
         },
       },
     },
