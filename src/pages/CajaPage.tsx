@@ -52,7 +52,7 @@ function getMovementVariant(type: CashMovementType) {
 }
 
 export function CajaPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
