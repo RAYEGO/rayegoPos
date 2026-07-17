@@ -1,7 +1,7 @@
 import { EstadoVenta, TipoComprobante } from '@prisma/client'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { createSale, getSalesDashboard } from '../modules/sales/sales.service.js'
+import { cancelSale, createSale, getSalesDashboard } from '../modules/sales/sales.service.js'
 
 const salesDashboardQuerySchema = z.object({
   search: z.string().optional(),
@@ -35,6 +35,10 @@ const createSaleSchema = z.object({
     .min(1),
 })
 
+const cancelSaleSchema = z.object({
+  observaciones: z.string().max(255).optional(),
+})
+
 export async function salesRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = salesDashboardQuerySchema.parse(request.query)
@@ -48,5 +52,11 @@ export async function salesRoutes(app: FastifyInstance) {
   app.post('/', async (request) => {
     const body = createSaleSchema.parse(request.body)
     return createSale(body, request)
+  })
+
+  app.patch('/:id/cancel', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = cancelSaleSchema.parse(request.body)
+    return cancelSale(params.id, request, body.observaciones)
   })
 }

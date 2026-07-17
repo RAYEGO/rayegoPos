@@ -1073,3 +1073,112 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
   return result
 }
+
+export async function cancelSale(saleId: string, request: FastifyRequest, observaciones?: string) {
+  const userId = await getAuthenticatedUserId(request)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const result = await prisma.$transaction(async (tx) => {
+    const sale = await tx.venta.findFirst({
+      where: {
+        id: saleId,
+        deletedAt: null,
+      },
+      include: {
+        detalles: {
+          where: { deletedAt: null },
+          include: {
+            lotesAsignados: {
+              where: { deletedAt: null },
+            },
+          },
+        },
+        pagos: { where: { deletedAt: null } },
+      },
+    })
+
+    if (!sale) {
+      throw createHttpError(404, 'La venta no fue encontrada.')
+    }
+
+    if (sale.estado === EstadoVenta.ANULADA) {
+      throw createHttpError(400, 'La venta ya está anulada.')
+    }
+
+    const returnReason = await ensureMovementReason(tx, userId, {
+      code: 'DEVOLUCION_VENTA',
+      name: 'Devolución por anulación de venta',
+      description: 'Ingreso de inventario registrado desde la anulación de una venta.',
+      type: TipoMovimientoInventario.ENTRADA,
+    })
+
+    for (const detail of sale.detalles) {
+      for (const lotAssignment of detail.lotesAsignados) {
+        const lot = await tx.lote.findFirst({
+          where: { id: lotAssignment.loteId, deletedAt: null },
+        })
+        if (!lot) continue
+
+        const allocatedAmount = decimalToNumber(lotAssignment.cantidad)
+        const nextAvailable = decimalToNumber(lot.stockDisponible) + allocatedAmount
+        const nextStatus = resolveLotStatus({
+          expiryDate: lot.fechaVencimiento,
+          availableUnits: nextAvailable,
+          reservedUnits: decimalToNumber(lot.stockReservado),
+          blockedUnits: decimalToNumber(lot.stockBloqueado),
+        })
+
+        await tx.lote.update({
+          where: { id: lot.id },
+          data: {
+            stockDisponible: toDecimal(nextAvailable, 4),
+            estado: nextStatus,
+            updatedById: userId,
+          },
+        })
+
+        await tx.movimientoInventario.create({
+          data: {
+            sucursalId: sale.sucursalId,
+            productoId: detail.productoId,
+            loteId: lot.id,
+            motivoId: returnReason.id,
+            detalleVentaId: detail.id,
+            detalleVentaLoteId: lotAssignment.id,
+            tipo: TipoMovimientoInventario.ENTRADA,
+            origen: OrigenMovimientoInventario.DEVOLUCION_VENTA,
+            cantidad: toDecimal(allocatedAmount, 4),
+            costoUnitario: lotAssignment.costoUnitario,
+            stockResultante: toDecimal(nextAvailable, 4),
+            referencia: `Anulación venta ${saleId.slice(0, 8).toUpperCase()} lote ${lot.numeroLote}`,
+            observaciones: toOptionalString(observaciones),
+            createdById: userId,
+            updatedById: userId,
+          },
+        })
+      }
+    }
+
+    const updatedSale = await tx.venta.update({
+      where: { id: saleId },
+      data: {
+        estado: EstadoVenta.ANULADA,
+        observaciones: toOptionalString(observaciones),
+        updatedById: userId,
+      },
+      include: saleInclude,
+    })
+
+    const codeMap = await buildSaleCodeMap()
+
+    return {
+      item: mapRecentSale(updatedSale, codeMap),
+    }
+  }, {
+    maxWait: 10_000,
+    timeout: 20_000,
+  })
+
+  return result
+}

@@ -47,4 +47,14 @@ export const salesService = {
       body: payload,
     })
   },
+
+  cancel(accessToken: string, saleId: string, observaciones?: string) {
+    return apiRequest<{
+      item: SalesDashboardResponse['recentSales'][0]
+    }>(`/api/sales/${saleId}/cancel`, {
+      method: 'PATCH',
+      accessToken,
+      body: { observaciones },
+    })
+  },
 }
