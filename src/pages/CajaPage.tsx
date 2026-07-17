@@ -6,6 +6,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Loader } from '@/components/ui/loader'
 import {
   Table,
   TableBody,
@@ -25,14 +27,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  cashDrawers,
-  cashMovements,
-  cashPaymentSummary,
-  type CashDrawerStatus,
-  type CashMovementType,
-} from '@/modules/cashier/mock-data'
-import { recentSales } from '@/modules/sales/mock-data'
+import { useAuth } from '@/hooks/useAuth'
+import { cashierService } from '@/services/cashierService'
+import type { CashDrawerStatus, CashMovementType, CashierDashboardResponse } from '@/types/cashier'
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-PE', {
@@ -55,16 +52,59 @@ function getMovementVariant(type: CashMovementType) {
 }
 
 export function CajaPage() {
+  const { logout, session } = useAuth()
+  const accessToken = session?.accessToken ?? ''
+  const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadDashboard = useCallback(async () => {
+    if (!accessToken) {
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await cashierService.getDashboard(accessToken)
+      setDashboard(response)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al cargar el dashboard')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [accessToken])
+
+  useEffect(() => {
+    loadDashboard()
+  }, [loadDashboard])
+
+  const cashDrawers = dashboard?.cashDrawers ?? []
+  const cashMovements = dashboard?.cashMovements ?? []
+  const cashPaymentSummary = dashboard?.cashPaymentSummary ?? []
+  const dashboardTotals = dashboard?.dashboardTotals ?? {
+    totalSales: 0,
+    totalInternalMovements: 0,
+    pendingCollections: 0,
+  }
   const activeDrawer = cashDrawers.find((drawer) => drawer.status !== 'CERRADA') ?? cashDrawers[0]
-  const totalSales = recentSales
-    .filter((sale) => sale.status === 'EMITIDA')
-    .reduce((sum, sale) => sum + sale.totalAmount, 0)
-  const totalInternalMovements = cashMovements
-    .filter((movement) => movement.paymentMethod === 'INTERNO')
-    .reduce((sum, movement) => sum + movement.amount, 0)
-  const pendingCollections = recentSales
-    .filter((sale) => sale.status === 'PENDIENTE_PAGO')
-    .reduce((sum, sale) => sum + sale.totalAmount, 0)
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[400px] items-center justify-center">
+        <Loader className="h-10 w-10" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+        <p className="font-medium text-destructive">{error}</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -84,16 +124,16 @@ export function CajaPage() {
                 Caja activa
               </p>
               <p className="mt-2 text-base font-semibold text-foreground">
-                {activeDrawer.code}
+                {activeDrawer?.code ?? '-'}
               </p>
-              <p className="text-small text-muted-foreground">{activeDrawer.branchName}</p>
+              <p className="text-small text-muted-foreground">{activeDrawer?.branchName ?? '-'}</p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
               <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
                 Ventas emitidas
               </p>
               <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(totalSales)}
+                {formatCurrency(dashboardTotals.totalSales)}
               </p>
               <p className="text-small text-muted-foreground">integradas desde ventas</p>
             </div>
@@ -102,7 +142,7 @@ export function CajaPage() {
                 Movimientos internos
               </p>
               <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(totalInternalMovements)}
+                {formatCurrency(dashboardTotals.totalInternalMovements)}
               </p>
               <p className="text-small text-muted-foreground">ingresos y egresos manuales</p>
             </div>
@@ -111,7 +151,7 @@ export function CajaPage() {
                 Pendiente de cobro
               </p>
               <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(pendingCollections)}
+                {formatCurrency(dashboardTotals.pendingCollections)}
               </p>
               <p className="text-small text-muted-foreground">ventas aun no conciliadas</p>
             </div>
@@ -129,19 +169,19 @@ export function CajaPage() {
             <div className="rounded-2xl border p-4">
               <p className="font-medium text-foreground">Cajero responsable</p>
               <p className="mt-1 text-small text-muted-foreground">
-                {activeDrawer.cashierName} · apertura {activeDrawer.openedAt}
+                {activeDrawer?.cashierName ?? '-'} · apertura {activeDrawer?.openedAt ?? '-'}
               </p>
             </div>
             <div className="rounded-2xl border p-4">
               <p className="font-medium text-foreground">Fondo inicial</p>
               <p className="mt-1 text-small text-muted-foreground">
-                {formatCurrency(activeDrawer.openingAmount)} para operaciones del turno.
+                {formatCurrency(activeDrawer?.openingAmount ?? 0)} para operaciones del turno.
               </p>
             </div>
             <div className="rounded-2xl border p-4">
               <p className="font-medium text-foreground">Resultado preliminar</p>
               <p className="mt-1 text-small text-muted-foreground">
-                esperado {formatCurrency(activeDrawer.expectedAmount)} · contado {formatCurrency(activeDrawer.countedAmount)}
+                esperado {formatCurrency(activeDrawer?.expectedAmount ?? 0)} · contado {formatCurrency(activeDrawer?.countedAmount ?? 0)}
               </p>
             </div>
           </CardContent>
@@ -311,13 +351,13 @@ export function CajaPage() {
                 <div className="rounded-2xl border p-4">
                   <p className="font-medium text-foreground">Diferencia en caja</p>
                   <p className="mt-1 text-small text-muted-foreground">
-                    El turno activo muestra una diferencia de {formatCurrency(activeDrawer.differenceAmount)} frente al esperado.
+                    El turno activo muestra una diferencia de {formatCurrency(activeDrawer?.differenceAmount ?? 0)} frente al esperado.
                   </p>
                 </div>
                 <div className="rounded-2xl border p-4">
                   <p className="font-medium text-foreground">Venta pendiente</p>
                   <p className="mt-1 text-small text-muted-foreground">
-                    Hay comprobantes pendientes de cobro por {formatCurrency(pendingCollections)}.
+                    Hay comprobantes pendientes de cobro por {formatCurrency(dashboardTotals.pendingCollections)}.
                   </p>
                 </div>
                 <div className="rounded-2xl border p-4">

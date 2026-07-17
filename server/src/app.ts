@@ -7,6 +7,8 @@ import { authRoutes } from './routes/auth.js'
 import { inventoryRoutes } from './routes/inventory.js'
 import { purchaseRoutes } from './routes/purchases.js'
 import { productRoutes } from './routes/products.js'
+import { salesRoutes } from './routes/sales.js'
+import { cashierRoutes } from './routes/cashier.js'
 
 export function createApp() {
   const app = Fastify({
@@ -49,6 +51,14 @@ export function createApp() {
 
     instance.register(purchaseRoutes, {
       prefix: '/api/purchases',
+    })
+
+    instance.register(salesRoutes, {
+      prefix: '/api/sales',
+    })
+
+    instance.register(cashierRoutes, {
+      prefix: '/api/cashier',
     })
   })
 
