@@ -2,8 +2,6 @@ import {
   BadgeDollarSign,
   CircleDollarSign,
   HandCoins,
-  ReceiptText,
-  ShieldCheck,
   WalletCards,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -265,78 +263,43 @@ export function CajaPage() {
     <div className="space-y-6">
       <PageHeader title="Caja" />
 
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+      <div className="grid gap-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Control diario de caja</CardTitle>
-            <CardDescription>
-              Apertura, recaudacion, movimientos internos y cierre conectados con ventas.
-            </CardDescription>
+          <CardHeader className="pb-4">
+            <CardTitle>Resumen de turno</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-4">
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Caja activa
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Caja
               </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
+              <p className="mt-2 text-lg font-semibold text-foreground">
                 {activeDrawer?.code ?? '-'}
               </p>
-              <p className="text-small text-muted-foreground">{activeDrawer?.branchName ?? '-'}</p>
+              <p className="text-xs text-muted-foreground hidden sm:block">{activeDrawer?.branchName ?? '-'}</p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Ventas emitidas
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Ventas
               </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
+              <p className="mt-2 text-lg font-semibold text-foreground">
                 {formatCurrency(dashboardTotals.totalSales)}
               </p>
-              <p className="text-small text-muted-foreground">integradas desde ventas</p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Movimientos internos
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Movimientos
               </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
+              <p className="mt-2 text-lg font-semibold text-foreground">
                 {formatCurrency(dashboardTotals.totalInternalMovements)}
               </p>
-              <p className="text-small text-muted-foreground">ingresos y egresos manuales</p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Pendiente de cobro
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Pendiente
               </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
+              <p className="mt-2 text-lg font-semibold text-foreground">
                 {formatCurrency(dashboardTotals.pendingCollections)}
-              </p>
-              <p className="text-small text-muted-foreground">ventas aun no conciliadas</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Estado actual</CardTitle>
-            <CardDescription>
-              Lectura rapida para apertura, cuadre y cierre operativo del turno.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Cajero responsable</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                {activeDrawer?.cashierName ?? '-'} · apertura {activeDrawer?.openedAt ?? '-'}
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Fondo inicial</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                {formatCurrency(activeDrawer?.openingAmount ?? 0)} para operaciones del turno.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Resultado preliminar</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                esperado {formatCurrency(activeDrawer?.expectedAmount ?? 0)} · contado {formatCurrency(activeDrawer?.countedAmount ?? 0)}
               </p>
             </div>
           </CardContent>
@@ -448,17 +411,14 @@ export function CajaPage() {
         </TabsContent>
 
         <TabsContent value="movimientos" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
+          <div className="grid gap-6">
             <Card>
               <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <BadgeDollarSign className="h-5 w-5 text-primary" />
-                    Libro de movimientos
+                    Movimientos
                   </CardTitle>
-                  <CardDescription>
-                    Ingresos por venta, egresos, retiros y cuadre de turno en una sola vista.
-                  </CardDescription>
                 </div>
                 <Button
                   type="button"
@@ -472,7 +432,7 @@ export function CajaPage() {
                   }}
                 >
                   <HandCoins className="h-4 w-4" />
-                  Movimiento manual
+                  Nuevo movimiento
                 </Button>
               </CardHeader>
               <CardContent>
@@ -482,8 +442,8 @@ export function CajaPage() {
                       <TableHead>Fecha</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead>Detalle</TableHead>
-                      <TableHead>Referencia</TableHead>
-                      <TableHead>Medio</TableHead>
+                      <TableHead className="hidden md:table-cell">Referencia</TableHead>
+                      <TableHead className="hidden md:table-cell">Medio</TableHead>
                       <TableHead>Monto</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -501,15 +461,15 @@ export function CajaPage() {
                         <TableCell>
                           <div className="space-y-1">
                             <p className="font-medium text-foreground">{movement.description}</p>
-                            <p className="text-small text-muted-foreground">
+                            <p className="text-xs text-muted-foreground">
                               {movement.actorName}
                             </p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
+                        <TableCell className="hidden md:table-cell text-muted-foreground">
                           {movement.reference}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden md:table-cell">
                           <Badge variant={movement.paymentMethod === 'INTERNO' ? 'outline' : 'info'}>
                             {movement.paymentMethod}
                           </Badge>
@@ -523,52 +483,17 @@ export function CajaPage() {
                 </Table>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ReceiptText className="h-5 w-5 text-primary" />
-                  Alertas de control
-                </CardTitle>
-                <CardDescription>
-                  Señales operativas para revisar antes de aprobar el cierre.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Diferencia en caja</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    El turno activo muestra una diferencia de {formatCurrency(activeDrawer?.differenceAmount ?? 0)} frente al esperado.
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Venta pendiente</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Hay comprobantes pendientes de cobro por {formatCurrency(dashboardTotals.pendingCollections)}.
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Movimientos manuales</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Todo ingreso o egreso interno debe quedar sustentado antes del cierre final.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="conciliacion" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
+          <div className="grid gap-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <CircleDollarSign className="h-5 w-5 text-primary" />
-                  Conciliacion por medio de pago
+                  Conciliación
                 </CardTitle>
-                <CardDescription>
-                  Comparacion entre ventas registradas y dinero efectivamente recibido.
-                </CardDescription>
               </CardHeader>
               <CardContent>
                 <Table>
@@ -577,7 +502,7 @@ export function CajaPage() {
                       <TableHead>Medio</TableHead>
                       <TableHead>Ventas</TableHead>
                       <TableHead>Cobrado</TableHead>
-                      <TableHead>Operaciones</TableHead>
+                      <TableHead className="hidden md:table-cell">Operaciones</TableHead>
                       <TableHead>Resultado</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -596,7 +521,7 @@ export function CajaPage() {
                           <TableCell className="font-medium text-foreground">
                             {formatCurrency(row.collectedAmount)}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="hidden md:table-cell text-muted-foreground">
                             {row.operations}
                           </TableCell>
                           <TableCell>
@@ -609,41 +534,6 @@ export function CajaPage() {
                     })}
                   </TableBody>
                 </Table>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  Reglas de cierre
-                </CardTitle>
-                <CardDescription>
-                  Checklist minimo antes de confirmar el cuadre de caja.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Validar ventas emitidas</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Revisar que todas las ventas del turno tengan medio de pago y comprobante conciliado.
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Sustentar diferencias</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Toda diferencia entre esperado y contado debe quedar observada o resuelta.
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Cerrar con trazabilidad</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    El cierre debe registrar responsable, hora, monto final y movimientos internos.
-                  </p>
-                </div>
-                <Button type="button" className="w-full">
-                  Aprobar cierre de caja
-                </Button>
               </CardContent>
             </Card>
           </div>

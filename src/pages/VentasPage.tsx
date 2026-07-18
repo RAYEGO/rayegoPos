@@ -491,84 +491,43 @@ export function VentasPage() {
     <div className="space-y-6">
       <PageHeader title="Ventas" />
 
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+      <div className="grid gap-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Mostrador y salida por lotes</CardTitle>
-            <CardDescription>
-              Venta real conectada a productos, pagos y descuento FIFO desde inventario.
-            </CardDescription>
+          <CardHeader className="pb-4">
+            <CardTitle>Resumen</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-4">
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Items en carrito
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Items
               </p>
-              <p className="mt-2 text-display text-foreground">{cartMetrics.itemCount}</p>
-              <p className="text-small text-muted-foreground">
-                {cartMetrics.totalUnits} unidades listas para facturar
+              <p className="mt-2 text-xl font-bold text-foreground">{cartMetrics.itemCount}</p>
+              <p className="text-xs text-muted-foreground hidden sm:block">
+                {cartMetrics.totalUnits} und
               </p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Total actual
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Total
               </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
+              <p className="mt-2 text-lg font-semibold text-foreground">
                 {formatCurrency(cartMetrics.total)}
               </p>
-              <p className="text-small text-muted-foreground">
-                checkout con pagos reales y vuelto controlado
-              </p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
                 Con receta
               </p>
-              <p className="mt-2 text-display text-foreground">
+              <p className="mt-2 text-xl font-bold text-foreground">
                 {dashboard?.summary?.prescriptionItemsCount ?? 0}
-              </p>
-              <p className="text-small text-muted-foreground">
-                dispensaciones sensibles recientes
               </p>
             </div>
             <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Pendiente de cobro
+              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                Pendiente
               </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
+              <p className="mt-2 text-lg font-semibold text-foreground">
                 {formatCurrency(dashboard?.summary?.totalOutstandingAmount ?? 0)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                saldo emitido sin cobro completo
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Reglas operativas</CardTitle>
-            <CardDescription>
-              La dispensación ya respeta FIFO, lotes y trazabilidad sanitaria.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Salida FIFO automática</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                Cada venta consume primero el lote con vencimiento más próximo.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Dispensación trazable</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                Cada línea queda enlazada a sus lotes consumidos y al kardex de salida.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Checkout real</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                El cobro registra pagos reales, saldo pendiente y vuelto cuando aplica.
               </p>
             </div>
           </CardContent>
@@ -583,7 +542,7 @@ export function VentasPage() {
         </TabsList>
 
         <TabsContent value="mostrador" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -642,41 +601,32 @@ export function VentasPage() {
 
                       return (
                         <div key={product.id} className="rounded-2xl border p-4">
-                          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="flex flex-col gap-3">
                             <div>
                               <p className="font-medium text-foreground">{product.name}</p>
-                              <p className="mt-1 text-small text-muted-foreground">
-                                {product.sku} · {product.presentationName} · {product.unitSymbol}
-                              </p>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <Badge variant="outline">{product.categoryName}</Badge>
+                              <div className="mt-2 flex items-center gap-2 flex-wrap">
                                 <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
                                 <Badge variant="success">
-                                  stock {product.availableUnits.toFixed(0)}
+                                  Stock {product.availableUnits.toFixed(0)}
                                 </Badge>
-                                {product.requiresPrescription ? (
-                                  <Badge variant="warning">Receta</Badge>
-                                ) : null}
-                                {product.isControlled ? (
-                                  <Badge variant="destructive">Controlado</Badge>
-                                ) : null}
-                                {product.coldChain ? (
-                                  <Badge variant="info">Cadena de frío</Badge>
-                                ) : null}
+                                {product.requiresPrescription && <Badge variant="warning">R</Badge>}
+                                {product.isControlled && <Badge variant="destructive">C</Badge>}
+                                {product.coldChain && <Badge variant="info">❄️</Badge>}
                               </div>
+                              <p className="mt-1 text-xs text-muted-foreground hidden sm:block">
+                                {product.sku} · {product.presentationName}
+                              </p>
                             </div>
 
-                            <div className="min-w-72 rounded-2xl border bg-muted/20 p-4">
-                              <p className="text-small font-medium text-foreground">
-                                Lote sugerido para salida
-                              </p>
-                              <p className="mt-2 text-small text-muted-foreground">
-                                {product.suggestedLot?.lotCode ?? 'Sin lote sugerido'} ·{' '}
-                                {product.suggestedLot?.availableUnits.toFixed(2) ?? '0.00'} und
-                              </p>
-                              <p className="text-small text-muted-foreground">
-                                vence {formatDate(product.suggestedLot?.expiryDate ?? null)}
-                              </p>
+                            <div className="rounded-2xl border bg-muted/20 p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-medium text-foreground">
+                                  Lote: {product.suggestedLot?.lotCode ?? 'N/A'}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Vence: {formatDate(product.suggestedLot?.expiryDate ?? null)}
+                                </p>
+                              </div>
                               <Button
                                 type="button"
                                 size="sm"
@@ -684,14 +634,13 @@ export function VentasPage() {
                                 onClick={() => addToCart(product)}
                                 disabled={!product.suggestedLot || remainingUnits <= 0}
                               >
-                                Agregar al carrito
+                                Agregar
                               </Button>
-                              {cartEntry ? (
-                                <p className="mt-2 text-xs text-muted-foreground">
-                                  En carrito: {cartEntry.quantity} · disponible restante{' '}
-                                  {Math.max(0, remainingUnits).toFixed(0)}
+                              {cartEntry && (
+                                <p className="mt-2 text-xs text-muted-foreground text-center">
+                                  En carrito: {cartEntry.quantity}
                                 </p>
-                              ) : null}
+                              )}
                             </div>
                           </div>
                         </div>
