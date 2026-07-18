@@ -297,18 +297,34 @@ export function ProductosPage() {
     <div className="space-y-6">
       <div className="space-y-3">
         <h1 className="text-2xl font-bold text-foreground">Productos</h1>
-        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-          <div>
-            <span className="font-semibold text-foreground">{portfolioMetrics.activeCatalog}</span> SKU
+        <div className="flex flex-wrap gap-4">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
+            <PackagePlus className="h-5 w-5 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-xl font-bold text-foreground">{portfolioMetrics.activeCatalog}</span>
+              <span className="text-xs text-muted-foreground">SKU</span>
+            </div>
           </div>
-          <div>
-            <span className="font-semibold text-foreground">{portfolioMetrics.lowStockCount}</span> Bajo Stock
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
+            <AlertTriangle className="h-5 w-5 text-warning" />
+            <div className="flex flex-col">
+              <span className="text-xl font-bold text-foreground">{portfolioMetrics.lowStockCount}</span>
+              <span className="text-xs text-muted-foreground">Bajo stock</span>
+            </div>
           </div>
-          <div>
-            <span className="font-semibold text-foreground">{portfolioMetrics.withPrescription}</span> Con receta
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
+            <Pill className="h-5 w-5 text-primary" />
+            <div className="flex flex-col">
+              <span className="text-xl font-bold text-foreground">{portfolioMetrics.withPrescription}</span>
+              <span className="text-xs text-muted-foreground">Con receta</span>
+            </div>
           </div>
-          <div>
-            <span className="font-semibold text-foreground">{portfolioMetrics.lotEnabled}</span> Con lotes
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
+            <TestTubeDiagonal className="h-5 w-5 text-info" />
+            <div className="flex flex-col">
+              <span className="text-xl font-bold text-foreground">{portfolioMetrics.lotEnabled}</span>
+              <span className="text-xs text-muted-foreground">Con lotes</span>
+            </div>
           </div>
         </div>
       </div>
