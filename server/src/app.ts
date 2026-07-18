@@ -9,6 +9,7 @@ import { purchaseRoutes } from './routes/purchases.js'
 import { productRoutes } from './routes/products.js'
 import { salesRoutes } from './routes/sales.js'
 import { cashierRoutes } from './routes/cashier.js'
+import suppliersRoutes from './routes/suppliers.js'
 
 export function createApp() {
   const app = Fastify({
@@ -59,6 +60,10 @@ export function createApp() {
 
     instance.register(cashierRoutes, {
       prefix: '/api/cashier',
+    })
+
+    instance.register(suppliersRoutes, {
+      prefix: '/api/suppliers',
     })
   })
 
