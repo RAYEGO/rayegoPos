@@ -4,13 +4,19 @@ import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   AlertTriangle,
-  ArrowUpDown,
+  ChevronDown,
   ClipboardList,
+  Edit,
+  History,
+  Layers,
   Loader2,
+  MoreVertical,
   PackagePlus,
   Pill,
+  Plus,
   Search,
-  ShieldAlert,
+  Trash2,
+  Copy,
   TestTubeDiagonal,
 } from 'lucide-react'
 
@@ -19,7 +25,6 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -31,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
@@ -50,7 +56,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
@@ -160,6 +165,8 @@ export function ProductosPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | ProductStatus>('TODOS')
   const [categoryFilter, setCategoryFilter] = useState('TODAS')
+  const [laboratoryFilter, setLaboratoryFilter] = useState('TODOS')
+  const [showSummary, setShowSummary] = useState(true)
   const [products, setProducts] = useState<ProductCatalogItem[]>([])
   const [summary, setSummary] = useState({
     total: 0,
@@ -245,12 +252,6 @@ export function ProductosPage() {
     [summary],
   )
 
-  const inventoryAlerts = useMemo(
-    () =>
-      products.filter((product) => product.stockUnits <= 20 || product.lotCount <= 1),
-    [products],
-  )
-
   const masterDataReady =
     options.categories.length > 0 && options.units.length > 0
 
@@ -294,390 +295,378 @@ export function ProductosPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
-        <h1 className="text-2xl font-bold text-foreground">Productos</h1>
-        <div className="flex flex-wrap gap-4">
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
-            <PackagePlus className="h-5 w-5 text-muted-foreground" />
+    <div className="space-y-4 p-4">
+      {/* Header with Title and Summary Toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Productos</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown
+            className={`ml-1 h-4 w-4 transition-transform ${
+              showSummary ? 'rotate-180' : ''
+            }`}
+          />
+        </Button>
+      </div>
+
+      {/* KPIs Section (Collapsible on Mobile) */}
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <PackagePlus className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
-              <span className="text-xl font-bold text-foreground">{portfolioMetrics.activeCatalog}</span>
+              <span className="text-lg font-bold text-foreground">{portfolioMetrics.activeCatalog}</span>
               <span className="text-xs text-muted-foreground">SKU</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
-            <AlertTriangle className="h-5 w-5 text-warning" />
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <AlertTriangle className="h-4 w-4 text-warning" />
             <div className="flex flex-col">
-              <span className="text-xl font-bold text-foreground">{portfolioMetrics.lowStockCount}</span>
+              <span className="text-lg font-bold text-foreground">{portfolioMetrics.lowStockCount}</span>
               <span className="text-xs text-muted-foreground">Bajo stock</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
-            <Pill className="h-5 w-5 text-primary" />
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <Pill className="h-4 w-4 text-primary" />
             <div className="flex flex-col">
-              <span className="text-xl font-bold text-foreground">{portfolioMetrics.withPrescription}</span>
+              <span className="text-lg font-bold text-foreground">{portfolioMetrics.withPrescription}</span>
               <span className="text-xs text-muted-foreground">Con receta</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-4 py-2">
-            <TestTubeDiagonal className="h-5 w-5 text-info" />
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <TestTubeDiagonal className="h-4 w-4 text-info" />
             <div className="flex flex-col">
-              <span className="text-xl font-bold text-foreground">{portfolioMetrics.lotEnabled}</span>
+              <span className="text-lg font-bold text-foreground">{portfolioMetrics.lotEnabled}</span>
               <span className="text-xs text-muted-foreground">Con lotes</span>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <Tabs defaultValue="catalogo">
-        <TabsList className="grid w-full grid-cols-3 lg:w-fit">
-          <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
-          <TabsTrigger value="maestros">Maestros</TabsTrigger>
-          <TabsTrigger value="inventario">Puente a inventario</TabsTrigger>
-        </TabsList>
+      {/* Tabs, Filters, and New Product Button */}
+      <Tabs defaultValue="catalogo" className="w-full">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
+            <TabsTrigger value="maestros">Maestros</TabsTrigger>
+          </TabsList>
+          <Button size="sm" onClick={() => setIsCreateDialogOpen(true)} disabled={!masterDataReady || isOptionsLoading}>
+            <Plus className="h-4 w-4 mr-1" />
+            Nuevo Producto
+          </Button>
+        </div>
 
-        <TabsContent value="catalogo" className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <PackagePlus className="h-5 w-5 text-primary" />
-                  Catálogo de productos
-                </CardTitle>
-                <CardDescription>
-                  Listado vivo del maestro de productos, conectado a Supabase vía Fastify y Prisma.
-                </CardDescription>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" disabled>
-                  <ArrowUpDown className="h-4 w-4" />
-                  Exportar catálogo
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => setIsCreateDialogOpen(true)}
-                  disabled={!masterDataReady || isOptionsLoading}
-                >
-                  <PackagePlus className="h-4 w-4" />
-                  Nuevo producto
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {!masterDataReady && !isOptionsLoading ? (
-                <div className="flex items-start gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>
-                    Aún no hay maestros suficientes para registrar productos. Ejecuta el seed actualizado para cargar categorías, unidades y laboratorios base.
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.5fr_0.5fr]">
+        <TabsContent value="catalogo" className="space-y-4 pt-4">
+          <Card className="p-4">
+            <div className="grid gap-3 md:grid-cols-4 lg:grid-cols-7">
+              <div className="md:col-span-2">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Buscar por SKU, nombre, código, principio activo o laboratorio"
+                    placeholder="Buscar por SKU, nombre, código"
                     className="pl-9"
                   />
                 </div>
-
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value) =>
-                    setStatusFilter(value as 'TODOS' | ProductStatus)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TODOS">Todos los estados</SelectItem>
-                    <SelectItem value="ACTIVO">Activo</SelectItem>
-                    <SelectItem value="INACTIVO">Inactivo</SelectItem>
-                    <SelectItem value="DESCONTINUADO">Descontinuado</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TODAS">Todas las categorías</SelectItem>
-                    {options.categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
-
-              {isCatalogLoading ? (
-                <div className="flex min-h-56 items-center justify-center rounded-2xl border">
-                  <Loader className="h-7 w-7" />
-                </div>
-              ) : catalogError ? (
-                <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-                  {catalogError}
-                </div>
-              ) : products.length === 0 ? (
-                <div className="rounded-2xl border border-dashed p-10 text-center">
-                  <p className="text-sm font-medium text-foreground">
-                    No se encontraron productos con los filtros actuales.
-                  </p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Ajusta los filtros o registra el primer SKU del catálogo.
-                  </p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Producto</TableHead>
-                      <TableHead>Clasificación</TableHead>
-                      <TableHead>Precio</TableHead>
-                      <TableHead>Stock</TableHead>
-                      <TableHead>Lotes</TableHead>
-                      <TableHead>Vencimiento</TableHead>
-                      <TableHead>Estado</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {products.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{product.name}</p>
-                            <p className="text-small text-muted-foreground">
-                              {product.sku}
-                              {product.presentation ? ` · ${product.presentation}` : ''}
-                              {product.concentration ? ` · ${product.concentration}` : ''}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-2">
-                            <Badge variant="outline">{product.category}</Badge>
-                            <p className="text-small text-muted-foreground">
-                              {product.activePrinciples.map((entry) => entry.name).join(', ') || 'Sin principio activo'}
-                              {product.laboratory ? ` · ${product.laboratory}` : ''}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">
-                              {formatCurrency(product.salePrice)}
-                            </p>
-                            <p className="text-small text-muted-foreground">
-                              costo {formatCurrency(product.costPrice)}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-2">
-                            <Badge variant={getStockVariant(product)}>
-                              {product.stockUnits.toFixed(2)} {product.unitSymbol}
-                            </Badge>
-                            <p className="text-small text-muted-foreground">
-                              {product.reservedUnits.toFixed(2)} reservadas
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-2">
-                            <Badge variant={product.lotCount > 0 ? 'info' : 'outline'}>
-                              {product.lotCount} lotes
-                            </Badge>
-                            <p className="text-small text-muted-foreground">
-                              {product.branchCoverage} sucursales
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDate(product.nextExpiry)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant={getProductStatusVariant(product.status)}>
-                              {product.status}
-                            </Badge>
-                            {product.requiresPrescription ? (
-                              <Badge variant="warning">Receta</Badge>
-                            ) : null}
-                            {product.isControlled ? (
-                              <Badge variant="destructive">Controlado</Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as 'TODOS' | ProductStatus)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos</SelectItem>
+                  <SelectItem value="ACTIVO">Activo</SelectItem>
+                  <SelectItem value="INACTIVO">Inactivo</SelectItem>
+                  <SelectItem value="DESCONTINUADO">Descontinuado</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Categoría" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODAS">Todas</SelectItem>
+                  {options.categories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={laboratoryFilter} onValueChange={setLaboratoryFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Laboratorio" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos</SelectItem>
+                  {options.laboratories.map((lab) => (
+                    <SelectItem key={lab.id} value={lab.id}>{lab.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="maestros" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ClipboardList className="h-5 w-5 text-primary" />
-                  Categorías
-                </CardTitle>
-                <CardDescription>
-                  Agrupación comercial real para filtros, compras y reportes.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {isOptionsLoading ? (
-                  <div className="flex min-h-40 items-center justify-center">
-                    <Loader className="h-6 w-6" />
-                  </div>
-                ) : (
-                  options.categories.map((category) => (
-                    <div key={category.id} className="rounded-2xl border p-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <p className="font-medium text-foreground">{category.name}</p>
-                        <Badge variant="outline">{category.skuCount} SKU</Badge>
-                      </div>
-                      <p className="mt-1 text-small text-muted-foreground">
-                        {category.activeCount} referencias activas en catálogo.
-                      </p>
+          {/* Mobile Cards View */}
+          <div className="md:hidden space-y-3">
+            {isCatalogLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : catalogError ? (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                {catalogError}
+              </div>
+            ) : products.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No se encontraron productos
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Ajusta los filtros o registra el primer producto
+                </p>
+              </div>
+            ) : (
+              products.map((product) => (
+                <Card key={product.id} className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="h-14 w-14 rounded-lg border bg-muted flex items-center justify-center text-2xl">
+                      📦
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TestTubeDiagonal className="h-5 w-5 text-primary" />
-                  Laboratorios
-                </CardTitle>
-                <CardDescription>
-                  Base operativa para abastecimiento y trazabilidad de origen.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {isOptionsLoading ? (
-                  <div className="flex min-h-40 items-center justify-center">
-                    <Loader className="h-6 w-6" />
-                  </div>
-                ) : (
-                  options.laboratories.map((laboratory) => (
-                    <div key={laboratory.id} className="rounded-2xl border p-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <p className="font-medium text-foreground">{laboratory.name}</p>
-                        <Badge variant="info">{laboratory.country ?? 'Sin país'}</Badge>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between">
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground truncate">{product.name}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {product.sku}
+                          </p>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <History className="h-4 w-4 mr-2" />
+                              Historial
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <Layers className="h-4 w-4 mr-2" />
+                              Ver lotes
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <Copy className="h-4 w-4 mr-2" />
+                              Duplicar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="text-destructive">
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                      <p className="mt-1 text-small text-muted-foreground">
-                        {laboratory.skuCount} SKU asociados al laboratorio.
-                      </p>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Pill className="h-5 w-5 text-primary" />
-                  Principios activos
-                </CardTitle>
-                <CardDescription>
-                  Base clínica para búsquedas por genérico y homologación terapéutica.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {isOptionsLoading ? (
-                  <div className="flex min-h-40 items-center justify-center">
-                    <Loader className="h-6 w-6" />
-                  </div>
-                ) : (
-                  options.activePrinciples.map((principle) => (
-                    <div key={principle.id} className="rounded-2xl border p-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <p className="font-medium text-foreground">{principle.name}</p>
-                        <Badge variant="outline">{principle.productCount} productos</Badge>
+                      <div className="mt-2 flex flex-wrap gap-2 items-center">
+                        <Badge variant={getStockVariant(product)}>
+                          {product.stockUnits.toFixed(0)} {product.unitSymbol}
+                        </Badge>
+                        <p className="font-medium text-sm text-foreground">{formatCurrency(product.salePrice)}</p>
+                        <Badge variant={getProductStatusVariant(product.status)}>
+                          {product.status}
+                        </Badge>
                       </div>
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Desktop/Tablet Table View */}
+          <div className="hidden md:block">
+            {isCatalogLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : catalogError ? (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                {catalogError}
+              </div>
+            ) : products.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No se encontraron productos con los filtros actuales
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Ajusta los filtros o registra el primer SKU del catálogo
+                </p>
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[300px]">Producto</TableHead>
+                        <TableHead className="hidden lg:table-cell">Categoría</TableHead>
+                        <TableHead className="hidden md:table-cell">Precio</TableHead>
+                        <TableHead>Stock</TableHead>
+                        <TableHead className="hidden lg:table-cell">Lotes</TableHead>
+                        <TableHead className="hidden xl:table-cell">Vencimiento</TableHead>
+                        <TableHead className="w-[80px] text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {products.map((product) => (
+                        <TableRow key={product.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 rounded-lg border bg-muted flex items-center justify-center text-lg">
+                                📦
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-medium text-foreground truncate">{product.name}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {product.sku}
+                                  {product.presentation ? ` · ${product.presentation}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            <Badge variant="outline">{product.category}</Badge>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <p className="font-medium text-sm">{formatCurrency(product.salePrice)}</p>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getStockVariant(product)}>
+                              {product.stockUnits.toFixed(0)} {product.unitSymbol}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            <Badge variant={product.lotCount > 0 ? 'info' : 'outline'}>
+                              {product.lotCount}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="hidden xl:table-cell text-sm text-muted-foreground">
+                            {formatDate(product.nextExpiry)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem>
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem>
+                                  <History className="h-4 w-4 mr-2" />
+                                  Historial
+                                </DropdownMenuItem>
+                                <DropdownMenuItem>
+                                  <Layers className="h-4 w-4 mr-2" />
+                                  Ver lotes
+                                </DropdownMenuItem>
+                                <DropdownMenuItem>
+                                  <Copy className="h-4 w-4 mr-2" />
+                                  Duplicar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-destructive">
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Eliminar
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 
-        <TabsContent value="inventario" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <TabsContent value="maestros" className="space-y-4 pt-4">
+          <div className="grid gap-4 lg:grid-cols-3">
             <Card>
-              <CardHeader>
-                <CardTitle>Preparación para inventario por lotes</CardTitle>
-                <CardDescription>
-                  Lo que ya queda cubierto desde Productos para el siguiente sprint.
-                </CardDescription>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4 text-primary" />
+                  Categorías
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Identificación del SKU</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Código, nombre, principio activo, concentración y presentación ya están normalizados.
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Políticas de dispensación</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    El maestro diferencia receta y controlados para aplicar reglas clínicas y comerciales.
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Costo y cobertura</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Ya medimos costo referencial, lotes activos y cobertura por sucursal desde la API.
-                  </p>
-                </div>
+              <CardContent className="space-y-2">
+                {isOptionsLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader className="h-5 w-5" />
+                  </div>
+                ) : (
+                  options.categories.map((category) => (
+                    <div key={category.id} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-sm text-foreground">{category.name}</p>
+                        <Badge variant="outline" className="text-xs">{category.skuCount} SKU</Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldAlert className="h-5 w-5 text-primary" />
-                  Alertas para el siguiente sprint
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <TestTubeDiagonal className="h-4 w-4 text-primary" />
+                  Laboratorios
                 </CardTitle>
-                <CardDescription>
-                  Casos que inventario deberá resolver apenas empecemos el manejo de lotes.
-                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {inventoryAlerts.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-6 text-small text-muted-foreground">
-                    Aún no hay alertas operativas. Cuando existan lotes y stock real, aquí se mostrará el foco inmediato.
+              <CardContent className="space-y-2">
+                {isOptionsLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader className="h-5 w-5" />
                   </div>
                 ) : (
-                  inventoryAlerts.map((product) => (
-                    <div key={product.id} className="rounded-2xl border p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-medium text-foreground">{product.name}</p>
-                          <p className="mt-1 text-small text-muted-foreground">
-                            {product.stockUnits.toFixed(2)} {product.unitSymbol} · {product.lotCount} lotes · vence {formatDate(product.nextExpiry)}
-                          </p>
-                        </div>
-                        <Badge variant={getStockVariant(product)}>
-                          {product.stockUnits === 0 ? 'Sin stock' : 'Atención'}
-                        </Badge>
+                  options.laboratories.map((laboratory) => (
+                    <div key={laboratory.id} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-sm text-foreground">{laboratory.name}</p>
+                        <Badge variant="info" className="text-xs">{laboratory.country ?? 'Sin país'}</Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Pill className="h-4 w-4 text-primary" />
+                  Principios activos
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {isOptionsLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader className="h-5 w-5" />
+                  </div>
+                ) : (
+                  options.activePrinciples.map((principle) => (
+                    <div key={principle.id} className="rounded-lg border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-sm text-foreground">{principle.name}</p>
+                        <Badge variant="outline" className="text-xs">{principle.productCount} productos</Badge>
                       </div>
                     </div>
                   ))
@@ -693,41 +682,35 @@ export function ProductosPage() {
           <DialogHeader>
             <DialogTitle>Registrar producto</DialogTitle>
             <DialogDescription>
-              Alta inicial del maestro farmacéutico con maestros reales y validación de catálogo.
+              Alta inicial del maestro farmacéutico
             </DialogDescription>
           </DialogHeader>
 
           <form
-            className="grid gap-6"
+            className="grid gap-4"
             onSubmit={form.handleSubmit(handleCreateProduct)}
           >
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">SKU</label>
-                <Input {...form.register('sku')} placeholder="MED-0001" />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">SKU</label>
+                <Input {...form.register('sku')} placeholder="MED-0001" size={1} />
                 <FieldError message={form.formState.errors.sku?.message} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Código interno</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Código interno</label>
                 <Input {...form.register('codigoInterno')} placeholder="INT-001" />
                 <FieldError message={form.formState.errors.codigoInterno?.message} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Código de barras</label>
-                <Input {...form.register('codigoBarras')} placeholder="7751234567890" />
-                <FieldError message={form.formState.errors.codigoBarras?.message} />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Nombre comercial</label>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-medium">Nombre comercial</label>
                 <Input {...form.register('nombre')} placeholder="Paracetamol 500 mg tabletas" />
                 <FieldError message={form.formState.errors.nombre?.message} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Categoría</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Categoría</label>
                 <Controller
                   control={form.control}
                   name="categoriaId"
@@ -738,9 +721,7 @@ export function ProductosPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {options.categories.map((category) => (
-                          <SelectItem key={category.id} value={category.id}>
-                            {category.name}
-                          </SelectItem>
+                          <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -749,8 +730,8 @@ export function ProductosPage() {
                 <FieldError message={form.formState.errors.categoriaId?.message} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Laboratorio</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Laboratorio</label>
                 <Controller
                   control={form.control}
                   name="laboratorioId"
@@ -765,9 +746,7 @@ export function ProductosPage() {
                       <SelectContent>
                         <SelectItem value="none">Sin laboratorio</SelectItem>
                         {options.laboratories.map((laboratory) => (
-                          <SelectItem key={laboratory.id} value={laboratory.id}>
-                            {laboratory.name}
-                          </SelectItem>
+                          <SelectItem key={laboratory.id} value={laboratory.id}>{laboratory.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -775,34 +754,8 @@ export function ProductosPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Presentación</label>
-                <Controller
-                  control={form.control}
-                  name="presentacionId"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value || 'none'}
-                      onValueChange={(value) => field.onChange(value === 'none' ? '' : value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Opcional" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin presentación</SelectItem>
-                        {options.presentations.map((presentation) => (
-                          <SelectItem key={presentation.id} value={presentation.id}>
-                            {presentation.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Unidad de medida</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Unidad de medida</label>
                 <Controller
                   control={form.control}
                   name="unidadMedidaId"
@@ -824,46 +777,8 @@ export function ProductosPage() {
                 <FieldError message={form.formState.errors.unidadMedidaId?.message} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Principio activo</label>
-                <Controller
-                  control={form.control}
-                  name="principioActivoId"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value || 'none'}
-                      onValueChange={(value) => field.onChange(value === 'none' ? '' : value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Opcional" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin principio activo</SelectItem>
-                        {options.activePrinciples.map((principle) => (
-                          <SelectItem key={principle.id} value={principle.id}>
-                            {principle.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Concentración</label>
-                <Input {...form.register('concentracion')} placeholder="500 mg" />
-                <FieldError message={form.formState.errors.concentracion?.message} />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Registro sanitario</label>
-                <Input {...form.register('registroSanitario')} placeholder="RS-12345" />
-                <FieldError message={form.formState.errors.registroSanitario?.message} />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Precio de venta</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Precio de venta</label>
                 <Input
                   type="number"
                   step="0.01"
@@ -872,8 +787,8 @@ export function ProductosPage() {
                 <FieldError message={form.formState.errors.precioVenta?.message} />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Costo referencial</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Costo referencial</label>
                 <Input
                   type="number"
                   step="0.01"
@@ -881,29 +796,16 @@ export function ProductosPage() {
                 />
                 <FieldError message={form.formState.errors.costoReferencia?.message} />
               </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Descripción</label>
-                <Textarea
-                  {...form.register('descripcion')}
-                  placeholder="Detalle comercial o farmacéutico relevante"
-                  className="min-h-24"
-                />
-                <FieldError message={form.formState.errors.descripcion?.message} />
-              </div>
             </div>
 
-            <div className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2">
+            <div className="grid gap-3 rounded-xl border p-3 md:grid-cols-2">
               <Controller
                 control={form.control}
                 name="requiereReceta"
                 render={({ field }) => (
-                  <label className="flex items-center justify-between gap-4 rounded-xl border p-4">
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <div>
-                      <p className="font-medium text-foreground">Requiere receta</p>
-                      <p className="text-small text-muted-foreground">
-                        Activa reglas de dispensación y validación clínica.
-                      </p>
+                      <p className="text-sm font-medium text-foreground">Requiere receta</p>
                     </div>
                     <Switch checked={field.value} onCheckedChange={field.onChange} />
                   </label>
@@ -914,12 +816,9 @@ export function ProductosPage() {
                 control={form.control}
                 name="esControlado"
                 render={({ field }) => (
-                  <label className="flex items-center justify-between gap-4 rounded-xl border p-4">
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <div>
-                      <p className="font-medium text-foreground">Producto controlado</p>
-                      <p className="text-small text-muted-foreground">
-                        Marca el SKU para controles más estrictos y seguimiento.
-                      </p>
+                      <p className="text-sm font-medium text-foreground">Producto controlado</p>
                     </div>
                     <Switch checked={field.value} onCheckedChange={field.onChange} />
                   </label>
@@ -931,6 +830,7 @@ export function ProductosPage() {
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => {
                   setIsCreateDialogOpen(false)
                   form.reset(defaultFormValues)
@@ -939,17 +839,14 @@ export function ProductosPage() {
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting} size="sm">
                 {isSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Guardando...
                   </>
                 ) : (
-                  <>
-                    <PackagePlus className="h-4 w-4" />
-                    Guardar producto
-                  </>
+                  'Guardar producto'
                 )}
               </Button>
             </DialogFooter>
