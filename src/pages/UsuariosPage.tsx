@@ -1,8 +1,8 @@
-import { History, MonitorSmartphone, RefreshCcw, ShieldCheck, UserPlus, Users2 } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, History, MonitorSmartphone, RefreshCcw, ShieldCheck, UserPlus, Users2 } from 'lucide-react'
 import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { PermissionBadge } from '@/components/auth/PermissionBadge'
 import { RoleBadge } from '@/components/auth/RoleBadge'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,7 +26,6 @@ import {
   permissionModules,
   roleDefinitions,
 } from '@/config/authorization'
-import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
 import type { AuthPermission } from '@/types/auth'
 import {
@@ -61,95 +60,37 @@ function getSeverityVariant(severity: 'INFO' | 'WARNING' | 'CRITICAL') {
 }
 
 export function UsuariosPage() {
-  const { session } = useAuth()
   const { can, hasRole } = useAuthorization()
+  const [showSummary, setShowSummary] = useState(false)
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Usuarios" />
-
-      <div className="grid gap-6 lg:grid-cols-4">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Contexto de seguridad activo</CardTitle>
-            <CardDescription>
-              Resumen del usuario autenticado y del alcance cargado en esta sesión.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border bg-muted/20 p-4">
-                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                  Usuario
-                </p>
-                <p className="mt-2 text-base font-semibold text-foreground">
-                  {session?.user.fullName}
-                </p>
-                <p className="text-small text-muted-foreground">{session?.user.email}</p>
-              </div>
-              <div className="rounded-2xl border bg-muted/20 p-4">
-                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                  Roles
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {session?.user.roles.map((role) => <RoleBadge key={role} role={role} />)}
-                </div>
-              </div>
-              <div className="rounded-2xl border bg-muted/20 p-4">
-                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                  Permisos
-                </p>
-                <p className="mt-2 text-base font-semibold text-foreground">
-                  {session?.user.permissions.includes('*')
-                    ? 'Acceso total'
-                    : `${session?.user.permissions.length ?? 0} activos`}
-                </p>
-                <p className="text-small text-muted-foreground">{session?.user.branchName}</p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {session?.user.permissions.includes('*') ? (
-                <Badge variant="info">Wildcard `*` activo</Badge>
-              ) : (
-                permissionDefinitions
-                  .filter((permission) => session?.user.permissions.includes(permission.key))
-                  .map((permission) => (
-                    <PermissionBadge key={permission.key} permission={permission.key} />
-                  ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Usuarios</CardTitle>
-            <CardDescription>Personas con acceso al sistema.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-display text-foreground">{securityUsers.length}</p>
-            <p className="text-small text-muted-foreground">
-              {securityUsers.filter((user) => user.status === 'ACTIVO').length} activos
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Sesiones activas</CardTitle>
-            <CardDescription>Control de acceso por dispositivo.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-display text-foreground">
-              {securitySessions.filter((sessionItem) => sessionItem.status === 'ACTIVA').length}
-            </p>
-            <p className="text-small text-muted-foreground">
-              {auditRecords.length} eventos auditables recientes
-            </p>
-          </CardContent>
-        </Card>
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Usuarios</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
+        </Button>
       </div>
+
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <Users2 className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{securityUsers.length}</span>
+              <span className="text-xs text-muted-foreground">Usuarios</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <MonitorSmartphone className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{securitySessions.filter((s) => s.status === 'ACTIVA').length}</span>
+              <span className="text-xs text-muted-foreground">Sesiones</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Tabs defaultValue={can('usuarios.read') ? 'usuarios' : can('sesiones.read') ? 'sesiones' : 'auditoria'}>
         <TabsList className="grid w-full grid-cols-3 lg:w-fit">

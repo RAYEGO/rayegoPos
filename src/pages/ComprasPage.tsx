@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
+  ChevronDown,
   ClipboardCheck,
   CreditCard,
   FileSpreadsheet,
@@ -15,7 +16,6 @@ import {
   Trash2,
   Truck,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -273,6 +273,7 @@ export function ComprasPage() {
   const [orderReceiptDrafts, setOrderReceiptDrafts] = useState<OrderReceiptDraft[]>([])
   const [isOrderSummaryDialogOpen, setIsOrderSummaryDialogOpen] = useState(false)
   const [selectedSummaryOrderId, setSelectedSummaryOrderId] = useState<string | null>(null)
+  const [showSummary, setShowSummary] = useState(false)
 
   const form = useForm<CreatePurchaseFormValues>({
     resolver: zodResolver(createPurchaseSchema),
@@ -823,136 +824,40 @@ export function ComprasPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Compras" />
-
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Abastecimiento y recepcion</CardTitle>
-            <CardDescription>
-              Flujo de compras conectado a proveedores, recepcion por lote e impacto en inventario.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Ordenes activas
-              </p>
-              <p className="mt-2 text-display text-foreground">{purchaseMetrics.activeOrders}</p>
-              <p className="text-small text-muted-foreground">
-                en curso con proveedor
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Recepciones programadas
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {purchaseMetrics.scheduledReceipts}
-              </p>
-              <p className="text-small text-muted-foreground">
-                listas para ingreso por lote
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Observadas
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {purchaseMetrics.observedReceipts}
-              </p>
-              <p className="text-small text-muted-foreground">
-                requieren validacion operativa
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Monto comprometido
-              </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(purchaseMetrics.activeSpend)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                ordenes no anuladas
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Devuelto
-              </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(purchaseMetrics.returnedAmount)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                nota de credito operativa
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Neto compras
-              </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(purchaseMetrics.netSpend)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                despues de devoluciones
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Pagado
-              </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(purchaseMetrics.totalPaid)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                abonos a proveedor
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Cuentas por pagar
-              </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
-                {formatCurrency(purchaseMetrics.pendingPayables)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                saldo vivo pendiente
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Enlace con inventario</CardTitle>
-            <CardDescription>
-              Lo recibido en compras alimenta de inmediato los lotes y sus vencimientos.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Recepcion por lote</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                Cada ingreso queda listo para generar lote, fecha de vencimiento y prioridad FIFO.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Control sanitario</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                La recepcion puede marcar observaciones, cadena de frio y trazabilidad de proveedor.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Reposicion dirigida</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                El modulo prepara compras segun quiebres, vencimientos y cobertura por sucursal.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Compras</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
+        </Button>
       </div>
+
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{purchaseMetrics.activeOrders}</span>
+              <span className="text-xs text-muted-foreground">Ordenes activas</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <PackageCheck className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{purchaseMetrics.scheduledReceipts}</span>
+              <span className="text-xs text-muted-foreground">Recepciones</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <CreditCard className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{formatCurrency(purchaseMetrics.totalPaid)}</span>
+              <span className="text-xs text-muted-foreground">Pagado</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Tabs defaultValue="ordenes">
         <TabsList className="grid w-full grid-cols-4 lg:w-fit">

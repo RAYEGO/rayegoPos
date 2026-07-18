@@ -1,13 +1,14 @@
+import { useState } from 'react'
 import {
   Activity,
   AlertTriangle,
   Boxes,
+  ChevronDown,
   CreditCard,
   PackageSearch,
   ShoppingCart,
   Users,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -46,6 +47,7 @@ function formatPercent(value: number) {
 }
 
 export function DashboardPage() {
+  const [showSummary, setShowSummary] = useState(false)
   const emittedSales = recentSales.filter((sale) => sale.status === 'EMITIDA')
   const grossSales = emittedSales.reduce((sum, sale) => sum + sale.totalAmount, 0)
   const activePurchases = purchaseOrders.filter(
@@ -73,17 +75,40 @@ export function DashboardPage() {
     .slice(0, 4)
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Dashboard" />
-
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm">
-          Exportar corte ejecutivo
-        </Button>
-        <Button type="button" variant="outline" size="sm">
-          Revisar alertas criticas
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
         </Button>
       </div>
+
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{formatCurrency(grossSales)}</span>
+              <span className="text-xs text-muted-foreground">Ventas</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <Boxes className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{availableStock}</span>
+              <span className="text-xs text-muted-foreground">Stock</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{activeCustomers.length}</span>
+              <span className="text-xs text-muted-foreground">Clientes</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-4">
         <Card>

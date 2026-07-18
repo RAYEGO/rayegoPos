@@ -7,22 +7,20 @@ import {
   Loader2,
   Minus,
   Plus,
-  Receipt,
-  ScanSearch,
   Search,
-  ShieldPlus,
   ShoppingBasket,
   Trash2,
+  ChevronDown,
+  MoreVertical,
+  History,
+  Pill,
+  CircleDollarSign,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card'
 import {
   Dialog,
@@ -51,6 +49,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { salesService } from '@/services/salesService'
@@ -182,6 +181,12 @@ function clampQuantity(value: number, max: number) {
   }
 
   return Math.min(Math.max(1, value), Math.max(1, Math.floor(max)))
+}
+
+function getStockVariant(product: any) {
+  if (product.availableUnits === 0) return 'destructive'
+  if (product.availableUnits <= 20) return 'warning'
+  return 'success'
 }
 
 export function VentasPage() {
@@ -487,430 +492,481 @@ export function VentasPage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Ventas" />
+  const [showSummary, setShowSummary] = useState(true)
 
-      <div className="grid gap-6">
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>Resumen</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Items
-              </p>
-              <p className="mt-2 text-xl font-bold text-foreground">{cartMetrics.itemCount}</p>
-              <p className="text-xs text-muted-foreground hidden sm:block">
-                {cartMetrics.totalUnits} und
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Total
-              </p>
-              <p className="mt-2 text-lg font-semibold text-foreground">
-                {formatCurrency(cartMetrics.total)}
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Con receta
-              </p>
-              <p className="mt-2 text-xl font-bold text-foreground">
-                {dashboard?.summary?.prescriptionItemsCount ?? 0}
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Pendiente
-              </p>
-              <p className="mt-2 text-lg font-semibold text-foreground">
-                {formatCurrency(dashboard?.summary?.totalOutstandingAmount ?? 0)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Ventas</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown
+            className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`}
+          />
+        </Button>
       </div>
 
-      <Tabs defaultValue="mostrador">
-        <TabsList className="grid w-full grid-cols-3 lg:w-fit">
-          <TabsTrigger value="mostrador">Mostrador</TabsTrigger>
-          <TabsTrigger value="operaciones">Operaciones recientes</TabsTrigger>
-          <TabsTrigger value="dispensacion">Dispensación</TabsTrigger>
-        </TabsList>
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <ShoppingBasket className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{cartMetrics.itemCount}</span>
+              <span className="text-xs text-muted-foreground">Items</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <CreditCard className="h-4 w-4 text-primary" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">
+                {formatCurrency(cartMetrics.total)}
+              </span>
+              <span className="text-xs text-muted-foreground">Total</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <Pill className="h-4 w-4 text-warning" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">
+                {dashboard?.summary?.prescriptionItemsCount ?? 0}
+              </span>
+              <span className="text-xs text-muted-foreground">Con receta</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <CircleDollarSign className="h-4 w-4 text-info" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">
+                {formatCurrency(dashboard?.summary?.totalOutstandingAmount ?? 0)}
+              </span>
+              <span className="text-xs text-muted-foreground">Pendiente</span>
+            </div>
+          </div>
+        </div>
+      )}
 
-        <TabsContent value="mostrador" className="space-y-6">
-          <div className="grid gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ScanSearch className="h-5 w-5 text-primary" />
-                  Catálogo vendible
-                </CardTitle>
-                <CardDescription>
-                  Productos listos para salida inmediata según stock disponible por lote.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-[1fr_220px]">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Buscar por nombre o SKU"
-                      className="pl-9"
-                    />
-                  </div>
+      <Tabs defaultValue="mostrador" className="w-full">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="mostrador">Mostrador</TabsTrigger>
+            <TabsTrigger value="operaciones">Operaciones</TabsTrigger>
+            <TabsTrigger value="dispensacion">Dispensación</TabsTrigger>
+          </TabsList>
+        </div>
 
-                  <Select value={branchFilter} onValueChange={setBranchFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sucursal" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="TODAS">Todas las sucursales</SelectItem>
-                      {options.branches.map((branch) => (
-                        <SelectItem key={branch.id} value={branch.id}>
-                          {branch.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+        <TabsContent value="mostrador" className="space-y-4 pt-4">
+          <Card className="p-4">
+            <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Buscar por nombre o SKU"
+                  className="pl-9"
+                />
+              </div>
+              <Select value={branchFilter} onValueChange={setBranchFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sucursal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODAS">Todas</SelectItem>
+                  {options.branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </Card>
 
-                {isLoading ? (
-                  <div className="flex min-h-64 items-center justify-center rounded-2xl border border-dashed">
-                    <Loader className="h-10 w-10" />
-                  </div>
-                ) : error ? (
-                  <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-                    <p className="font-medium text-destructive">No pudimos cargar ventas</p>
-                    <p className="mt-1 text-small text-muted-foreground">{error}</p>
-                  </div>
-                ) : availableProducts.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-small text-muted-foreground">
-                    No hay productos con stock disponible para la sucursal o búsqueda actual.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {availableProducts.map((product) => {
-                      const cartEntry = cartItems.find((item) => item.productId === product.id)
-                      const remainingUnits = product.availableUnits - (cartEntry?.quantity ?? 0)
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader className="h-7 w-7" />
+            </div>
+          ) : error ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+              {error}
+            </div>
+          ) : availableProducts.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-8 text-center">
+              <p className="text-sm font-medium text-foreground">
+                No hay productos con stock disponible
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Ajusta la búsqueda o filtros
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {availableProducts.map((product) => {
+                const cartEntry = cartItems.find((item) => item.productId === product.id)
+                const remainingUnits = product.availableUnits - (cartEntry?.quantity ?? 0)
 
-                      return (
-                        <div key={product.id} className="rounded-2xl border p-4">
-                          <div className="flex flex-col gap-3">
-                            <div>
-                              <p className="font-medium text-foreground">{product.name}</p>
-                              <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
-                                <Badge variant="success">
-                                  Stock {product.availableUnits.toFixed(0)}
-                                </Badge>
-                                {product.requiresPrescription && <Badge variant="warning">R</Badge>}
-                                {product.isControlled && <Badge variant="destructive">C</Badge>}
-                                {product.coldChain && <Badge variant="info">❄️</Badge>}
-                              </div>
-                              <p className="mt-1 text-xs text-muted-foreground hidden sm:block">
-                                {product.sku} · {product.presentationName}
-                              </p>
-                            </div>
-
-                            <div className="rounded-2xl border bg-muted/20 p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-xs font-medium text-foreground">
-                                  Lote: {product.suggestedLot?.lotCode ?? 'N/A'}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  Vence: {formatDate(product.suggestedLot?.expiryDate ?? null)}
-                                </p>
-                              </div>
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="mt-3 w-full"
-                                onClick={() => addToCart(product)}
-                                disabled={!product.suggestedLot || remainingUnits <= 0}
-                              >
-                                Agregar
-                              </Button>
-                              {cartEntry && (
-                                <p className="mt-2 text-xs text-muted-foreground text-center">
-                                  En carrito: {cartEntry.quantity}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShoppingBasket className="h-5 w-5 text-primary" />
-                  Carrito actual
-                </CardTitle>
-                <CardDescription>
-                  Resumen en tiempo real para emitir la venta y disparar la dispensación.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {cartItems.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-small text-muted-foreground">
-                    El carrito está vacío. Agrega productos del catálogo para empezar.
-                  </div>
-                ) : (
-                  cartItems.map((item) => (
-                    <div key={item.productId} className="rounded-2xl border p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-medium text-foreground">{item.name}</p>
-                          <p className="mt-1 text-small text-muted-foreground">
-                            {item.sku} · {formatCurrency(item.salePrice)} c/u
-                          </p>
-                          <p className="text-small text-muted-foreground">
-                            FIFO {item.suggestedLotCode} · vence{' '}
-                            {formatDate(item.suggestedLotExpiryDate)}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {item.requiresPrescription ? (
-                              <Badge variant="warning">Receta</Badge>
-                            ) : null}
-                            {item.isControlled ? (
-                              <Badge variant="destructive">Controlado</Badge>
-                            ) : null}
-                            {item.coldChain ? <Badge variant="info">Frío</Badge> : null}
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <p className="font-medium text-foreground">
-                            {formatCurrency(item.quantity * item.salePrice)}
-                          </p>
-                          <p className="text-small text-muted-foreground">
-                            stock {item.availableUnits.toFixed(0)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
-                          >
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                          <Input
-                            type="number"
-                            min={1}
-                            max={Math.max(1, Math.floor(item.availableUnits))}
-                            value={item.quantity}
-                            onChange={(event) =>
-                              updateCartQuantity(
-                                item.productId,
-                                Number(event.target.value || item.quantity),
-                              )
-                            }
-                            className="w-24"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
-                            disabled={item.quantity >= Math.floor(item.availableUnits)}
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
-
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeFromCart(item.productId)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Quitar
-                        </Button>
+                return (
+                  <Card key={product.id} className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate">{product.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{product.sku}</p>
                       </div>
                     </div>
-                  ))
-                )}
 
-                <div className="rounded-2xl border bg-muted/20 p-4">
+                    <div className="mt-3 flex flex-wrap gap-2 items-center">
+                      <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
+                      <Badge variant={getStockVariant(product)}>
+                        {product.availableUnits.toFixed(0)} {product.unitSymbol}
+                      </Badge>
+                      {product.requiresPrescription && <Badge variant="warning">R</Badge>}
+                      {product.isControlled && <Badge variant="destructive">C</Badge>}
+                      {product.coldChain && <Badge variant="info">❄️</Badge>}
+                    </div>
+
+                    {product.suggestedLot && (
+                      <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium text-foreground">
+                            Lote: {product.suggestedLot.lotCode}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Vence: {formatDate(product.suggestedLot.expiryDate)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => addToCart(product)}
+                        disabled={!product.suggestedLot || remainingUnits <= 0}
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        {cartEntry ? `Agregar (${cartEntry.quantity})` : 'Agregar'}
+                      </Button>
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+
+          {cartItems.length > 0 && (
+            <Card className="p-4">
+              <h3 className="font-medium text-foreground mb-3">Carrito</h3>
+              <div className="space-y-3">
+                {cartItems.map((item) => (
+                  <div key={item.productId} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate">{item.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatCurrency(item.salePrice)} / {item.unitSymbol}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium text-foreground">
+                          {formatCurrency(item.quantity * item.salePrice)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={Math.max(1, Math.floor(item.availableUnits))}
+                          value={item.quantity}
+                          onChange={(event) =>
+                            updateCartQuantity(
+                              item.productId,
+                              Number(event.target.value || item.quantity),
+                            )
+                          }
+                          className="w-16 h-8 text-center"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
+                          disabled={item.quantity >= Math.floor(item.availableUnits)}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFromCart(item.productId)}
+                        className="h-8 px-2"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+
+                <div className="rounded-lg border bg-muted/20 p-3 mt-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-small text-muted-foreground">Subtotal</span>
-                    <span className="font-medium text-foreground">
-                      {formatCurrency(cartMetrics.subtotal)}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-small text-muted-foreground">Con receta</span>
-                    <span className="font-medium text-foreground">
-                      {cartMetrics.prescriptionItems}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-small text-muted-foreground">Controlados</span>
-                    <span className="font-medium text-foreground">
-                      {cartMetrics.controlledItems}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between border-t pt-3">
-                    <span className="font-medium text-foreground">Total</span>
-                    <span className="text-base font-semibold text-foreground">
+                    <span className="text-sm text-muted-foreground">Total</span>
+                    <span className="text-lg font-semibold text-foreground">
                       {formatCurrency(cartMetrics.total)}
                     </span>
                   </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCartItems([])}
+                      className="flex-1"
+                    >
+                      Vaciar
+                    </Button>
+                    <Button type="button" size="sm" onClick={openCheckoutDialog} className="flex-1">
+                      <CreditCard className="h-4 w-4 mr-1" />
+                      Cobrar
+                    </Button>
+                  </div>
                 </div>
-
-                <div className="grid gap-2 md:grid-cols-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCartItems([])}
-                    disabled={cartItems.length === 0}
-                  >
-                    Vaciar carrito
-                  </Button>
-                  <Button type="button" onClick={openCheckoutDialog} disabled={!cartItems.length}>
-                    <CreditCard className="h-4 w-4" />
-                    Cobrar ahora
-                  </Button>
-                </div>
-              </CardContent>
+              </div>
             </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="operaciones" className="space-y-4 pt-4">
+          {/* Mobile Cards View */}
+          <div className="md:hidden space-y-3">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : recentSales.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No hay ventas recientes
+                </p>
+              </div>
+            ) : (
+              recentSales.map((sale) => (
+                <Card key={sale.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground truncate">{sale.code}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {formatDateTime(sale.createdAt)}
+                      </p>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem>
+                          <History className="h-4 w-4 mr-2" />
+                          Ver detalles
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 items-center">
+                    <Badge variant={getSaleStatusVariant(sale.status)}>{sale.status}</Badge>
+                    <p className="font-medium text-sm text-foreground">
+                      {formatCurrency(sale.totalAmount)}
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {sale.customerName} · {sale.itemCount} items
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {sale.paymentMethods.map((method) => (
+                      <Badge key={method} variant={getPaymentVariant(method)} className="text-xs">
+                        {method}
+                      </Badge>
+                    ))}
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : recentSales.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No hay ventas recientes
+                </p>
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Comprobante</TableHead>
+                        <TableHead className="hidden lg:table-cell">Cliente</TableHead>
+                        <TableHead className="hidden md:table-cell">Cajero</TableHead>
+                        <TableHead className="hidden md:table-cell">Fecha</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead className="hidden lg:table-cell">Pagos</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="w-[80px] text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recentSales.map((sale) => (
+                        <TableRow key={sale.id}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{sale.code}</p>
+                              <p className="text-xs text-muted-foreground hidden sm:block">
+                                {sale.itemCount} items
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell text-muted-foreground">
+                            {sale.customerName}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-muted-foreground">
+                            {sale.cashierName}
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-muted-foreground">
+                            {formatDateTime(sale.createdAt)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">
+                                {formatCurrency(sale.totalAmount)}
+                              </p>
+                              {sale.outstandingAmount > 0 ? (
+                                <p className="text-xs text-amber-700">
+                                  saldo {formatCurrency(sale.outstandingAmount)}
+                                </p>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            <div className="flex flex-wrap gap-1">
+                              {sale.paymentMethods.map((method) => (
+                                <Badge key={method} variant={getPaymentVariant(method)} className="text-xs">
+                                  {method}
+                                </Badge>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getSaleStatusVariant(sale.status)}>{sale.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem>
+                                  <History className="h-4 w-4 mr-2" />
+                                  Ver detalles
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 
-        <TabsContent value="operaciones" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Receipt className="h-5 w-5 text-primary" />
-                Ventas recientes
-              </CardTitle>
-              <CardDescription>
-                Historial operativo con cobro, estado de saldo y medios de pago usados.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="flex min-h-40 items-center justify-center">
-                  <Loader className="h-10 w-10" />
-                </div>
-              ) : recentSales.length === 0 ? (
-                <div className="rounded-2xl border border-dashed p-8 text-center text-small text-muted-foreground">
-                  Aún no hay ventas registradas para mostrar.
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Comprobante</TableHead>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Cajero</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Pagos</TableHead>
-                      <TableHead>Estado</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentSales.map((sale) => (
-                      <TableRow key={sale.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{sale.code}</p>
-                            <p className="text-small text-muted-foreground">
-                              {sale.itemCount} items · {sale.branchName}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {sale.customerName}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {sale.cashierName}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDateTime(sale.createdAt)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">
-                              {formatCurrency(sale.totalAmount)}
-                            </p>
-                            {sale.outstandingAmount > 0 ? (
-                              <p className="text-small text-amber-700">
-                                saldo {formatCurrency(sale.outstandingAmount)}
-                              </p>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-2">
-                            {sale.paymentMethods.map((method) => (
-                              <Badge key={`${sale.id}-${method}`} variant={getPaymentVariant(method)}>
-                                {method}
-                              </Badge>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getSaleStatusVariant(sale.status)}>{sale.status}</Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <TabsContent value="dispensacion" className="space-y-4 pt-4">
+          {/* Mobile Cards View */}
+          <div className="md:hidden space-y-3">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : dispensations.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No hay dispensaciones registradas
+                </p>
+              </div>
+            ) : (
+              dispensations.map((record) => (
+                <Card key={record.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground truncate">{record.productName}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Venta: {record.saleCode}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 items-center">
+                    <Badge variant="success">{record.status}</Badge>
+                    {record.isControlled && <Badge variant="destructive">Controlado</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Cliente: {record.customerName} · Lotes: {record.lotCodes.join(', ')}
+                  </p>
+                </Card>
+              ))
+            )}
+          </div>
 
-        <TabsContent value="dispensacion" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldPlus className="h-5 w-5 text-primary" />
-                  Control de dispensación
-                </CardTitle>
-                <CardDescription>
-                  Trazabilidad de ventas sensibles con cliente, lote y responsable.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="flex min-h-40 items-center justify-center">
-                    <Loader className="h-10 w-10" />
-                  </div>
-                ) : dispensations.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-small text-muted-foreground">
-                    Aún no hay dispensaciones sensibles registradas.
-                  </div>
-                ) : (
+          {/* Desktop Table View */}
+          <div className="hidden md:block">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : dispensations.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No hay dispensaciones registradas
+                </p>
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-0">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Venta</TableHead>
                         <TableHead>Producto</TableHead>
-                        <TableHead>Cliente</TableHead>
-                        <TableHead>Responsable</TableHead>
-                        <TableHead>Lotes</TableHead>
-                        <TableHead>Fecha</TableHead>
+                        <TableHead className="hidden lg:table-cell">Cliente</TableHead>
+                        <TableHead className="hidden md:table-cell">Responsable</TableHead>
+                        <TableHead className="hidden lg:table-cell">Lotes</TableHead>
+                        <TableHead className="hidden md:table-cell">Fecha</TableHead>
                         <TableHead>Estado</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -920,7 +976,7 @@ export function VentasPage() {
                           <TableCell>
                             <div className="space-y-1">
                               <p className="font-medium text-foreground">{record.saleCode}</p>
-                              <p className="text-small text-muted-foreground">
+                              <p className="text-xs text-muted-foreground">
                                 {record.requiresPrescription ? 'Con receta' : 'Controlado'}
                               </p>
                             </div>
@@ -928,71 +984,31 @@ export function VentasPage() {
                           <TableCell className="font-medium text-foreground">
                             {record.productName}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="hidden lg:table-cell text-muted-foreground">
                             {record.customerName}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="hidden md:table-cell text-muted-foreground">
                             {record.cashierName}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="hidden lg:table-cell text-muted-foreground">
                             {record.lotCodes.join(', ')}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="hidden md:table-cell text-muted-foreground">
                             {formatDateTime(record.dispensedAt)}
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-1">
                               <Badge variant="success">{record.status}</Badge>
-                              {record.isControlled ? (
-                                <Badge variant="destructive">Controlado</Badge>
-                              ) : null}
+                              {record.isControlled && <Badge variant="destructive">Controlado</Badge>}
                             </div>
                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Lectura operativa</CardTitle>
-                <CardDescription>
-                  Resumen rápido del comportamiento comercial y sanitario del mostrador.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Total facturado reciente</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Ventas registradas en el tablero actual de operaciones.
-                  </p>
-                  <p className="mt-3 text-base font-semibold text-foreground">
-                    {formatCurrency(dashboard?.summary?.totalBilledAmount ?? 0)}
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Ventas cobradas</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Operaciones cerradas sin saldo pendiente para el cliente.
-                  </p>
-                  <p className="mt-3 text-base font-semibold text-foreground">
-                    {dashboard?.summary?.paidSalesCount ?? 0}
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium text-foreground">Items controlados</p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    Dispensaciones que requieren trazabilidad reforzada.
-                  </p>
-                  <p className="mt-3 text-base font-semibold text-foreground">
-                    {dashboard?.summary?.controlledItemsCount ?? 0}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
       </Tabs>

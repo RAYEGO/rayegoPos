@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Boxes,
+  ChevronDown,
   History,
   Loader2,
   PackagePlus,
@@ -14,7 +15,6 @@ import {
   SlidersHorizontal,
   TriangleAlert,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -326,6 +326,7 @@ export function InventarioPage() {
   const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false)
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false)
   const [isMutating, setIsMutating] = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
 
   const createForm = useForm<CreateLotFormValues>({
     resolver: zodResolver(createLotSchema),
@@ -579,90 +580,67 @@ export function InventarioPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Inventario" />
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Inventario</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
+        </Button>
+      </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Inventario vivo por lotes</CardTitle>
-            <CardDescription>
-              Control real de lotes, vencimiento, costo y disponibilidad por sucursal y almacén.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Disponible
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {formatQuantity(dashboard.summary.totalAvailableUnits)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                unidades listas para venta
-              </p>
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <Boxes className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{formatQuantity(dashboard.summary.totalAvailableUnits)}</span>
+              <span className="text-xs text-muted-foreground">Disponible</span>
             </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Reservado
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {formatQuantity(dashboard.summary.totalReservedUnits)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                comprometido para operación
-              </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{formatQuantity(dashboard.summary.totalReservedUnits)}</span>
+              <span className="text-xs text-muted-foreground">Reservado</span>
             </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Bloqueado
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {formatQuantity(dashboard.summary.totalBlockedUnits)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                retenido para revisión interna
-              </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{formatQuantity(dashboard.summary.totalBlockedUnits)}</span>
+              <span className="text-xs text-muted-foreground">Bloqueado</span>
             </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Por vencer
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {dashboard.summary.expiringSoonCount}
-              </p>
-              <p className="text-small text-muted-foreground">
-                lotes que piden salida prioritaria
-              </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <TriangleAlert className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{dashboard.summary.expiringSoonCount}</span>
+              <span className="text-xs text-muted-foreground">Por vencer</span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+      )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Vista por sucursal</CardTitle>
-            <CardDescription>
-              Cobertura consolidada antes de transferencias, compras o rebalanceo.
-            </CardDescription>
+      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+        <Card className="hidden xl:block">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Vista por sucursal</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2">
             {dashboard.branchSummary.length === 0 ? (
-              <div className="rounded-2xl border border-dashed p-6 text-small text-muted-foreground">
+              <div className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
                 Aún no hay sucursales con lotes cargados.
               </div>
             ) : (
               dashboard.branchSummary.map((branch) => (
-                <div key={branch.id} className="rounded-2xl border p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <p className="font-medium text-foreground">{branch.name}</p>
-                    <Badge variant="outline">{branch.lotCount} lotes</Badge>
+                <div key={branch.id} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">{branch.name}</p>
+                    <Badge variant="outline" className="text-xs">{branch.lotCount} lotes</Badge>
                   </div>
-                  <p className="mt-2 text-small text-muted-foreground">
-                    {branch.skuCount} SKU · {formatQuantity(branch.availableUnits)} disponibles ·{' '}
-                    {formatQuantity(branch.blockedUnits)} bloqueados
-                  </p>
-                  <p className="mt-1 text-small text-muted-foreground">
-                    {branch.warehouseNames.join(', ') || 'Sin almacén definido'}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {branch.skuCount} SKU · {formatQuantity(branch.availableUnits)} disp.
                   </p>
                 </div>
               ))

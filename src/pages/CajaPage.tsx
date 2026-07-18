@@ -3,21 +3,22 @@ import {
   CircleDollarSign,
   HandCoins,
   WalletCards,
+  ChevronDown,
+  MoreVertical,
+  Edit,
+  History,
+  Trash2,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { z } from 'zod'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card'
 import {
   Dialog,
@@ -46,6 +47,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { cashierService } from '@/services/cashierService'
 import type {
@@ -113,6 +115,7 @@ export function CajaPage() {
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showSummary, setShowSummary] = useState(true)
 
   // Dialog state
   const [openDrawerDialogOpen, setOpenDrawerDialogOpen] = useState(false)
@@ -253,189 +256,301 @@ export function CajaPage() {
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
         <p className="font-medium text-destructive">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Caja" />
-
-      <div className="grid gap-6">
-        <Card>
-          <CardHeader className="pb-4">
-            <CardTitle>Resumen de turno</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Caja
-              </p>
-              <p className="mt-2 text-lg font-semibold text-foreground">
-                {activeDrawer?.code ?? '-'}
-              </p>
-              <p className="text-xs text-muted-foreground hidden sm:block">{activeDrawer?.branchName ?? '-'}</p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Ventas
-              </p>
-              <p className="mt-2 text-lg font-semibold text-foreground">
-                {formatCurrency(dashboardTotals.totalSales)}
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Movimientos
-              </p>
-              <p className="mt-2 text-lg font-semibold text-foreground">
-                {formatCurrency(dashboardTotals.totalInternalMovements)}
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                Pendiente
-              </p>
-              <p className="mt-2 text-lg font-semibold text-foreground">
-                {formatCurrency(dashboardTotals.pendingCollections)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Caja</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown
+            className={`ml-1 h-4 w-4 transition-transform ${
+              showSummary ? 'rotate-180' : ''
+            }`}
+          />
+        </Button>
       </div>
 
-      <Tabs defaultValue="turnos">
-        <TabsList className="grid w-full grid-cols-3 lg:w-fit">
-          <TabsTrigger value="turnos">Turnos</TabsTrigger>
-          <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
-          <TabsTrigger value="conciliacion">Conciliacion</TabsTrigger>
-        </TabsList>
+      {/* KPIs Section (Collapsible on Mobile) */}
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <WalletCards className="h-4 w-4 text-primary" />
+            <div className="flex flex-col">
+              <p className="text-lg font-bold text-foreground">{activeDrawer?.code ?? '-'}</p>
+              <p className="text-xs text-muted-foreground">Caja</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <HandCoins className="h-4 w-4 text-success" />
+            <div className="flex flex-col">
+              <p className="text-lg font-bold text-foreground">{formatCurrency(dashboardTotals.totalSales)}</p>
+              <p className="text-xs text-muted-foreground">Ventas</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <BadgeDollarSign className="h-4 w-4 text-info" />
+            <div className="flex flex-col">
+              <p className="text-lg font-bold text-foreground">{formatCurrency(dashboardTotals.totalInternalMovements)}</p>
+              <p className="text-xs text-muted-foreground">Movimientos</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <CircleDollarSign className="h-4 w-4 text-warning" />
+            <div className="flex flex-col">
+              <p className="text-lg font-bold text-foreground">{formatCurrency(dashboardTotals.pendingCollections)}</p>
+              <p className="text-xs text-muted-foreground">Pendiente</p>
+            </div>
+          </div>
+        </div>
+      )}
 
-        <TabsContent value="turnos" className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <WalletCards className="h-5 w-5 text-primary" />
-                  Apertura y cierre de caja
-                </CardTitle>
-                <CardDescription>
-                  Seguimiento del turno por sucursal, operador y resultado de cuadre.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setOpenDrawerDialogOpen(true)}
-                >
-                  <HandCoins className="h-4 w-4" />
-                  Registrar fondo
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!activeDrawer || activeDrawer.status === 'CERRADA'}
-                  onClick={() => {
-                    if (activeDrawer) {
-                      closeDrawerForm.setValue('openingId', activeDrawer.id)
-                      closeDrawerForm.setValue('countedAmount', activeDrawer.expectedAmount)
-                      setCloseDrawerDialogOpen(true)
-                    }
-                  }}
-                >
-                  Cerrar turno
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Caja</TableHead>
-                    <TableHead>Sucursal</TableHead>
-                    <TableHead>Responsable</TableHead>
-                    <TableHead>Apertura</TableHead>
-                    <TableHead>Esperado</TableHead>
-                    <TableHead>Contado</TableHead>
-                    <TableHead>Estado</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {cashDrawers.map((drawer) => (
-                    <TableRow key={drawer.id}>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <p className="font-medium text-foreground">{drawer.code}</p>
-                          <p className="text-small text-muted-foreground">
-                            fondo {formatCurrency(drawer.openingAmount)}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {drawer.branchName}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {drawer.cashierName}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {drawer.openedAt}
-                      </TableCell>
-                      <TableCell className="font-medium text-foreground">
-                        {formatCurrency(drawer.expectedAmount)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <p className="font-medium text-foreground">
-                            {formatCurrency(drawer.countedAmount)}
-                          </p>
-                          <p className="text-small text-muted-foreground">
-                            dif. {formatCurrency(drawer.differenceAmount)}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getDrawerStatusVariant(drawer.status)}>
-                          {drawer.status}
-                        </Badge>
-                      </TableCell>
+      <Tabs defaultValue="turnos" className="w-full">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="turnos">Turnos</TabsTrigger>
+            <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
+            <TabsTrigger value="conciliacion">Conciliacion</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="turnos" className="space-y-4 pt-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setOpenDrawerDialogOpen(true)}
+            >
+              <HandCoins className="h-4 w-4 mr-1" />
+              Registrar fondo
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!activeDrawer || activeDrawer.status === 'CERRADA'}
+              onClick={() => {
+                if (activeDrawer) {
+                  closeDrawerForm.setValue('openingId', activeDrawer.id)
+                  closeDrawerForm.setValue('countedAmount', activeDrawer.expectedAmount)
+                  setCloseDrawerDialogOpen(true)
+                }
+              }}
+            >
+              Cerrar turno
+            </Button>
+          </div>
+
+          {/* Mobile Cards View */}
+          <div className="md:hidden space-y-3">
+            {cashDrawers.map((drawer) => (
+              <Card key={drawer.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between">
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate">{drawer.code}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {drawer.branchName}
+                        </p>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <History className="h-4 w-4 mr-2" />
+                            Historial
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="text-destructive">
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 items-center">
+                      <Badge variant={getDrawerStatusVariant(drawer.status)}>
+                        {drawer.status}
+                      </Badge>
+                      <p className="text-sm text-muted-foreground">
+                        {formatCurrency(drawer.openingAmount)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Desktop/Tablet Table View */}
+          <div className="hidden md:block">
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Caja</TableHead>
+                      <TableHead className="hidden lg:table-cell">Sucursal</TableHead>
+                      <TableHead className="hidden lg:table-cell">Responsable</TableHead>
+                      <TableHead className="hidden md:table-cell">Apertura</TableHead>
+                      <TableHead>Esperado</TableHead>
+                      <TableHead className="hidden md:table-cell">Contado</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="w-[80px] text-right">Acciones</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {cashDrawers.map((drawer) => (
+                      <TableRow key={drawer.id}>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="font-medium text-foreground">{drawer.code}</p>
+                            <p className="text-xs text-muted-foreground">
+                              fondo {formatCurrency(drawer.openingAmount)}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-muted-foreground">
+                          {drawer.branchName}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-muted-foreground">
+                          {drawer.cashierName}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-muted-foreground">
+                          {drawer.openedAt}
+                        </TableCell>
+                        <TableCell className="font-medium text-foreground">
+                          {formatCurrency(drawer.expectedAmount)}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <div className="space-y-1">
+                            <p className="font-medium text-foreground">
+                              {formatCurrency(drawer.countedAmount)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              dif. {formatCurrency(drawer.differenceAmount)}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getDrawerStatusVariant(drawer.status)}>
+                            {drawer.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <History className="h-4 w-4 mr-2" />
+                                Historial
+                              </DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive">
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Eliminar
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
-        <TabsContent value="movimientos" className="space-y-6">
-          <div className="grid gap-6">
-            <Card>
-              <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <BadgeDollarSign className="h-5 w-5 text-primary" />
-                    Movimientos
-                  </CardTitle>
+        <TabsContent value="movimientos" className="space-y-4 pt-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!activeDrawer || activeDrawer.status === 'CERRADA'}
+              onClick={() => {
+                if (activeDrawer) {
+                  createMovementForm.setValue('openingId', activeDrawer.id)
+                  setCreateMovementDialogOpen(true)
+                }
+              }}
+            >
+              <HandCoins className="h-4 w-4 mr-1" />
+              Nuevo movimiento
+            </Button>
+          </div>
+
+          {/* Mobile Cards View */}
+          <div className="md:hidden space-y-3">
+            {cashMovements.map((movement) => (
+              <Card key={movement.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between">
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate">{movement.description}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {movement.createdAt}
+                        </p>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <History className="h-4 w-4 mr-2" />
+                            Historial
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="text-destructive">
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 items-center">
+                      <Badge variant={getMovementVariant(movement.type)}>
+                        {movement.type}
+                      </Badge>
+                      <p className="font-medium text-sm text-foreground">{formatCurrency(movement.amount)}</p>
+                    </div>
+                  </div>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={!activeDrawer || activeDrawer.status === 'CERRADA'}
-                  onClick={() => {
-                    if (activeDrawer) {
-                      createMovementForm.setValue('openingId', activeDrawer.id)
-                      setCreateMovementDialogOpen(true)
-                    }
-                  }}
-                >
-                  <HandCoins className="h-4 w-4" />
-                  Nuevo movimiento
-                </Button>
-              </CardHeader>
-              <CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Desktop/Tablet Table View */}
+          <div className="hidden md:block">
+            <Card>
+              <CardContent className="p-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -443,8 +558,9 @@ export function CajaPage() {
                       <TableHead>Tipo</TableHead>
                       <TableHead>Detalle</TableHead>
                       <TableHead className="hidden md:table-cell">Referencia</TableHead>
-                      <TableHead className="hidden md:table-cell">Medio</TableHead>
+                      <TableHead className="hidden lg:table-cell">Medio</TableHead>
                       <TableHead>Monto</TableHead>
+                      <TableHead className="w-[80px] text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -469,13 +585,36 @@ export function CajaPage() {
                         <TableCell className="hidden md:table-cell text-muted-foreground">
                           {movement.reference}
                         </TableCell>
-                        <TableCell className="hidden md:table-cell">
+                        <TableCell className="hidden lg:table-cell">
                           <Badge variant={movement.paymentMethod === 'INTERNO' ? 'outline' : 'info'}>
                             {movement.paymentMethod}
                           </Badge>
                         </TableCell>
                         <TableCell className="font-medium text-foreground">
                           {formatCurrency(movement.amount)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <History className="h-4 w-4 mr-2" />
+                                Historial
+                              </DropdownMenuItem>
+                              <DropdownMenuItem className="text-destructive">
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Eliminar
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -486,23 +625,49 @@ export function CajaPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="conciliacion" className="space-y-6">
-          <div className="grid gap-6">
+        <TabsContent value="conciliacion" className="space-y-4 pt-4">
+          {/* Mobile Cards View */}
+          <div className="md:hidden space-y-3">
+            {cashPaymentSummary.map((row) => {
+              const difference = row.collectedAmount - row.salesAmount
+
+              return (
+                <Card key={row.method} className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between">
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground truncate">{row.method}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {row.operations} operaciones
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 items-center">
+                        <p className="text-sm text-muted-foreground">Ventas: {formatCurrency(row.salesAmount)}</p>
+                        <p className="text-sm text-muted-foreground">Cobrado: {formatCurrency(row.collectedAmount)}</p>
+                        <Badge variant={difference === 0 ? 'success' : 'warning'}>
+                          {formatCurrency(difference)}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+
+          {/* Desktop/Tablet Table View */}
+          <div className="hidden md:block">
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CircleDollarSign className="h-5 w-5 text-primary" />
-                  Conciliación
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+              <CardContent className="p-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Medio</TableHead>
                       <TableHead>Ventas</TableHead>
                       <TableHead>Cobrado</TableHead>
-                      <TableHead className="hidden md:table-cell">Operaciones</TableHead>
+                      <TableHead className="hidden lg:table-cell">Operaciones</TableHead>
                       <TableHead>Resultado</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -521,7 +686,7 @@ export function CajaPage() {
                           <TableCell className="font-medium text-foreground">
                             {formatCurrency(row.collectedAmount)}
                           </TableCell>
-                          <TableCell className="hidden md:table-cell text-muted-foreground">
+                          <TableCell className="hidden lg:table-cell text-muted-foreground">
                             {row.operations}
                           </TableCell>
                           <TableCell>
@@ -555,7 +720,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="branchId"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Sucursal
               </label>
@@ -575,7 +740,7 @@ export function CajaPage() {
                 </SelectContent>
               </Select>
               {openDrawerForm.formState.errors.branchId ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {openDrawerForm.formState.errors.branchId.message}
                 </p>
               ) : null}
@@ -584,7 +749,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="openingAmount"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Monto de apertura
               </label>
@@ -597,7 +762,7 @@ export function CajaPage() {
                 })}
               />
               {openDrawerForm.formState.errors.openingAmount ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {openDrawerForm.formState.errors.openingAmount.message}
                 </p>
               ) : null}
@@ -606,7 +771,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="observations"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Observaciones (opcional)
               </label>
@@ -621,15 +786,16 @@ export function CajaPage() {
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => setOpenDrawerDialogOpen(false)}
                 disabled={isSubmitting}
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting} size="sm">
                 {isSubmitting ? (
                   <>
-                    <Loader className="h-4 w-4 text-current" />
+                    <Loader className="h-4 w-4 text-current mr-2" />
                     Guardando...
                   </>
                 ) : (
@@ -654,7 +820,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="openingId"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Apertura de caja
               </label>
@@ -676,7 +842,7 @@ export function CajaPage() {
                 </SelectContent>
               </Select>
               {closeDrawerForm.formState.errors.openingId ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {closeDrawerForm.formState.errors.openingId.message}
                 </p>
               ) : null}
@@ -685,7 +851,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="countedAmount"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Monto contado
               </label>
@@ -698,7 +864,7 @@ export function CajaPage() {
                 })}
               />
               {closeDrawerForm.formState.errors.countedAmount ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {closeDrawerForm.formState.errors.countedAmount.message}
                 </p>
               ) : null}
@@ -707,7 +873,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="observations"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Observaciones (opcional)
               </label>
@@ -722,15 +888,16 @@ export function CajaPage() {
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => setCloseDrawerDialogOpen(false)}
                 disabled={isSubmitting}
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting} size="sm">
                 {isSubmitting ? (
                   <>
-                    <Loader className="h-4 w-4 text-current" />
+                    <Loader className="h-4 w-4 text-current mr-2" />
                     Guardando...
                   </>
                 ) : (
@@ -755,7 +922,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="openingId"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Apertura de caja
               </label>
@@ -777,7 +944,7 @@ export function CajaPage() {
                 </SelectContent>
               </Select>
               {createMovementForm.formState.errors.openingId ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {createMovementForm.formState.errors.openingId.message}
                 </p>
               ) : null}
@@ -786,7 +953,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="type"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Tipo de movimiento
               </label>
@@ -807,7 +974,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="amount"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Monto
               </label>
@@ -820,7 +987,7 @@ export function CajaPage() {
                 })}
               />
               {createMovementForm.formState.errors.amount ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {createMovementForm.formState.errors.amount.message}
                 </p>
               ) : null}
@@ -829,7 +996,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="concept"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Concepto
               </label>
@@ -839,7 +1006,7 @@ export function CajaPage() {
                 {...createMovementForm.register('concept')}
               />
               {createMovementForm.formState.errors.concept ? (
-                <p className="text-caption text-destructive">
+                <p className="text-xs text-destructive">
                   {createMovementForm.formState.errors.concept.message}
                 </p>
               ) : null}
@@ -848,7 +1015,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="reference"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Referencia (opcional)
               </label>
@@ -862,7 +1029,7 @@ export function CajaPage() {
             <div className="space-y-2">
               <label
                 htmlFor="observations"
-                className="text-small font-medium text-foreground"
+                className="text-xs font-medium text-foreground"
               >
                 Observaciones (opcional)
               </label>
@@ -877,15 +1044,16 @@ export function CajaPage() {
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 onClick={() => setCreateMovementDialogOpen(false)}
                 disabled={isSubmitting}
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting} size="sm">
                 {isSubmitting ? (
                   <>
-                    <Loader className="h-4 w-4 text-current" />
+                    <Loader className="h-4 w-4 text-current mr-2" />
                     Guardando...
                   </>
                 ) : (

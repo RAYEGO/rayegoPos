@@ -1,12 +1,12 @@
+import { useState } from 'react'
 import {
   BarChart3,
-  FileSpreadsheet,
+  ChevronDown,
   LineChart,
   PackageOpen,
   ReceiptText,
   Truck,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -42,6 +42,7 @@ function formatCurrency(value: number) {
 }
 
 export function ReportesPage() {
+  const [showSummary, setShowSummary] = useState(false)
   const salesByCustomer = [...recentSales]
     .filter((sale) => sale.status === 'EMITIDA')
     .sort((left, right) => right.totalAmount - left.totalAmount)
@@ -83,19 +84,39 @@ export function ReportesPage() {
         customerRecords.length
       : 0
 
-  return (
-    <div className="space-y-6">
-      <PageHeader title="Reportes" />
+  const totalSales = recentSales
+    .filter((sale) => sale.status === 'EMITIDA')
+    .reduce((sum, sale) => sum + sale.totalAmount, 0)
+  const totalStock = inventoryLots.reduce((sum, lot) => sum + lot.availableUnits, 0)
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm">
-          <FileSpreadsheet className="h-4 w-4" />
-          Exportar reporte
-        </Button>
-        <Button type="button" variant="outline" size="sm">
-          Actualizar indicadores
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-foreground">Reportes</h1>
+        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+          Resumen
+          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
         </Button>
       </div>
+
+      {showSummary && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{formatCurrency(totalSales)}</span>
+              <span className="text-xs text-muted-foreground">Ventas</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <PackageOpen className="h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{totalStock}</span>
+              <span className="text-xs text-muted-foreground">Stock</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-4">
         <Card>
