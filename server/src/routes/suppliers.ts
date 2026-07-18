@@ -1,80 +1,55 @@
-
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import type { FastifyRequest } from 'fastify/types/request';
-import type { FastifyReply } from 'fastify/types/reply';
-import type { TipoDocumentoIdentidad, TipoPersona } from '@prisma/client';
-
+import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+import { TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
 import {
   getSuppliersDashboard,
   createSupplier,
   updateSupplier,
   deleteSupplier,
-} from '../modules/suppliers/suppliers.service.js';
+} from '../modules/suppliers/suppliers.service.js'
 
-type GetSuppliersQueryParams = {
-  search?: string;
-  status?: 'activo' | 'inactivo';
-};
+const getSuppliersQuerySchema = z.object({
+  search: z.string().optional(),
+  status: z.enum(['activo', 'inactivo']).optional(),
+})
 
-type CreateSupplierBody = {
-  tipoPersona?: TipoPersona;
-  tipoDocumento?: TipoDocumentoIdentidad;
-  numeroDocumento: string;
-  razonSocial: string;
-  nombreComercial?: string;
-  contactoNombre?: string;
-  contactoTelefono?: string;
-  email?: string;
-  direccion?: string;
-  ubigeo?: string;
-  observaciones?: string;
-};
+const createSupplierSchema = z.object({
+  tipoPersona: z.nativeEnum(TipoPersona).optional(),
+  tipoDocumento: z.nativeEnum(TipoDocumentoIdentidad).optional(),
+  numeroDocumento: z.string().min(1).max(20),
+  razonSocial: z.string().min(1).max(200),
+  nombreComercial: z.string().max(200).optional(),
+  contactoNombre: z.string().max(150).optional(),
+  contactoTelefono: z.string().max(30).optional(),
+  email: z.string().max(150).email().optional(),
+  direccion: z.string().max(255).optional(),
+  ubigeo: z.string().max(6).optional(),
+  observaciones: z.string().max(255).optional(),
+})
 
-type UpdateSupplierBody = Partial<CreateSupplierBody> & { activo?: boolean };
+const updateSupplierSchema = createSupplierSchema.partial().extend({
+  activo: z.boolean().optional(),
+})
 
-const suppliersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
-  fastify.get(
-    '/',
-    { onRequest: [fastify.authenticate] },
-    async (request: FastifyRequest<{ Querystring: GetSuppliersQueryParams }>, reply: FastifyReply) => {
-      const { search, status } = request.query;
-      const result = await getSuppliersDashboard({ search, status });
-      return reply.send(result);
-    }
-  );
+export default async function suppliersRoutes(app: FastifyInstance) {
+  app.get('/', async (request) => {
+    const query = getSuppliersQuerySchema.parse(request.query)
+    return getSuppliersDashboard(query)
+  })
 
-  fastify.post(
-    '/',
-    { onRequest: [fastify.authenticate] },
-    async (request: FastifyRequest<{ Body: CreateSupplierBody }>, reply: FastifyReply) => {
-      const result = await createSupplier(request.body, request);
-      return reply.status(201).send(result);
-    }
-  );
+  app.post('/', async (request) => {
+    const body = createSupplierSchema.parse(request.body)
+    return createSupplier(body)
+  })
 
-  fastify.put(
-    '/:id',
-    { onRequest: [fastify.authenticate] },
-    async (
-      request: FastifyRequest<{
-        Params: { id: string };
-        Body: UpdateSupplierBody;
-      }>,
-      reply: FastifyReply
-    ) => {
-      const result = await updateSupplier(request.params.id, request.body, request);
-      return reply.send(result);
-    }
-  );
+  app.put('/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = updateSupplierSchema.parse(request.body)
+    return updateSupplier(params.id, body)
+  })
 
-  fastify.delete(
-    '/:id',
-    { onRequest: [fastify.authenticate] },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
-      const result = await deleteSupplier(request.params.id, request);
-      return reply.send(result);
-    }
-  );
-};
-
-export default suppliersRoutes;
+  app.delete('/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    return deleteSupplier(params.id)
+  })
+}
