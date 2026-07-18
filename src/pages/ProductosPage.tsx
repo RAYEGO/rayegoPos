@@ -13,7 +13,7 @@ import {
   ShieldAlert,
   TestTubeDiagonal,
 } from 'lucide-react'
-import { PageHeader } from '@/components/layout/PageHeader'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -295,86 +295,22 @@ export function ProductosPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Productos" />
-
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Base maestra del catálogo</CardTitle>
-            <CardDescription>
-              Catálogo farmacéutico conectado al backend y listo para enlazar stock por lote, compras y ventas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                SKU activos
-              </p>
-              <p className="mt-2 text-display text-foreground">{portfolioMetrics.activeCatalog}</p>
-              <p className="text-small text-muted-foreground">
-                listos para operación comercial
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Bajo stock
-              </p>
-              <p className="mt-2 text-display text-foreground">{portfolioMetrics.lowStockCount}</p>
-              <p className="text-small text-muted-foreground">
-                productos que pedirán reposición
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Con receta
-              </p>
-              <p className="mt-2 text-display text-foreground">
-                {portfolioMetrics.withPrescription}
-              </p>
-              <p className="text-small text-muted-foreground">
-                requieren validación de dispensación
-              </p>
-            </div>
-            <div className="rounded-2xl border bg-muted/20 p-4">
-              <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                Con lotes
-              </p>
-              <p className="mt-2 text-display text-foreground">{portfolioMetrics.lotEnabled}</p>
-              <p className="text-small text-muted-foreground">
-                ya conectados a inventario real
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Siguiente impacto operativo</CardTitle>
-            <CardDescription>
-              El módulo ya queda preparado para el siguiente paso del flujo farmacéutico.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Lotes y expiración</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                Cada SKU ya puede enlazarse a lotes, vencimiento y disponibilidad por sucursal.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Compras y recepción</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                El catálogo usa maestros reales de categoría, laboratorio, unidad y presentación.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Dispensación segura</p>
-              <p className="mt-1 text-small text-muted-foreground">
-                Separamos receta, controlados y principio activo para trazabilidad clínica.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="space-y-3">
+        <h1 className="text-2xl font-bold text-foreground">Productos</h1>
+        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <div>
+            <span className="font-semibold text-foreground">{portfolioMetrics.activeCatalog}</span> SKU
+          </div>
+          <div>
+            <span className="font-semibold text-foreground">{portfolioMetrics.lowStockCount}</span> Bajo Stock
+          </div>
+          <div>
+            <span className="font-semibold text-foreground">{portfolioMetrics.withPrescription}</span> Con receta
+          </div>
+          <div>
+            <span className="font-semibold text-foreground">{portfolioMetrics.lotEnabled}</span> Con lotes
+          </div>
+        </div>
       </div>
 
       <Tabs defaultValue="catalogo">
