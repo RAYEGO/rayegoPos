@@ -2,6 +2,9 @@ import {
   CodigoFormaPago,
   EstadoLote,
   EstadoVenta,
+  EstadoAperturaCaja,
+  TipoMovimientoCaja,
+  OperacionCaja,
   OrigenMovimientoInventario,
   Prisma,
   TipoComprobante,
@@ -691,7 +694,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
   const result = await prisma.$transaction(async (tx) => {
     await ensureDefaultPaymentMethods(tx, userId)
 
-    const [branch, responsibleUser, customer, products, paymentMethods] = await Promise.all([
+    const [branch, responsibleUser, customer, products, paymentMethods, openCashDrawer] = await Promise.all([
       tx.sucursal.findFirst({
         where: {
           id: payload.sucursalId,
@@ -747,6 +750,15 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           activo: true,
         },
       }),
+      tx.aperturaCaja.findFirst({
+        where: {
+          caja: {
+            sucursalId: payload.sucursalId,
+          },
+          estado: EstadoAperturaCaja.ABIERTA,
+          deletedAt: null,
+        },
+      }),
     ])
 
     if (!branch) {
@@ -770,6 +782,10 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
     if (paymentMethods.length !== payload.payments.length) {
       throw createHttpError(404, 'Una o más formas de pago seleccionadas no están disponibles.')
+    }
+
+    if (!openCashDrawer) {
+      throw createHttpError(400, 'No hay una caja abierta para esta sucursal. Por favor, abre la caja antes de realizar ventas.')
     }
 
     const productMap = new Map(products.map((product) => [product.id, product]))
@@ -1047,6 +1063,42 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       }
     }
 
+    // Create cash movements for each payment
+    for (const [index, payment] of payments.entries()) {
+      const ventaPago = sale.pagos[index] // get the created VentaPago
+      await tx.movimientoCaja.create({
+        data: {
+          aperturaCajaId: openCashDrawer.id,
+          tipo: TipoMovimientoCaja.VENTA,
+          operacion: OperacionCaja.INGRESO,
+          monto: toDecimal(payment.amount, 2),
+          referencia: `Venta ${sale.id.slice(0, 8).toUpperCase()}`,
+          formaPagoId: payment.formaPagoId,
+          ventaPagoId: ventaPago.id,
+          observaciones: toOptionalString(payment.observaciones),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+    }
+
+    // If there's change, create an egreso movement
+    if (changeAmount > 0) {
+      await tx.movimientoCaja.create({
+        data: {
+          aperturaCajaId: openCashDrawer.id,
+          tipo: TipoMovimientoCaja.VENTA, // or maybe AJUSTE? But VENTA makes sense
+          operacion: OperacionCaja.EGRESO,
+          monto: toDecimal(changeAmount, 2),
+          referencia: `Vuelto venta ${sale.id.slice(0, 8).toUpperCase()}`,
+          formaPagoId: payments[0].formaPagoId, // only efectivo allows change
+          observaciones: 'Vuelto a cliente',
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+    }
+
     const saleSequence = await tx.venta.count({
       where: {
         deletedAt: null,
@@ -1094,7 +1146,12 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
             },
           },
         },
-        pagos: { where: { deletedAt: null } },
+        pagos: { 
+          where: { deletedAt: null },
+          include: {
+            movimientosCaja: true, // get the linked MovimientoCaja
+          },
+        },
       },
     })
 
@@ -1152,6 +1209,29 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
             costoUnitario: lotAssignment.costoUnitario,
             stockResultante: toDecimal(nextAvailable, 4),
             referencia: `Anulación venta ${saleId.slice(0, 8).toUpperCase()} lote ${lot.numeroLote}`,
+            observaciones: toOptionalString(observaciones),
+            createdById: userId,
+            updatedById: userId,
+          },
+        })
+      }
+    }
+
+    // Reverse all cash movements from this sale
+    for (const pago of sale.pagos) {
+      for (const movimiento of pago.movimientosCaja) {
+        const reverseOperacion = movimiento.operacion === OperacionCaja.INGRESO 
+          ? OperacionCaja.EGRESO 
+          : OperacionCaja.INGRESO
+
+        await tx.movimientoCaja.create({
+          data: {
+            aperturaCajaId: movimiento.aperturaCajaId,
+            tipo: TipoMovimientoCaja.AJUSTE,
+            operacion: reverseOperacion,
+            monto: movimiento.monto,
+            referencia: `Reversión anulación venta ${saleId.slice(0, 8).toUpperCase()}`,
+            formaPagoId: movimiento.formaPagoId,
             observaciones: toOptionalString(observaciones),
             createdById: userId,
             updatedById: userId,
