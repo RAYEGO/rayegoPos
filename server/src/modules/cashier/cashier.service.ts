@@ -108,6 +108,13 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
+  // Get options (branches, payment methods, etc.)
+  const branches = await prisma.sucursal.findMany({
+    where: { deletedAt: null, estado: 'ACTIVA' },
+    select: { id: true, nombre: true, codigo: true },
+    orderBy: { nombre: 'asc' },
+  })
+
   // Get all cash drawers (aperturas)
   const cashDrawers = await prisma.aperturaCaja.findMany({
     where: {
@@ -338,6 +345,9 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
       totalSales,
       totalInternalMovements,
       pendingCollections,
+    },
+    options: {
+      branches,
     },
   }
 }

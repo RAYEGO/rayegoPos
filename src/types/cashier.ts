@@ -45,6 +45,16 @@ export type CashPaymentSummaryRecord = {
   operations: number
 }
 
+export interface BranchOption {
+  id: string
+  nombre: string
+  codigo: string
+}
+
+export interface CashierDashboardOptions {
+  branches: BranchOption[]
+}
+
 export type CashierDashboardResponse = {
   cashDrawers: CashDrawerRecord[]
   cashMovements: CashMovementRecord[]
@@ -54,6 +64,7 @@ export type CashierDashboardResponse = {
     totalInternalMovements: number
     pendingCollections: number
   }
+  options: CashierDashboardOptions
 }
 
 export type OpenCashDrawerPayload = {
