@@ -110,7 +110,7 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
 
   // Get options (branches, payment methods, etc.)
   const branches = await prisma.sucursal.findMany({
-    where: { deletedAt: null, estado: 'ACTIVA' },
+    where: { deletedAt: null, activo: true },
     select: { id: true, nombre: true, codigo: true },
     orderBy: { nombre: 'asc' },
   })
