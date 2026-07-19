@@ -38,6 +38,10 @@ function normalizeWhatsAppPhone(rawPhone: string) {
   return normalized.replace(/\D/g, '')
 }
 
+async function copyToClipboard(value: string) {
+  await navigator.clipboard.writeText(value)
+}
+
 function getApiErrorMessage(error: unknown) {
   if (error instanceof ApiError || error instanceof ApiNetworkError) {
     return error.message
@@ -135,18 +139,45 @@ export function VentaTicketPage() {
     window.print()
   }, [])
 
-  const handleWhatsapp = useCallback(() => {
+  const handleShare = useCallback(async () => {
     if (!receipt) return
 
+    const shareUrl = `${window.location.origin}/print/sales/${saleId}`
+
+    const message = whatsAppMessage ?? `Ticket ${receipt.document.correlativo}`
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Ticket ${receipt.document.correlativo}`,
+          text: message,
+          url: shareUrl,
+        })
+        return
+      } catch {
+        return
+      }
+    }
+
     if (!whatsappPhone) {
-      toast.error('El cliente no tiene teléfono registrado para WhatsApp.')
+      try {
+        await copyToClipboard(shareUrl)
+        toast.success('Link del ticket copiado. Adjunta el PDF en WhatsApp.')
+      } catch {
+        toast.error('No fue posible compartir automáticamente.')
+      }
       return
     }
 
-    const message = whatsAppMessage ?? `Ticket ${receipt.document.correlativo}`
     const url = `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`
     window.open(url, '_blank', 'noopener,noreferrer')
-  }, [receipt, whatsappPhone, whatsAppMessage])
+  }, [receipt, saleId, whatsappPhone, whatsAppMessage])
+
+  useEffect(() => {
+    if (!receipt) return
+    if (searchParams.get('share') !== '1') return
+    void handleShare()
+  }, [handleShare, receipt, searchParams])
 
   return (
     <div className="min-h-screen bg-background">
@@ -165,14 +196,11 @@ export function VentaTicketPage() {
             <p className="truncate text-xs text-muted-foreground">{receipt?.document.correlativo ?? '—'}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={loadReceipt} disabled={isLoading}>
-              Actualizar
-            </Button>
             <Button type="button" size="sm" onClick={handlePrint} disabled={isLoading || !receipt}>
-              Imprimir / PDF
+              Imprimir / Guardar PDF
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={handleWhatsapp} disabled={!receipt}>
-              WhatsApp
+            <Button type="button" variant="outline" size="sm" onClick={handleShare} disabled={!receipt}>
+              Compartir
             </Button>
           </div>
         </div>
@@ -322,4 +350,3 @@ export function VentaTicketPage() {
     </div>
   )
 }
-

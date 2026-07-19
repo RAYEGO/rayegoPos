@@ -512,6 +512,15 @@ export function VentasPage() {
     [receiptSale],
   )
 
+  const shareReceipt = useCallback(() => {
+    if (!receiptSale) {
+      return
+    }
+
+    const url = `/print/sales/${receiptSale.id}?share=1`
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }, [receiptSale])
+
   const [showSummary, setShowSummary] = useState(true)
 
   return (
@@ -1410,21 +1419,8 @@ export function VentasPage() {
             <Button type="button" onClick={() => openReceipt('print')} disabled={!receiptSale}>
               Imprimir / Guardar PDF
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => openReceipt('view')}
-              disabled={!receiptSale}
-            >
-              Abrir ticket
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => openReceipt('view')}
-              disabled={!receiptSale}
-            >
-              Abrir para WhatsApp
+            <Button type="button" variant="outline" onClick={shareReceipt} disabled={!receiptSale}>
+              Compartir
             </Button>
           </div>
 
