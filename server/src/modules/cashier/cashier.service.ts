@@ -104,7 +104,11 @@ async function getDefaultCashDrawerForBranch(branchId: string) {
   })
 }
 
-export async function getCashierDashboard(filters: CashierDashboardFilters) {
+export async function getCashierDashboard(
+  filters: CashierDashboardFilters,
+  request: FastifyRequest,
+) {
+  await getAuthenticatedUserId(request)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -242,6 +246,8 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
     )
     let expectedAmount = openingAmount
     for (const movement of movementsForDrawer) {
+      if (movement.tipo === TipoMovimientoCaja.APERTURA) continue
+      if (movement.tipo === TipoMovimientoCaja.CIERRE) continue
       if (movement.operacion === 'INGRESO') {
         expectedAmount += decimalToNumber(movement.monto)
       } else {
@@ -276,6 +282,9 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
   const mappedCashMovements = cashMovements.map((movement) => {
     let type: 'VENTA' | 'INGRESO_MANUAL' | 'EGRESO' | 'RETIRO' | 'CUADRE'
     switch (movement.tipo) {
+      case TipoMovimientoCaja.APERTURA:
+        type = 'INGRESO_MANUAL'
+        break
       case TipoMovimientoCaja.VENTA:
         type = 'VENTA'
         break
@@ -294,6 +303,9 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
     }
 
     let description = movement.observaciones || 'Movimiento de caja'
+    if (movement.tipo === TipoMovimientoCaja.APERTURA) {
+      description = 'Apertura de caja'
+    }
     if (movement.ventaPago) {
       description = 'Cobro de venta mostrador'
     }
@@ -323,7 +335,13 @@ export async function getCashierDashboard(filters: CashierDashboardFilters) {
     .reduce((sum, sale) => sum + decimalToNumber(sale.total), 0)
 
   const totalInternalMovements = cashMovements
-    .filter((m) => !m.formaPago && m.tipo !== TipoMovimientoCaja.VENTA)
+    .filter(
+      (m) =>
+        !m.formaPago &&
+        m.tipo !== TipoMovimientoCaja.VENTA &&
+        m.tipo !== TipoMovimientoCaja.APERTURA &&
+        m.tipo !== TipoMovimientoCaja.CIERRE,
+    )
     .reduce(
       (sum, m) =>
         sum +
@@ -362,6 +380,22 @@ export async function openCashDrawer(
 ) {
   const userId = await getAuthenticatedUserId(request)
 
+  const existingOpenDrawerForUser = await prisma.aperturaCaja.findFirst({
+    where: {
+      usuarioId: userId,
+      estado: EstadoAperturaCaja.ABIERTA,
+      deletedAt: null,
+    },
+    include: cashDrawerInclude,
+  })
+
+  if (existingOpenDrawerForUser) {
+    throw createHttpError(
+      400,
+      `Ya tienes una caja abierta en ${existingOpenDrawerForUser.caja.sucursal.nombre}. Cierra el turno antes de abrir una nueva caja.`,
+    )
+  }
+
   // Get or create a cash drawer for the branch
   let cashDrawer = await getDefaultCashDrawerForBranch(data.branchId)
 
@@ -378,17 +412,22 @@ export async function openCashDrawer(
     })
   }
 
-  // Check if there's already an open drawer
-  const existingOpenDrawer = await prisma.aperturaCaja.findFirst({
+  const existingOpenDrawerForBranch = await prisma.aperturaCaja.findFirst({
     where: {
-      cajaId: cashDrawer.id,
+      caja: {
+        sucursalId: data.branchId,
+      },
       estado: EstadoAperturaCaja.ABIERTA,
       deletedAt: null,
     },
+    include: cashDrawerInclude,
   })
 
-  if (existingOpenDrawer) {
-    throw createHttpError(400, 'Ya existe una caja abierta para esta sucursal.')
+  if (existingOpenDrawerForBranch) {
+    throw createHttpError(
+      400,
+      `Ya existe una caja abierta para esta sucursal (responsable: ${formatFullName(existingOpenDrawerForBranch.usuario)}).`,
+    )
   }
 
   // Create the opening
@@ -448,6 +487,10 @@ export async function closeCashDrawer(
     throw createHttpError(404, 'Apertura de caja no encontrada.')
   }
 
+  if (opening.usuarioId !== userId) {
+    throw createHttpError(403, 'No tienes permisos para cerrar esta caja.')
+  }
+
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
     throw createHttpError(400, 'La caja ya está cerrada.')
   }
@@ -457,6 +500,8 @@ export async function closeCashDrawer(
   let expectedAmount = openingAmount
   for (const movement of opening.movimientos) {
     if (movement.deletedAt) continue
+    if (movement.tipo === TipoMovimientoCaja.APERTURA) continue
+    if (movement.tipo === TipoMovimientoCaja.CIERRE) continue
     if (movement.operacion === OperacionCaja.INGRESO) {
       expectedAmount += decimalToNumber(movement.monto)
     } else {
@@ -531,6 +576,10 @@ export async function createCashMovement(
 
   if (!opening) {
     throw createHttpError(404, 'Apertura de caja no encontrada.')
+  }
+
+  if (opening.usuarioId !== userId) {
+    throw createHttpError(403, 'No tienes permisos para registrar movimientos en esta caja.')
   }
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {

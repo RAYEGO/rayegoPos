@@ -49,6 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
+import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
 import type {
   CashDrawerStatus,
@@ -110,7 +111,7 @@ type CloseCashDrawerFormValues = z.infer<typeof closeCashDrawerSchema>
 type CreateCashMovementFormValues = z.infer<typeof createCashMovementSchema>
 
 export function CajaPage() {
-  const { session } = useAuth()
+  const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -154,6 +155,11 @@ export function CajaPage() {
     },
   })
 
+  const handleUnauthorized = useCallback(async () => {
+    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
+    await logout()
+  }, [logout])
+
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
       return
@@ -173,14 +179,24 @@ export function CajaPage() {
         createMovementForm.setValue('openingId', activeDrawer.id)
       }
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+
+      if (err instanceof ApiError || err instanceof ApiNetworkError) {
+        setError(err.message)
+        return
+      }
+
       setError(err instanceof Error ? err.message : 'Error al cargar el dashboard')
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, closeDrawerForm, createMovementForm])
+  }, [accessToken, closeDrawerForm, createMovementForm, handleUnauthorized])
 
   useEffect(() => {
-    loadDashboard()
+    void loadDashboard()
   }, [loadDashboard])
 
   // Handlers
@@ -195,6 +211,11 @@ export function CajaPage() {
       openDrawerForm.reset()
       await loadDashboard()
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+
       toast.error(err instanceof Error ? err.message : 'Error al abrir la caja.')
     } finally {
       setIsSubmitting(false)
@@ -212,6 +233,11 @@ export function CajaPage() {
       closeDrawerForm.reset()
       await loadDashboard()
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+
       toast.error(err instanceof Error ? err.message : 'Error al cerrar la caja.')
     } finally {
       setIsSubmitting(false)
@@ -229,6 +255,11 @@ export function CajaPage() {
       createMovementForm.reset()
       await loadDashboard()
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+
       toast.error(err instanceof Error ? err.message : 'Error al crear el movimiento.')
     } finally {
       setIsSubmitting(false)
@@ -245,6 +276,7 @@ export function CajaPage() {
   }
   const branches = dashboard?.options?.branches ?? []
   const activeDrawer = cashDrawers.find((drawer) => drawer.status !== 'CERRADA') ?? cashDrawers[0]
+  const hasOpenDrawer = cashDrawers.some((drawer) => drawer.status !== 'CERRADA')
 
   if (isLoading) {
     return (
@@ -325,6 +357,7 @@ export function CajaPage() {
               type="button"
               variant="outline"
               size="sm"
+              disabled={hasOpenDrawer}
               onClick={() => setOpenDrawerDialogOpen(true)}
             >
               <HandCoins className="h-4 w-4 mr-1" />

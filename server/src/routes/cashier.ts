@@ -13,13 +13,13 @@ const cashierDashboardQuerySchema = z.object({
 
 const openCashDrawerSchema = z.object({
   branchId: z.string().uuid(),
-  openingAmount: z.number().positive(),
+  openingAmount: z.number().nonnegative(),
   observations: z.string().max(255).optional(),
 })
 
 const closeCashDrawerSchema = z.object({
   openingId: z.string().uuid(),
-  countedAmount: z.number().positive(),
+  countedAmount: z.number().nonnegative(),
   observations: z.string().max(255).optional(),
 })
 
@@ -35,9 +35,12 @@ const createCashMovementSchema = z.object({
 export async function cashierRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = cashierDashboardQuerySchema.parse(request.query)
-    return getCashierDashboard({
-      branchId: query.branchId,
-    })
+    return getCashierDashboard(
+      {
+        branchId: query.branchId,
+      },
+      request,
+    )
   })
 
   app.post('/open', async (request) => {
