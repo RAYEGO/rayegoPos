@@ -200,6 +200,8 @@ export function VentasPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [cartItems, setCartItems] = useState<LocalCartItem[]>([])
   const [isCheckoutDialogOpen, setIsCheckoutDialogOpen] = useState(false)
+  const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
+  const [receiptSale, setReceiptSale] = useState<{ id: string; code: string } | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const checkoutForm = useForm<SaleCheckoutFormValues>({
@@ -473,6 +475,8 @@ export function VentasPage() {
         `Venta ${response.item.code} registrada. Total ${formatCurrency(response.item.totalAmount)}.`,
       )
 
+      setReceiptSale({ id: response.item.id, code: response.item.code })
+      setIsReceiptDialogOpen(true)
       setCartItems([])
       setIsCheckoutDialogOpen(false)
       checkoutForm.reset(defaultCheckoutFormValues)
@@ -491,6 +495,22 @@ export function VentasPage() {
       setIsSubmitting(false)
     }
   }
+
+  const openReceipt = useCallback(
+    (mode: 'view' | 'print') => {
+      if (!receiptSale) {
+        return
+      }
+
+      const url =
+        mode === 'print'
+          ? `/print/sales/${receiptSale.id}?print=1`
+          : `/print/sales/${receiptSale.id}`
+
+      window.open(url, '_blank', 'noopener,noreferrer')
+    },
+    [receiptSale],
+  )
 
   const [showSummary, setShowSummary] = useState(true)
 
@@ -1366,6 +1386,53 @@ export function VentasPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isReceiptDialogOpen}
+        onOpenChange={(open) => {
+          setIsReceiptDialogOpen(open)
+          if (!open) {
+            setReceiptSale(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Ticket 80mm</DialogTitle>
+            <DialogDescription>
+              Venta {receiptSale?.code ?? '—'}. Para WhatsApp: imprime y guarda como PDF, luego adjunta el archivo en el chat.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-2">
+            <Button type="button" onClick={() => openReceipt('print')} disabled={!receiptSale}>
+              Imprimir / Guardar PDF
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => openReceipt('view')}
+              disabled={!receiptSale}
+            >
+              Abrir ticket
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => openReceipt('view')}
+              disabled={!receiptSale}
+            >
+              Abrir para WhatsApp
+            </Button>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsReceiptDialogOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

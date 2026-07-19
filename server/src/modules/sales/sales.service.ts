@@ -190,6 +190,23 @@ function buildSaleCode(index: number) {
   return `VNT-${String(index).padStart(6, '0')}`
 }
 
+function resolveDefaultDocumentSerie(tipoComprobante: TipoComprobante) {
+  if (tipoComprobante === TipoComprobante.FACTURA) return 'F001'
+  if (tipoComprobante === TipoComprobante.BOLETA) return 'B001'
+  return 'T001'
+}
+
+function formatDocumentNumber({
+  serie,
+  numero,
+}: {
+  serie: string | null | undefined
+  numero: string | null | undefined
+}) {
+  if (serie && numero) return `${serie}-${numero}`
+  return null
+}
+
 function isColdChainProduct(productName: string) {
   return /insulina|vacuna|refriger|cadena de frio/i.test(productName)
 }
@@ -376,7 +393,9 @@ async function ensureMovementReason(
 }
 
 function mapRecentSale(sale: SaleWithRelations, codeMap: Map<string, string>) {
-  const code = codeMap.get(sale.id) ?? `VNT-${sale.id.slice(0, 6).toUpperCase()}`
+  const persistedDocumentNumber = formatDocumentNumber({ serie: sale.serie, numero: sale.numero })
+  const code =
+    persistedDocumentNumber ?? codeMap.get(sale.id) ?? `VNT-${sale.id.slice(0, 6).toUpperCase()}`
 
   return {
     id: sale.id,
@@ -401,7 +420,10 @@ function mapDispensations(sales: SaleWithRelations[], codeMap: Map<string, strin
       .map((detail) => ({
         id: detail.id,
         saleId: sale.id,
-        saleCode: codeMap.get(sale.id) ?? `VNT-${sale.id.slice(0, 6).toUpperCase()}`,
+        saleCode:
+          formatDocumentNumber({ serie: sale.serie, numero: sale.numero }) ??
+          codeMap.get(sale.id) ??
+          `VNT-${sale.id.slice(0, 6).toUpperCase()}`,
         productName: detail.producto.nombre,
         customerName: getCustomerDisplayName(sale.cliente),
         cashierName: formatFullName(sale.usuarioResponsable),
@@ -788,6 +810,82 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       throw createHttpError(400, 'No hay una caja abierta para esta sucursal. Por favor, abre la caja antes de realizar ventas.')
     }
 
+    const tipoComprobante = payload.tipoComprobante ?? TipoComprobante.TICKET
+
+    const activeSerie = await (async () => {
+      const existing = await tx.serieDocumento.findFirst({
+        where: {
+          deletedAt: null,
+          activo: true,
+          empresaId: branch.empresaId,
+          sucursalId: branch.id,
+          tipoComprobante,
+        },
+        orderBy: [{ createdAt: 'asc' }],
+        select: {
+          id: true,
+        },
+      })
+
+      if (existing) {
+        return existing
+      }
+
+      const defaultSerie = resolveDefaultDocumentSerie(tipoComprobante)
+
+      return tx.serieDocumento.upsert({
+        where: {
+          empresaId_sucursalId_tipoComprobante_serie: {
+            empresaId: branch.empresaId,
+            sucursalId: branch.id,
+            tipoComprobante,
+            serie: defaultSerie,
+          },
+        },
+        update: {
+          activo: true,
+          deletedAt: null,
+          updatedById: userId,
+        },
+        create: {
+          empresaId: branch.empresaId,
+          sucursalId: branch.id,
+          tipoComprobante,
+          serie: defaultSerie,
+          activo: true,
+          createdById: userId,
+          updatedById: userId,
+        },
+        select: {
+          id: true,
+        },
+      })
+    })()
+
+    const serieUpdate = await tx.serieDocumento.update({
+      where: {
+        id: activeSerie.id,
+      },
+      data: {
+        siguienteNumero: {
+          increment: 1,
+        },
+        updatedById: userId,
+      },
+      select: {
+        id: true,
+        serie: true,
+        longitudNumero: true,
+        siguienteNumero: true,
+      },
+    })
+
+    const numeroDocumento = String(serieUpdate.siguienteNumero - 1).padStart(
+      serieUpdate.longitudNumero,
+      '0',
+    )
+    const correlativo = `${serieUpdate.serie}-${numeroDocumento}`
+
     const productMap = new Map(products.map((product) => [product.id, product]))
     const paymentMethodMap = new Map(paymentMethods.map((method) => [method.id, method]))
 
@@ -907,7 +1005,10 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         sucursalId: payload.sucursalId,
         clienteId: payload.clienteId,
         usuarioResponsableId: userId,
-        tipoComprobante: payload.tipoComprobante ?? TipoComprobante.TICKET,
+        serieDocumentoId: serieUpdate.id,
+        tipoComprobante,
+        serie: serieUpdate.serie,
+        numero: numeroDocumento,
         fechaEmision: new Date(),
         estado: balanceAmount <= 0 ? EstadoVenta.COBRADA : EstadoVenta.EMITIDA,
         subtotal: toDecimal(subtotalAmount, 2),
@@ -1099,16 +1200,10 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       })
     }
 
-    const saleSequence = await tx.venta.count({
-      where: {
-        deletedAt: null,
-      },
-    })
-
     return {
       item: {
         id: sale.id,
-        code: buildSaleCode(saleSequence),
+        code: correlativo,
         customerName: getCustomerDisplayName(sale.cliente),
         cashierName: formatFullName(sale.usuarioResponsable),
         totalAmount,
@@ -1124,6 +1219,177 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
   })
 
   return result
+}
+
+export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
+  await getAuthenticatedUserId(request)
+
+  const sale = await prisma.venta.findFirst({
+    where: {
+      id: saleId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      tipoComprobante: true,
+      serie: true,
+      numero: true,
+      fechaEmision: true,
+      subtotal: true,
+      descuentoTotal: true,
+      impuestoTotal: true,
+      total: true,
+      vuelto: true,
+      saldoPendiente: true,
+      observaciones: true,
+      sucursal: {
+        select: {
+          id: true,
+          nombre: true,
+          direccion: true,
+          telefono: true,
+          empresa: {
+            select: {
+              razonSocial: true,
+              nombreComercial: true,
+              numeroDocumento: true,
+              direccion: true,
+              telefono: true,
+            },
+          },
+        },
+      },
+      cliente: {
+        select: {
+          id: true,
+          tipoDocumento: true,
+          numeroDocumento: true,
+          nombreCompleto: true,
+          razonSocial: true,
+          nombres: true,
+          apellidos: true,
+          direccion: true,
+          telefono: true,
+        },
+      },
+      usuarioResponsable: {
+        select: {
+          nombres: true,
+          apellidos: true,
+        },
+      },
+      detalles: {
+        where: { deletedAt: null },
+        orderBy: [{ createdAt: 'asc' }],
+        select: {
+          id: true,
+          cantidad: true,
+          precioUnitario: true,
+          descuentoTotal: true,
+          subtotal: true,
+          total: true,
+          producto: {
+            select: {
+              nombre: true,
+              sku: true,
+              unidadMedida: {
+                select: {
+                  simbolo: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      pagos: {
+        where: { deletedAt: null },
+        orderBy: [{ fechaPago: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          monto: true,
+          referenciaExterna: true,
+          observaciones: true,
+          formaPago: {
+            select: {
+              codigo: true,
+              nombre: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (!sale) {
+    throw createHttpError(404, 'La venta no fue encontrada.')
+  }
+
+  const documentNumber =
+    formatDocumentNumber({ serie: sale.serie, numero: sale.numero }) ??
+    `VNT-${sale.id.slice(0, 8).toUpperCase()}`
+
+  return {
+    document: {
+      tipoComprobante: sale.tipoComprobante,
+      correlativo: documentNumber,
+    },
+    issuedAt: formatDateTime(sale.fechaEmision),
+    company: {
+      razonSocial: sale.sucursal.empresa.razonSocial,
+      nombreComercial: sale.sucursal.empresa.nombreComercial,
+      ruc: sale.sucursal.empresa.numeroDocumento,
+      direccion: sale.sucursal.empresa.direccion,
+      telefono: sale.sucursal.empresa.telefono,
+    },
+    branch: {
+      id: sale.sucursal.id,
+      nombre: sale.sucursal.nombre,
+      direccion: sale.sucursal.direccion,
+      telefono: sale.sucursal.telefono,
+    },
+    customer: sale.cliente
+      ? {
+          id: sale.cliente.id,
+          nombre:
+            sale.cliente.nombreCompleto ??
+            sale.cliente.razonSocial ??
+            `${sale.cliente.nombres ?? ''} ${sale.cliente.apellidos ?? ''}`.trim(),
+          tipoDocumento: sale.cliente.tipoDocumento,
+          numeroDocumento: sale.cliente.numeroDocumento,
+          direccion: sale.cliente.direccion,
+          telefono: sale.cliente.telefono,
+        }
+      : null,
+    cashierName: formatFullName(sale.usuarioResponsable),
+    items: sale.detalles.map((detail) => ({
+      id: detail.id,
+      sku: detail.producto.sku,
+      name: detail.producto.nombre,
+      unitSymbol: detail.producto.unidadMedida.simbolo,
+      quantity: decimalToNumber(detail.cantidad),
+      unitPrice: decimalToNumber(detail.precioUnitario),
+      discountAmount: decimalToNumber(detail.descuentoTotal),
+      subtotal: decimalToNumber(detail.subtotal),
+      total: decimalToNumber(detail.total),
+    })),
+    totals: {
+      subtotal: decimalToNumber(sale.subtotal),
+      discountTotal: decimalToNumber(sale.descuentoTotal),
+      taxTotal: decimalToNumber(sale.impuestoTotal),
+      total: decimalToNumber(sale.total),
+      changeAmount: decimalToNumber(sale.vuelto),
+      outstandingAmount: decimalToNumber(sale.saldoPendiente),
+    },
+    payments: sale.pagos.map((payment) => ({
+      id: payment.id,
+      methodCode: payment.formaPago.codigo,
+      methodName: payment.formaPago.nombre,
+      amount: decimalToNumber(payment.monto),
+      reference: payment.referenciaExterna,
+      observations: payment.observaciones,
+    })),
+    observations: sale.observaciones,
+  }
 }
 
 export async function cancelSale(saleId: string, request: FastifyRequest, observaciones?: string) {

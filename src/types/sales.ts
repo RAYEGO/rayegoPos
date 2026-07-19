@@ -97,3 +97,61 @@ export type CreateSalePayload = {
     observaciones?: string
   }>
 }
+
+export type SaleReceiptResponse = {
+  document: {
+    tipoComprobante: 'TICKET' | 'BOLETA' | 'FACTURA'
+    correlativo: string
+  }
+  issuedAt: string | null
+  company: {
+    razonSocial: string
+    nombreComercial: string | null
+    ruc: string
+    direccion: string | null
+    telefono: string | null
+  }
+  branch: {
+    id: string
+    nombre: string
+    direccion: string | null
+    telefono: string | null
+  }
+  customer: {
+    id: string
+    nombre: string
+    tipoDocumento: string | null
+    numeroDocumento: string | null
+    direccion: string | null
+    telefono: string | null
+  } | null
+  cashierName: string
+  items: Array<{
+    id: string
+    sku: string
+    name: string
+    unitSymbol: string
+    quantity: number
+    unitPrice: number
+    discountAmount: number
+    subtotal: number
+    total: number
+  }>
+  totals: {
+    subtotal: number
+    discountTotal: number
+    taxTotal: number
+    total: number
+    changeAmount: number
+    outstandingAmount: number
+  }
+  payments: Array<{
+    id: string
+    methodCode: string
+    methodName: string
+    amount: number
+    reference: string | null
+    observations: string | null
+  }>
+  observations: string | null
+}

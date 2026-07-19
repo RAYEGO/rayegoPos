@@ -1,5 +1,5 @@
 import { apiRequest } from '@/services/apiClient'
-import type { CreateSalePayload, SalesDashboardResponse } from '@/types/sales'
+import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } from '@/types/sales'
 
 type SalesDashboardFilters = {
   search?: string
@@ -55,6 +55,12 @@ export const salesService = {
       method: 'PATCH',
       accessToken,
       body: { observaciones },
+    })
+  },
+
+  getReceipt(accessToken: string, saleId: string) {
+    return apiRequest<SaleReceiptResponse>(`/api/sales/${saleId}/receipt`, {
+      accessToken,
     })
   },
 }
