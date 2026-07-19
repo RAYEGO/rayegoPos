@@ -34,22 +34,22 @@ const updateSupplierSchema = createSupplierSchema.partial().extend({
 export default async function suppliersRoutes(app: FastifyInstance) {
   app.get('/', async (request) => {
     const query = getSuppliersQuerySchema.parse(request.query)
-    return getSuppliersDashboard(query)
+    return getSuppliersDashboard(query, request)
   })
 
   app.post('/', async (request) => {
     const body = createSupplierSchema.parse(request.body)
-    return createSupplier(body)
+    return createSupplier(body, request)
   })
 
   app.put('/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = updateSupplierSchema.parse(request.body)
-    return updateSupplier(params.id, body)
+    return updateSupplier(params.id, body, request)
   })
 
   app.delete('/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
-    return deleteSupplier(params.id)
+    return deleteSupplier(params.id, request)
   })
 }

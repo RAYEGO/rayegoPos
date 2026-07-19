@@ -582,174 +582,201 @@ export function VentasPage() {
             </div>
           </Card>
 
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader className="h-7 w-7" />
-            </div>
-          ) : error ? (
-            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-              {error}
-            </div>
-          ) : availableProducts.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-8 text-center">
-              <p className="text-sm font-medium text-foreground">
-                No hay productos con stock disponible
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Ajusta la búsqueda o filtros
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {availableProducts.map((product) => {
-                const cartEntry = cartItems.find((item) => item.productId === product.id)
-                const remainingUnits = product.availableUnits - (cartEntry?.quantity ?? 0)
-
-                return (
-                  <Card key={product.id} className="p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-foreground truncate">{product.name}</p>
-                        <p className="text-xs text-muted-foreground mt-1">{product.sku}</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2 items-center">
-                      <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
-                      <Badge variant={getStockVariant(product)}>
-                        {product.availableUnits.toFixed(0)} {product.unitSymbol}
-                      </Badge>
-                      {product.requiresPrescription && <Badge variant="warning">R</Badge>}
-                      {product.isControlled && <Badge variant="destructive">C</Badge>}
-                      {product.coldChain && <Badge variant="info">❄️</Badge>}
-                    </div>
-
-                    {product.suggestedLot && (
-                      <div className="mt-3 rounded-lg border bg-muted/20 p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-medium text-foreground">
-                            Lote: {product.suggestedLot.lotCode}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Vence: {formatDate(product.suggestedLot.expiryDate)}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="mt-3 flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => addToCart(product)}
-                        disabled={!product.suggestedLot || remainingUnits <= 0}
-                      >
-                        <Plus className="h-4 w-4 mr-1" />
-                        {cartEntry ? `Agregar (${cartEntry.quantity})` : 'Agregar'}
-                      </Button>
-                    </div>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
-
-          {cartItems.length > 0 && (
-            <Card className="p-4">
-              <h3 className="font-medium text-foreground mb-3">Carrito</h3>
-              <div className="space-y-3">
-                {cartItems.map((item) => (
-                  <div key={item.productId} className="rounded-lg border p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-foreground truncate">{item.name}</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {formatCurrency(item.salePrice)} / {item.unitSymbol}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-medium text-foreground">
-                          {formatCurrency(item.quantity * item.salePrice)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
-                        >
-                          <Minus className="h-4 w-4" />
-                        </Button>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={Math.max(1, Math.floor(item.availableUnits))}
-                          value={item.quantity}
-                          onChange={(event) =>
-                            updateCartQuantity(
-                              item.productId,
-                              Number(event.target.value || item.quantity),
-                            )
-                          }
-                          className="w-16 h-8 text-center"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
-                          disabled={item.quantity >= Math.floor(item.availableUnits)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFromCart(item.productId)}
-                        className="h-8 px-2"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-
-                <div className="rounded-lg border bg-muted/20 p-3 mt-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Total</span>
-                    <span className="text-lg font-semibold text-foreground">
-                      {formatCurrency(cartMetrics.total)}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCartItems([])}
-                      className="flex-1"
-                    >
-                      Vaciar
-                    </Button>
-                    <Button type="button" size="sm" onClick={openCheckoutDialog} className="flex-1">
-                      <CreditCard className="h-4 w-4 mr-1" />
-                      Cobrar
-                    </Button>
-                  </div>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_340px]">
+            <div className="lg:col-span-1 xl:col-span-2">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader className="h-7 w-7" />
                 </div>
-              </div>
-            </Card>
-          )}
+              ) : error ? (
+                <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                  {error}
+                </div>
+              ) : availableProducts.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-8 text-center">
+                  <p className="text-sm font-medium text-foreground">
+                    No hay productos con stock disponible
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Ajusta la búsqueda o filtros
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {availableProducts.map((product) => {
+                    const cartEntry = cartItems.find((item) => item.productId === product.id)
+                    const remainingUnits = product.availableUnits - (cartEntry?.quantity ?? 0)
+
+                    return (
+                      <Card key={product.id} className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium text-foreground">{product.name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{product.sku}</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
+                          <Badge variant={getStockVariant(product)}>
+                            {product.availableUnits.toFixed(0)} {product.unitSymbol}
+                          </Badge>
+                          {product.requiresPrescription && <Badge variant="warning">R</Badge>}
+                          {product.isControlled && <Badge variant="destructive">C</Badge>}
+                          {product.coldChain && <Badge variant="info">❄️</Badge>}
+                        </div>
+
+                        {product.suggestedLot && (
+                          <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-foreground">
+                                Lote: {product.suggestedLot.lotCode}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Vence: {formatDate(product.suggestedLot.expiryDate)}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => addToCart(product)}
+                            disabled={!product.suggestedLot || remainingUnits <= 0}
+                          >
+                            <Plus className="mr-1 h-4 w-4" />
+                            {cartEntry ? `Agregar (${cartEntry.quantity})` : 'Agregar'}
+                          </Button>
+                        </div>
+                      </Card>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="lg:col-span-1 xl:col-span-1">
+              <Card className="p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-hidden">
+                <h3 className="mb-3 font-medium text-foreground">Carrito</h3>
+
+                {cartItems.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-6 text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      Aún no hay productos en el carrito
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Agrega productos desde las tarjetas del mostrador
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3 lg:h-[calc(100vh-7rem)]">
+                    <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+                      {cartItems.map((item) => (
+                        <div key={item.productId} className="rounded-lg border p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-foreground">{item.name}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {formatCurrency(item.salePrice)} / {item.unitSymbol}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-medium text-foreground">
+                                {formatCurrency(item.quantity * item.salePrice)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() =>
+                                  updateCartQuantity(item.productId, item.quantity - 1)
+                                }
+                              >
+                                <Minus className="h-4 w-4" />
+                              </Button>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={Math.max(1, Math.floor(item.availableUnits))}
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  updateCartQuantity(
+                                    item.productId,
+                                    Number(event.target.value || item.quantity),
+                                  )
+                                }
+                                className="h-8 w-16 text-center"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() =>
+                                  updateCartQuantity(item.productId, item.quantity + 1)
+                                }
+                                disabled={item.quantity >= Math.floor(item.availableUnits)}
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeFromCart(item.productId)}
+                              className="h-8 px-2"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-lg border bg-background p-3 shadow-sm ring-1 ring-border/60 lg:mt-auto">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Total</span>
+                        <span className="text-lg font-semibold text-foreground">
+                          {formatCurrency(cartMetrics.total)}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCartItems([])}
+                          className="flex-1"
+                        >
+                          Vaciar
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={openCheckoutDialog}
+                          className="flex-1"
+                        >
+                          <CreditCard className="mr-1 h-4 w-4" />
+                          Cobrar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="operaciones" className="space-y-4 pt-4">

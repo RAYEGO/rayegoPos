@@ -1,10 +1,38 @@
 import { Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
+import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
   error.statusCode = statusCode
   return error
+}
+
+type AuthTokenPayload = {
+  sub: string
+  typ: 'access' | 'refresh' | 'reset-password'
+}
+
+async function getAuthenticatedUserId(request: FastifyRequest) {
+  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
+
+  if (!token) {
+    throw createHttpError(401, 'Sesión no disponible.')
+  }
+
+  let decoded: AuthTokenPayload | null = null
+
+  try {
+    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
+  } catch {
+    decoded = null
+  }
+
+  if (!decoded || decoded.typ !== 'access') {
+    throw createHttpError(401, 'El token de acceso no es válido.')
+  }
+
+  return decoded.sub
 }
 
 function toOptionalString(value?: string | null) {
@@ -76,7 +104,11 @@ function mapSupplier(supplier: SupplierWithRelations) {
   }
 }
 
-export async function getSuppliersDashboard(filters: GetSuppliersFilters = {}) {
+export async function getSuppliersDashboard(
+  filters: GetSuppliersFilters = {},
+  request: FastifyRequest,
+) {
+  await getAuthenticatedUserId(request)
   const search = filters.search?.trim().toLowerCase()
   const isActive =
     filters.status === 'activo' ? true : filters.status === 'inactivo' ? false : undefined
@@ -128,7 +160,9 @@ export async function getSuppliersDashboard(filters: GetSuppliersFilters = {}) {
   }
 }
 
-export async function createSupplier(payload: CreateSupplierPayload) {
+export async function createSupplier(payload: CreateSupplierPayload, request: FastifyRequest) {
+  const userId = await getAuthenticatedUserId(request)
+
   if (!payload.razonSocial.trim()) {
     throw createHttpError(400, 'La razón social es obligatoria.')
   }
@@ -136,10 +170,9 @@ export async function createSupplier(payload: CreateSupplierPayload) {
     throw createHttpError(400, 'El número de documento es obligatorio.')
   }
 
-  const existingSupplier = await prisma.proveedor.findFirst({
+  const existingSupplier = await prisma.proveedor.findUnique({
     where: {
       numeroDocumento: payload.numeroDocumento.trim(),
-      deletedAt: null,
     },
   })
   if (existingSupplier) {
@@ -160,6 +193,8 @@ export async function createSupplier(payload: CreateSupplierPayload) {
       ubigeo: toOptionalString(payload.ubigeo),
       observaciones: toOptionalString(payload.observaciones),
       activo: true,
+      createdById: userId,
+      updatedById: userId,
     },
     include: supplierInclude,
   })
@@ -169,7 +204,13 @@ export async function createSupplier(payload: CreateSupplierPayload) {
   }
 }
 
-export async function updateSupplier(supplierId: string, payload: UpdateSupplierPayload) {
+export async function updateSupplier(
+  supplierId: string,
+  payload: UpdateSupplierPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
   const existingSupplier = await prisma.proveedor.findFirst({
     where: {
       id: supplierId,
@@ -181,18 +222,24 @@ export async function updateSupplier(supplierId: string, payload: UpdateSupplier
     throw createHttpError(404, 'El proveedor no fue encontrado.')
   }
 
+  if (payload.razonSocial !== undefined && !payload.razonSocial.trim()) {
+    throw createHttpError(400, 'La razón social es obligatoria.')
+  }
+
+  if (payload.numeroDocumento !== undefined && !payload.numeroDocumento.trim()) {
+    throw createHttpError(400, 'El número de documento es obligatorio.')
+  }
+
   if (
     payload.numeroDocumento &&
     payload.numeroDocumento.trim() !== existingSupplier.numeroDocumento
   ) {
-    const duplicateSupplier = await prisma.proveedor.findFirst({
+    const duplicateSupplier = await prisma.proveedor.findUnique({
       where: {
         numeroDocumento: payload.numeroDocumento.trim(),
-        deletedAt: null,
-        id: { not: supplierId },
       },
     })
-    if (duplicateSupplier) {
+    if (duplicateSupplier && duplicateSupplier.id !== supplierId) {
       throw createHttpError(
         409,
         'Ya existe otro proveedor con ese número de documento.',
@@ -200,7 +247,7 @@ export async function updateSupplier(supplierId: string, payload: UpdateSupplier
     }
   }
 
-  const updateData: Prisma.ProveedorUpdateInput = {
+  const updateData: Prisma.ProveedorUncheckedUpdateInput = {
     ...(payload.tipoPersona !== undefined ? { tipoPersona: payload.tipoPersona } : {}),
     ...(payload.tipoDocumento !== undefined ? { tipoDocumento: payload.tipoDocumento } : {}),
     ...(payload.numeroDocumento !== undefined
@@ -225,6 +272,7 @@ export async function updateSupplier(supplierId: string, payload: UpdateSupplier
       ? { observaciones: toOptionalString(payload.observaciones) }
       : {}),
     ...(payload.activo !== undefined ? { activo: payload.activo } : {}),
+    updatedById: userId,
   }
 
   const updatedSupplier = await prisma.proveedor.update({
@@ -236,7 +284,9 @@ export async function updateSupplier(supplierId: string, payload: UpdateSupplier
   return { item: mapSupplier(updatedSupplier) }
 }
 
-export async function deleteSupplier(supplierId: string) {
+export async function deleteSupplier(supplierId: string, request: FastifyRequest) {
+  const userId = await getAuthenticatedUserId(request)
+
   const supplier = await prisma.proveedor.findFirst({
     where: { id: supplierId, deletedAt: null },
   })
@@ -250,6 +300,7 @@ export async function deleteSupplier(supplierId: string) {
     data: {
       deletedAt: new Date(),
       activo: false,
+      updatedById: userId,
     },
   })
 
