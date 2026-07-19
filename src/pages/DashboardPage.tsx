@@ -2,12 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
-  Boxes,
-  ChevronDown,
-  CreditCard,
-  PackageSearch,
   ShoppingCart,
-  Users,
+  WalletCards,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,14 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { dashboardService } from '@/services/dashboardService'
@@ -48,33 +36,25 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
-function formatPercent(value: number) {
-  return `${Math.round(value)}%`
-}
-
 const defaultDashboard: DashboardOverviewResponse = {
-  kpis: {
-    salesTodayTotal: 0,
-    salesTodayCount: 0,
+  sales: {
+    todayTotal: 0,
+    todayCount: 0,
     averageTicket: 0,
-    pendingCollections: 0,
-    purchaseOpenCount: 0,
-    purchaseOutstanding: 0,
-    availableStockUnits: 0,
+  },
+  cash: {
+    activeDrawer: null,
+  },
+  alerts: {
     expiringLotsCount: 0,
     lowStockProductsCount: 0,
-    customersTotalCount: 0,
-    customersActiveCount: 0,
-    activeProductsCount: 0,
-  },
-  cashPaymentSummary: [],
-  alerts: {
     expiringLots: [],
     lowStockProducts: [],
   },
-  topCustomers: [],
-  recentSales: [],
-  cashDrawer: null,
+  activity: {
+    recentSales: [],
+    recentCashMovements: [],
+  },
   options: {
     branches: [],
   },
@@ -96,11 +76,11 @@ export function DashboardPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
-  const [showSummary, setShowSummary] = useState(false)
   const [branchId, setBranchId] = useState<string>('all')
   const [dashboard, setDashboard] = useState<DashboardOverviewResponse>(defaultDashboard)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showAlertDetails, setShowAlertDetails] = useState(false)
 
   const handleUnauthorized = useCallback(async () => {
     toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
@@ -137,23 +117,39 @@ export function DashboardPage() {
     void loadDashboard()
   }, [loadDashboard])
 
-  const kpis = dashboard.kpis
-  const cashDrawer = dashboard.cashDrawer
-
-  const collectedVsSales = useMemo(
-    () =>
-      dashboard.cashPaymentSummary.reduce(
-        (sum, item) => sum + item.collectedAmount - item.salesAmount,
-        0,
-      ),
-    [dashboard.cashPaymentSummary],
-  )
+  const activeDrawer = dashboard.cash.activeDrawer
 
   const branchOptions = dashboard.options.branches
   const selectedBranchLabel =
     branchId === 'all'
       ? 'Todas las sucursales'
       : branchOptions.find((branch) => branch.id === branchId)?.nombre ?? 'Sucursal'
+
+  const activityRows = useMemo(() => {
+    const sales = dashboard.activity.recentSales.map((sale) => ({
+      id: `sale-${sale.id}`,
+      createdAt: sale.issuedAt,
+      title: sale.document ?? 'Venta emitida',
+      subtitle: sale.customerName ?? 'Mostrador',
+      amount: sale.total,
+      variant: 'success' as const,
+    }))
+
+    const movements = dashboard.activity.recentCashMovements.map((movement) => ({
+      id: `cash-${movement.id}`,
+      createdAt: movement.createdAt,
+      title: movement.reference ?? movement.type,
+      subtitle: `${movement.type} · ${movement.actorName}`,
+      amount:
+        movement.operation === 'INGRESO' ? movement.amount : -movement.amount,
+      variant:
+        movement.operation === 'INGRESO' ? ('info' as const) : ('warning' as const),
+    }))
+
+    return [...sales, ...movements]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 12)
+  }, [dashboard.activity.recentCashMovements, dashboard.activity.recentSales])
 
   return (
     <div className="space-y-4 p-4">
@@ -173,13 +169,6 @@ export function DashboardPage() {
               ))}
             </SelectContent>
           </Select>
-
-          <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
-            Resumen
-            <ChevronDown
-              className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`}
-            />
-          </Button>
         </div>
       </div>
 
@@ -193,51 +182,22 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {showSummary && (
-        <div className="flex flex-wrap gap-3">
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">
-                {formatCurrency(kpis.salesTodayTotal)}
-              </span>
-              <span className="text-xs text-muted-foreground">Ventas</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <Boxes className="h-4 w-4 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">
-                {Math.round(kpis.availableStockUnits)}
-              </span>
-              <span className="text-xs text-muted-foreground">Stock</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <Users className="h-4 w-4 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{kpis.customersActiveCount}</span>
-              <span className="text-xs text-muted-foreground">Clientes</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="grid gap-6 xl:grid-cols-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
-              <CardTitle>Ventas emitidas</CardTitle>
-              <CardDescription>Operacion comercial del periodo actual.</CardDescription>
+              <CardTitle>Ventas del día</CardTitle>
+              <CardDescription>Monitor operativo del turno.</CardDescription>
             </div>
             <ShoppingCart className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
             <p className="text-display text-foreground">
-              {formatCurrency(kpis.salesTodayTotal)}
+              {formatCurrency(dashboard.sales.todayTotal)}
             </p>
             <p className="text-small text-muted-foreground">
-              {kpis.salesTodayCount} operaciones · ticket {formatCurrency(kpis.averageTicket)}
+              {dashboard.sales.todayCount} ventas · ticket{' '}
+              {formatCurrency(dashboard.sales.averageTicket)}
             </p>
           </CardContent>
         </Card>
@@ -245,225 +205,154 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
-              <CardTitle>Compras comprometidas</CardTitle>
-              <CardDescription>Ordenes en curso con proveedor.</CardDescription>
+              <CardTitle>Estado de caja</CardTitle>
+              <CardDescription>Turno actual y saldo esperado.</CardDescription>
             </div>
-            <PackageSearch className="h-5 w-5 text-primary" />
+            <WalletCards className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">
-              {formatCurrency(kpis.purchaseOutstanding)}
-            </p>
-            <p className="text-small text-muted-foreground">
-              {kpis.purchaseOpenCount} ordenes con saldo pendiente
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div>
-              <CardTitle>Stock utilizable</CardTitle>
-              <CardDescription>Unidades disponibles por lote.</CardDescription>
-            </div>
-            <Boxes className="h-5 w-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-display text-foreground">
-              {Math.round(kpis.availableStockUnits)}
-            </p>
-            <p className="text-small text-muted-foreground">
-              {kpis.expiringLotsCount} lotes por vencer · {kpis.lowStockProductsCount} bajo stock
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div>
-              <CardTitle>Clientes activos</CardTitle>
-              <CardDescription>Padrón comercial vigente.</CardDescription>
-            </div>
-            <Users className="h-5 w-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-display text-foreground">{kpis.customersActiveCount}</p>
-            <p className="text-small text-muted-foreground">
-              {dashboard.topCustomers.length} clientes con mayor valor
-            </p>
+            {activeDrawer ? (
+              <>
+                <p className="text-display text-foreground">
+                  {formatCurrency(activeDrawer.expectedAmount)}
+                </p>
+                <p className="text-small text-muted-foreground">
+                  {activeDrawer.branchName} · {activeDrawer.cashierName}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  apertura {new Date(activeDrawer.openedAt).toLocaleString('es-PE')}
+                </p>
+                {activeDrawer.lastCashCount ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    último arqueo {new Date(activeDrawer.lastCashCount.createdAt).toLocaleTimeString('es-PE')} · dif{' '}
+                    {formatCurrency(activeDrawer.lastCashCount.differenceCashAmount)}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">sin arqueo registrado</p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-display text-foreground">—</p>
+                <p className="text-small text-muted-foreground">No hay turno abierto</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5 text-primary" />
-              Pulso ejecutivo
-            </CardTitle>
-            <CardDescription>
-              Lectura sintetica del estado comercial, operativo y financiero.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Catalogo activo</p>
-              <p className="mt-2 text-display text-foreground">{kpis.activeProductsCount}</p>
-              <p className="text-small text-muted-foreground">
-                SKU listos para venta y reposicion.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Caja del turno</p>
-              <p className="mt-2 text-display text-foreground">
-                {cashDrawer ? formatCurrency(cashDrawer.expectedAmount) : '—'}
-              </p>
-              <p className="text-small text-muted-foreground">
-                diferencia actual {cashDrawer ? formatCurrency(cashDrawer.differenceAmount) : '—'}
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Conciliacion medios de pago</p>
-              <p className="mt-2 text-display text-foreground">
-                {formatCurrency(collectedVsSales)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                saldo agregado entre ventas y cobros.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Cobranza pendiente</p>
-              <p className="mt-2 text-display text-foreground">
-                {formatCurrency(kpis.pendingCollections)}
-              </p>
-              <p className="text-small text-muted-foreground">
-                saldo de ventas emitidas por cobrar.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-primary" />
-              Alertas del dia
+              Alertas críticas
             </CardTitle>
-            <CardDescription>
-              Puntos que merecen accion inmediata antes del siguiente turno.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <p className="font-medium text-foreground">Lotes por vencer</p>
-                <Badge variant="warning">{kpis.expiringLotsCount}</Badge>
-              </div>
-              <p className="mt-2 text-small text-muted-foreground">
-                Priorizar salida FIFO y campañas para productos cercanos a vencimiento.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <p className="font-medium text-foreground">Diferencia de caja</p>
-                <Badge
-                  variant={
-                    cashDrawer && cashDrawer.differenceAmount === 0 ? 'success' : 'warning'
-                  }
-                >
-                  {cashDrawer ? formatCurrency(cashDrawer.differenceAmount) : '—'}
-                </Badge>
-              </div>
-              <p className="mt-2 text-small text-muted-foreground">
-                Validar soportes de caja antes del cierre definitivo.
-              </p>
-            </div>
-            <div className="rounded-2xl border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <p className="font-medium text-foreground">Stock bajo</p>
-                <Badge variant="info">{kpis.lowStockProductsCount}</Badge>
-              </div>
-              <p className="mt-2 text-small text-muted-foreground">
-                Productos con stock por debajo del mínimo configurado (o 20 por defecto).
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <CardDescription>Solo lo que requiere atención inmediata.</CardDescription>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAlertDetails((current) => !current)}
+          >
+            {showAlertDetails ? 'Ocultar' : 'Ver'}
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="warning">{dashboard.alerts.expiringLotsCount} por vencer</Badge>
+            <Badge variant="info">{dashboard.alerts.lowStockProductsCount} bajo stock</Badge>
+            <Badge variant={activeDrawer ? 'success' : 'outline'}>
+              {activeDrawer ? 'Caja abierta' : 'Caja cerrada'}
+            </Badge>
+          </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Clientes de mayor valor</CardTitle>
-            <CardDescription>
-              Base comercial prioritaria para retencion y seguimiento.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Operaciones</TableHead>
-                  <TableHead>Valor acumulado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dashboard.topCustomers.slice(0, 10).map((customer) => (
-                  <TableRow key={customer.customerId}>
-                    <TableCell className="font-medium text-foreground">
-                      {customer.name}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{customer.operations}</TableCell>
-                    <TableCell className="font-medium text-foreground">
-                      {formatCurrency(customer.total)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-primary" />
-              Cobros por medio
-            </CardTitle>
-            <CardDescription>
-              Resumen de participacion por canal de pago.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {dashboard.cashPaymentSummary.map((item) => {
-              const width =
-                item.salesAmount > 0 ? (item.collectedAmount / item.salesAmount) * 100 : 0
-
-              return (
-                <div key={item.method} className="space-y-2">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="font-medium text-foreground">{item.method}</span>
-                    <span className="text-small text-muted-foreground">
-                      {formatCurrency(item.collectedAmount)} / {formatCurrency(item.salesAmount)}
-                    </span>
+          {showAlertDetails ? (
+            <div className="space-y-3">
+              {dashboard.alerts.expiringLots.length ? (
+                <div className="rounded-2xl border p-4">
+                  <p className="text-sm font-medium text-foreground">Lotes por vencer</p>
+                  <div className="mt-3 space-y-2">
+                    {dashboard.alerts.expiringLots.slice(0, 3).map((lot) => (
+                      <div key={lot.id} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-foreground">{lot.productName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {lot.branchName} · {lot.lotCode} · vence {lot.expiryDate}
+                          </p>
+                        </div>
+                        <p className="text-sm font-medium text-foreground">
+                          {Math.round(lot.availableUnits)} {lot.unitSymbol}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                  <div className="h-2 rounded-full bg-muted">
-                    <div
-                      className="h-2 rounded-full bg-primary"
-                      style={{ width: `${Math.min(width, 100)}%` }}
-                    />
-                  </div>
-                  <p className="text-small text-muted-foreground">
-                    {item.operations} operaciones · cumplimiento {formatPercent(width)}
-                  </p>
                 </div>
-              )
-            })}
-          </CardContent>
-        </Card>
-      </div>
+              ) : null}
+
+              {dashboard.alerts.lowStockProducts.length ? (
+                <div className="rounded-2xl border p-4">
+                  <p className="text-sm font-medium text-foreground">Stock bajo</p>
+                  <div className="mt-3 space-y-2">
+                    {dashboard.alerts.lowStockProducts.slice(0, 3).map((row) => (
+                      <div key={row.productId} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-foreground">{row.name}</p>
+                          <p className="text-xs text-muted-foreground">{row.sku}</p>
+                        </div>
+                        <p className="text-sm font-medium text-foreground">
+                          {Math.round(row.stockUnits)} / {Math.round(row.threshold)} {row.unitSymbol}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-primary" />
+            Actividad reciente
+          </CardTitle>
+          <CardDescription>Eventos recientes del sistema (ventas y caja).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {activityRows.length === 0 ? (
+            <div className="rounded-2xl border border-dashed p-8 text-center">
+              <p className="text-sm text-muted-foreground">Sin actividad reciente.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {activityRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex items-start justify-between gap-3 rounded-2xl border p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
+                    <p className="text-xs text-muted-foreground">{row.subtitle}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {new Date(row.createdAt).toLocaleString('es-PE')}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <Badge variant={row.variant}>{row.amount >= 0 ? 'INGRESO' : 'EGRESO'}</Badge>
+                    <p className="text-sm font-medium text-foreground">
+                      {formatCurrency(row.amount)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

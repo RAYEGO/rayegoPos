@@ -4,21 +4,6 @@ export type BranchOption = {
   codigo: string
 }
 
-export type DashboardKpis = {
-  salesTodayTotal: number
-  salesTodayCount: number
-  averageTicket: number
-  pendingCollections: number
-  purchaseOpenCount: number
-  purchaseOutstanding: number
-  availableStockUnits: number
-  expiringLotsCount: number
-  lowStockProductsCount: number
-  customersTotalCount: number
-  customersActiveCount: number
-  activeProductsCount: number
-}
-
 export type DashboardExpiringLot = {
   id: string
   branchName: string
@@ -37,13 +22,6 @@ export type DashboardLowStockProduct = {
   unitSymbol: string
   stockUnits: number
   threshold: number
-}
-
-export type DashboardCustomerRanking = {
-  customerId: string
-  name: string
-  total: number
-  operations: number
 }
 
 export type DashboardRecentSale = {
@@ -65,25 +43,44 @@ export type DashboardCashDrawer = {
   expectedAmount: number
   countedAmount: number
   differenceAmount: number
+  lastCashCount: {
+    createdAt: string
+    expectedCashAmount: number
+    countedCashAmount: number
+    differenceCashAmount: number
+  } | null
 }
 
-export type DashboardPaymentSummary = {
-  method: string
-  salesAmount: number
-  collectedAmount: number
-  operations: number
+export type DashboardRecentCashMovement = {
+  id: string
+  createdAt: string
+  type: string
+  operation: string
+  amount: number
+  reference: string | null
+  paymentMethod: string | null
+  actorName: string
 }
 
 export type DashboardOverviewResponse = {
-  kpis: DashboardKpis
-  cashPaymentSummary: DashboardPaymentSummary[]
+  sales: {
+    todayTotal: number
+    todayCount: number
+    averageTicket: number
+  }
+  cash: {
+    activeDrawer: DashboardCashDrawer | null
+  }
   alerts: {
+    expiringLotsCount: number
+    lowStockProductsCount: number
     expiringLots: DashboardExpiringLot[]
     lowStockProducts: DashboardLowStockProduct[]
   }
-  topCustomers: DashboardCustomerRanking[]
-  recentSales: DashboardRecentSale[]
-  cashDrawer: DashboardCashDrawer | null
+  activity: {
+    recentSales: DashboardRecentSale[]
+    recentCashMovements: DashboardRecentCashMovement[]
+  }
   options: {
     branches: BranchOption[]
   }

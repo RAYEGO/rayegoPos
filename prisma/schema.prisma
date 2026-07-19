@@ -249,6 +249,7 @@ model Usuario {
   aperturasCaja        AperturaCaja[] @relation("AperturaCajaUsuario")
   cierresCaja          CierreCaja[]   @relation("CierreCajaUsuario")
   conciliacionesCaja   ConciliacionCaja[] @relation("ConciliacionCajaUsuario")
+  arqueosCaja          ArqueoCaja[]   @relation("ArqueoCajaUsuario")
   auditoriasActor      Auditoria[]    @relation("AuditoriaActor")
 
   empresasCreadas                   Empresa[]                    @relation("EmpresaCreatedBy")
@@ -315,6 +316,8 @@ model Usuario {
   cierresActualizados               CierreCaja[]                 @relation("CierreCajaUpdatedBy")
   conciliacionesCajaCreadas         ConciliacionCaja[]           @relation("ConciliacionCajaCreatedBy")
   conciliacionesCajaActualizadas    ConciliacionCaja[]           @relation("ConciliacionCajaUpdatedBy")
+  arqueosCajaCreados                ArqueoCaja[]                 @relation("ArqueoCajaCreatedBy")
+  arqueosCajaActualizados           ArqueoCaja[]                 @relation("ArqueoCajaUpdatedBy")
   movimientosCajaCreados            MovimientoCaja[]             @relation("MovimientoCajaCreatedBy")
   movimientosCajaActualizados       MovimientoCaja[]             @relation("MovimientoCajaUpdatedBy")
   conciliacionCajaDetallesCreados        ConciliacionCajaDetalle[] @relation("ConciliacionCajaDetalleCreatedBy")
@@ -1103,6 +1106,7 @@ model AperturaCaja {
   updatedBy   Usuario?         @relation("AperturaCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   cierre      CierreCaja?
   conciliaciones ConciliacionCaja[]
+  arqueos     ArqueoCaja[]
   movimientos MovimientoCaja[]
 
   @@index([cajaId, estado])
@@ -1160,6 +1164,32 @@ model ConciliacionCajaDetalle {
   @@index([formaPagoId])
   @@index([deletedAt])
   @@map("conciliacion_caja_detalle")
+}
+
+model ArqueoCaja {
+  id                  String    @id @default(uuid()) @db.Uuid
+  aperturaCajaId      String    @map("apertura_caja_id") @db.Uuid
+  usuarioId           String    @map("usuario_id") @db.Uuid
+  fechaArqueo         DateTime  @default(now()) @map("fecha_arqueo")
+  montoSistemaEfectivo Decimal  @default(0) @map("monto_sistema_efectivo") @db.Decimal(14, 2)
+  montoDeclaradoEfectivo Decimal @default(0) @map("monto_declarado_efectivo") @db.Decimal(14, 2)
+  diferenciaEfectivo  Decimal   @default(0) @map("diferencia_efectivo") @db.Decimal(14, 2)
+  observaciones       String?   @db.VarChar(255)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  deletedAt           DateTime? @map("deleted_at")
+  createdById         String?   @map("created_by") @db.Uuid
+  updatedById         String?   @map("updated_by") @db.Uuid
+
+  aperturaCaja AperturaCaja @relation(fields: [aperturaCajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  usuario      Usuario      @relation("ArqueoCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy    Usuario?     @relation("ArqueoCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy    Usuario?     @relation("ArqueoCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([aperturaCajaId, fechaArqueo])
+  @@index([usuarioId, fechaArqueo])
+  @@index([deletedAt])
+  @@map("arqueo_caja")
 }
 
 model CierreCaja {

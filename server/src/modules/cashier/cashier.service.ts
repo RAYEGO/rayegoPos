@@ -963,3 +963,130 @@ export async function saveCashReconciliation(
     },
   }
 }
+
+type CashCountPayload = {
+  openingId: string
+  countedCashAmount: number
+  observations?: string
+}
+
+type CashCountsQuery = {
+  openingId: string
+}
+
+export async function createCashCount(request: FastifyRequest, payload: CashCountPayload) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const opening = await prisma.aperturaCaja.findFirst({
+    where: {
+      id: payload.openingId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      usuarioId: true,
+      estado: true,
+    },
+  })
+
+  if (!opening) {
+    throw createHttpError(404, 'Apertura de caja no encontrada.')
+  }
+
+  if (opening.usuarioId !== userId) {
+    throw createHttpError(403, 'No tienes permisos para registrar arqueo en esta caja.')
+  }
+
+  if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
+    throw createHttpError(400, 'La caja no está abierta.')
+  }
+
+  const { expectedMap, cashMethodId } = await buildExpectedByPaymentMethod(opening.id)
+  const expectedCashAmount = roundMoney(expectedMap.get(cashMethodId) ?? 0)
+  const countedCashAmount = roundMoney(payload.countedCashAmount)
+  const differenceCashAmount = roundMoney(countedCashAmount - expectedCashAmount)
+
+  const observations = toOptionalString(payload.observations)
+  if (differenceCashAmount !== 0 && !observations) {
+    throw createHttpError(
+      400,
+      'Debes registrar observaciones cuando exista diferencia en el arqueo.',
+    )
+  }
+
+  const cashCount = await prisma.arqueoCaja.create({
+    data: {
+      aperturaCajaId: opening.id,
+      usuarioId: userId,
+      montoSistemaEfectivo: toDecimal(expectedCashAmount, 2),
+      montoDeclaradoEfectivo: toDecimal(countedCashAmount, 2),
+      diferenciaEfectivo: toDecimal(differenceCashAmount, 2),
+      observaciones: observations,
+      createdById: userId,
+      updatedById: userId,
+    },
+  })
+
+  return {
+    success: true,
+    cashCountId: cashCount.id,
+    createdAt: formatDateTime(cashCount.fechaArqueo),
+    expectedCashAmount,
+    countedCashAmount,
+    differenceCashAmount,
+  }
+}
+
+export async function getCashCounts(request: FastifyRequest, query: CashCountsQuery) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const opening = await prisma.aperturaCaja.findFirst({
+    where: {
+      id: query.openingId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      usuarioId: true,
+    },
+  })
+
+  if (!opening) {
+    throw createHttpError(404, 'Apertura de caja no encontrada.')
+  }
+
+  if (opening.usuarioId !== userId) {
+    throw createHttpError(403, 'No tienes permisos para ver arqueos de esta caja.')
+  }
+
+  const rows = await prisma.arqueoCaja.findMany({
+    where: {
+      deletedAt: null,
+      aperturaCajaId: opening.id,
+    },
+    orderBy: { fechaArqueo: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      fechaArqueo: true,
+      montoSistemaEfectivo: true,
+      montoDeclaradoEfectivo: true,
+      diferenciaEfectivo: true,
+      observaciones: true,
+      createdBy: { select: { nombres: true, apellidos: true } },
+    },
+  })
+
+  return {
+    openingId: opening.id,
+    rows: rows.map((row) => ({
+      id: row.id,
+      createdAt: formatDateTime(row.fechaArqueo),
+      expectedCashAmount: decimalToNumber(row.montoSistemaEfectivo),
+      countedCashAmount: decimalToNumber(row.montoDeclaradoEfectivo),
+      differenceCashAmount: decimalToNumber(row.diferenciaEfectivo),
+      observations: row.observaciones ?? null,
+      actorName: row.createdBy ? formatFullName(row.createdBy) : 'Sistema',
+    })),
+  }
+}

@@ -18,7 +18,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
+  CardDescription,
   CardContent,
+  CardHeader,
+  CardTitle,
 } from '@/components/ui/card'
 import {
   Dialog,
@@ -54,7 +57,9 @@ import type {
   CashDrawerStatus,
   CashMovementType,
   CashierDashboardResponse,
+  CashCountsResponse,
   CashReconciliationPreviewResponse,
+  CreateCashCountPayload,
   OpenCashDrawerPayload,
   CreateCashMovementPayload,
   SaveCashReconciliationPayload,
@@ -98,8 +103,15 @@ const createCashMovementSchema = z.object({
   observations: z.string().optional(),
 })
 
+const cashCountSchema = z.object({
+  openingId: z.string().min(1, 'Selecciona una apertura de caja'),
+  countedCashAmount: z.number().min(0, 'El monto debe ser mayor o igual a 0'),
+  observations: z.string().optional(),
+})
+
 type OpenCashDrawerFormValues = z.infer<typeof openCashDrawerSchema>
 type CreateCashMovementFormValues = z.infer<typeof createCashMovementSchema>
+type CashCountFormValues = z.infer<typeof cashCountSchema>
 
 export function CajaPage() {
   const { logout, session } = useAuth()
@@ -112,6 +124,7 @@ export function CajaPage() {
   // Dialog state
   const [openDrawerDialogOpen, setOpenDrawerDialogOpen] = useState(false)
   const [createMovementDialogOpen, setCreateMovementDialogOpen] = useState(false)
+  const [cashCountDialogOpen, setCashCountDialogOpen] = useState(false)
   const [closeConfirmDialogOpen, setCloseConfirmDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedDrawerId, setSelectedDrawerId] = useState<string | null>(null)
@@ -125,6 +138,10 @@ export function CajaPage() {
   const [reconciliationObservations, setReconciliationObservations] = useState('')
   const [isReconciliationLoading, setIsReconciliationLoading] = useState(false)
   const [reconciliationError, setReconciliationError] = useState<string | null>(null)
+
+  const [cashCounts, setCashCounts] = useState<CashCountsResponse | null>(null)
+  const [isCashCountsLoading, setIsCashCountsLoading] = useState(false)
+  const [cashCountsError, setCashCountsError] = useState<string | null>(null)
 
   // Forms
   const openDrawerForm = useForm<OpenCashDrawerFormValues>({
@@ -144,6 +161,15 @@ export function CajaPage() {
       amount: 0,
       concept: '',
       reference: '',
+      observations: '',
+    },
+  })
+
+  const cashCountForm = useForm<CashCountFormValues>({
+    resolver: zodResolver(cashCountSchema),
+    defaultValues: {
+      openingId: '',
+      countedCashAmount: 0,
       observations: '',
     },
   })
@@ -245,6 +271,32 @@ export function CajaPage() {
     }
   }
 
+  const handleCreateCashCount = async (values: CashCountFormValues) => {
+    if (!accessToken) return
+
+    setIsSubmitting(true)
+    try {
+      await cashierService.createCashCount(accessToken, values as CreateCashCountPayload)
+      toast.success('Arqueo registrado correctamente.')
+      setCashCountDialogOpen(false)
+      cashCountForm.reset({
+        openingId: values.openingId,
+        countedCashAmount: 0,
+        observations: '',
+      })
+      await Promise.all([loadDashboard(), loadCashCounts(values.openingId)])
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+
+      toast.error(err instanceof Error ? err.message : 'Error al registrar el arqueo.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const loadReconciliationPreview = useCallback(
     async (openingId: string) => {
       if (!accessToken) return
@@ -274,6 +326,30 @@ export function CajaPage() {
     [accessToken, handleUnauthorized],
   )
 
+  const loadCashCounts = useCallback(
+    async (openingId: string) => {
+      if (!accessToken) return
+
+      setIsCashCountsLoading(true)
+      setCashCountsError(null)
+      try {
+        const response = await cashierService.getCashCounts(accessToken, openingId)
+        setCashCounts(response)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+
+        setCashCounts(null)
+        setCashCountsError(err instanceof Error ? err.message : 'Error al cargar arqueos.')
+      } finally {
+        setIsCashCountsLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+
   useEffect(() => {
     if (!selectedDrawerId) {
       return
@@ -284,7 +360,13 @@ export function CajaPage() {
     }
 
     void loadReconciliationPreview(selectedDrawerId)
-  }, [loadReconciliationPreview, reconciliationPreview?.opening.id, selectedDrawerId])
+    void loadCashCounts(selectedDrawerId)
+  }, [
+    loadCashCounts,
+    loadReconciliationPreview,
+    reconciliationPreview?.opening.id,
+    selectedDrawerId,
+  ])
 
   const handleSelectDrawer = useCallback(
     async (openingId: string) => {
@@ -294,9 +376,11 @@ export function CajaPage() {
       setReconciliationCounted({})
       setReconciliationObservations('')
       setReconciliationError(null)
-      await loadReconciliationPreview(openingId)
+      setCashCounts(null)
+      setCashCountsError(null)
+      await Promise.all([loadReconciliationPreview(openingId), loadCashCounts(openingId)])
     },
-    [loadReconciliationPreview],
+    [loadCashCounts, loadReconciliationPreview],
   )
 
   const reconciliationTotals = useMemo(() => {
@@ -405,6 +489,11 @@ export function CajaPage() {
     ? cashMovements.filter((movement) => movement.openingId === selectedDrawerId)
     : []
   const canOperateSelected = selectedDrawer?.status === 'ABIERTA'
+  const expectedCashAmountForCount =
+    reconciliationPreview?.rows.find((row) => row.code === 'EFECTIVO')?.expectedAmount ?? 0
+  const watchedCountedCashAmount = cashCountForm.watch('countedCashAmount')
+  const watchedCashCountObservations = cashCountForm.watch('observations')
+  const cashCountDifferenceAmount = watchedCountedCashAmount - expectedCashAmountForCount
 
   if (isLoading) {
     return (
@@ -636,7 +725,16 @@ export function CajaPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => toast.message('Arqueo en desarrollo.')}
+                  onClick={() => {
+                    const expectedCashAmount =
+                      reconciliationPreview?.rows.find((row) => row.code === 'EFECTIVO')?.expectedAmount ?? 0
+                    cashCountForm.reset({
+                      openingId: selectedDrawer.id,
+                      countedCashAmount: expectedCashAmount,
+                      observations: '',
+                    })
+                    setCashCountDialogOpen(true)
+                  }}
                 >
                   <ClipboardCheck className="mr-1 h-4 w-4" />
                   Realizar arqueo
@@ -949,9 +1047,68 @@ export function CajaPage() {
             </TabsContent>
 
             <TabsContent value="historial" className="space-y-4 pt-4">
-              {reconciliationPreview?.history?.length ? (
-                <Card>
-                  <CardContent className="p-0">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Arqueos (efectivo)</CardTitle>
+                  <CardDescription>Conteos físicos registrados durante el turno.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {isCashCountsLoading ? (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader className="h-7 w-7" />
+                    </div>
+                  ) : cashCountsError ? (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                      {cashCountsError}
+                    </div>
+                  ) : cashCounts?.rows?.length ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Esperado</TableHead>
+                          <TableHead>Contado</TableHead>
+                          <TableHead>Diferencia</TableHead>
+                          <TableHead className="hidden md:table-cell">Usuario</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {cashCounts.rows.map((row) => (
+                          <TableRow key={row.id}>
+                            <TableCell className="text-muted-foreground">{row.createdAt}</TableCell>
+                            <TableCell className="font-medium text-foreground">
+                              {formatCurrency(row.expectedCashAmount)}
+                            </TableCell>
+                            <TableCell className="font-medium text-foreground">
+                              {formatCurrency(row.countedCashAmount)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={row.differenceCashAmount === 0 ? 'success' : 'warning'}>
+                                {formatCurrency(row.differenceCashAmount)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="hidden md:table-cell text-muted-foreground">
+                              {row.actorName}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed p-8 text-center">
+                      <p className="text-sm text-muted-foreground">Aún no hay arqueos registrados.</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Conciliaciones</CardTitle>
+                  <CardDescription>Conciliaciones guardadas por medio de pago.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {reconciliationPreview?.history?.length ? (
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -984,15 +1141,15 @@ export function CajaPage() {
                         ))}
                       </TableBody>
                     </Table>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="rounded-2xl border border-dashed p-8 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    Aún no hay conciliaciones registradas para este turno.
-                  </p>
-                </div>
-              )}
+                  ) : (
+                    <div className="rounded-2xl border border-dashed p-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Aún no hay conciliaciones registradas para este turno.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
         </Card>
@@ -1150,6 +1307,102 @@ export function CajaPage() {
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cashCountDialogOpen} onOpenChange={setCashCountDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Arqueo de efectivo</DialogTitle>
+            <DialogDescription>
+              Registra el conteo físico de efectivo durante el turno. No cierra la caja.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={cashCountForm.handleSubmit(handleCreateCashCount)} className="space-y-4">
+            <input type="hidden" {...cashCountForm.register('openingId')} />
+            <div className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Esperado</span>
+                <span className="font-medium text-foreground">
+                  {formatCurrency(expectedCashAmountForCount)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Diferencia</span>
+                <Badge variant={cashCountDifferenceAmount === 0 ? 'success' : 'warning'}>
+                  {formatCurrency(cashCountDifferenceAmount)}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="countedCashAmount" className="text-xs font-medium text-foreground">
+                Contado (efectivo)
+              </label>
+              <Input
+                id="countedCashAmount"
+                type="number"
+                step="0.01"
+                {...cashCountForm.register('countedCashAmount', { valueAsNumber: true })}
+              />
+              {cashCountForm.formState.errors.countedCashAmount ? (
+                <p className="text-xs text-destructive">
+                  {cashCountForm.formState.errors.countedCashAmount.message}
+                </p>
+              ) : null}
+            </div>
+
+            {cashCountDifferenceAmount !== 0 ? (
+              <div className="space-y-2">
+                <label htmlFor="cashCountObservations" className="text-xs font-medium text-foreground">
+                  Observaciones del cajero (obligatorio)
+                </label>
+                <Textarea
+                  id="cashCountObservations"
+                  placeholder="Explica la diferencia encontrada."
+                  {...cashCountForm.register('observations')}
+                />
+                {watchedCashCountObservations?.trim() ? null : (
+                  <p className="text-xs text-destructive">
+                    Las observaciones son obligatorias cuando existe diferencia.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label htmlFor="cashCountObservations" className="text-xs font-medium text-foreground">
+                  Observaciones (opcional)
+                </label>
+                <Textarea
+                  id="cashCountObservations"
+                  placeholder="Agrega observaciones si es necesario."
+                  {...cashCountForm.register('observations')}
+                />
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCashCountDialogOpen(false)}
+                disabled={isSubmitting}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader className="h-4 w-4 text-current" />
+                    Guardando...
+                  </>
+                ) : (
+                  'Registrar arqueo'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

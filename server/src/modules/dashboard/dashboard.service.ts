@@ -1,6 +1,5 @@
 import {
   EstadoAperturaCaja,
-  EstadoCompra,
   EstadoVenta,
   OperacionCaja,
   Prisma,
@@ -44,6 +43,10 @@ function formatDate(value: Date) {
   return value.toISOString().slice(0, 10)
 }
 
+function formatFullName(user: { nombres: string; apellidos: string | null }) {
+  return `${user.nombres} ${user.apellidos ?? ''}`.trim()
+}
+
 async function getAuthenticatedUserId(request: FastifyRequest) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
 
@@ -72,7 +75,6 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
   const branchId = filters.branchId
   const today = startOfDay(new Date())
   const expiringUntil = addDays(today, 30)
-  const last30Days = addDays(today, -30)
 
   const branches = await prisma.sucursal.findMany({
     where: { deletedAt: null, activo: true },
@@ -81,11 +83,6 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
   })
 
   const salesWhere: Prisma.VentaWhereInput = {
-    deletedAt: null,
-    ...(branchId ? { sucursalId: branchId } : {}),
-  }
-
-  const purchaseWhere: Prisma.CompraWhereInput = {
     deletedAt: null,
     ...(branchId ? { sucursalId: branchId } : {}),
   }
@@ -99,21 +96,13 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
   const [
     salesTodayAggregate,
     salesTodayCount,
-    salesTodayPayments,
-    paymentMethods,
-    pendingCollectionsAggregate,
-    purchaseOpenCount,
-    purchaseOutstandingAggregate,
-    availableStockAggregate,
-    customersTotalCount,
-    customersActiveCount,
     expiringLots,
     activeCashDrawer,
     recentSales,
-    salesLast30Days,
     productStockByProduct,
     inventoryThresholds,
     productsInfo,
+    recentCashMovements,
   ] = await Promise.all([
     prisma.venta.aggregate({
       where: {
@@ -128,71 +117,6 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
         ...salesWhere,
         fechaEmision: { gte: today },
         estado: { not: EstadoVenta.ANULADA },
-      },
-    }),
-    prisma.ventaPago.findMany({
-      where: {
-        deletedAt: null,
-        venta: {
-          ...salesWhere,
-          fechaEmision: { gte: today },
-          estado: { not: EstadoVenta.ANULADA },
-        },
-      },
-      select: {
-        monto: true,
-        formaPago: {
-          select: {
-            codigo: true,
-          },
-        },
-      },
-    }),
-    prisma.formaPago.findMany({
-      where: {
-        deletedAt: null,
-        activo: true,
-      },
-      select: {
-        codigo: true,
-      },
-      orderBy: { codigo: 'asc' },
-    }),
-    prisma.venta.aggregate({
-      where: {
-        ...salesWhere,
-        estado: EstadoVenta.EMITIDA,
-      },
-      _sum: { saldoPendiente: true },
-    }),
-    prisma.compra.count({
-      where: {
-        ...purchaseWhere,
-        estado: { in: [EstadoCompra.REGISTRADA, EstadoCompra.PARCIAL] },
-      },
-    }),
-    prisma.compra.aggregate({
-      where: {
-        ...purchaseWhere,
-        estado: { in: [EstadoCompra.REGISTRADA, EstadoCompra.PARCIAL] },
-      },
-      _sum: { saldoPendiente: true },
-    }),
-    prisma.lote.aggregate({
-      where: lotWhere,
-      _sum: { stockDisponible: true },
-    }),
-    prisma.cliente.count({
-      where: {
-        deletedAt: null,
-        ...(branchId ? { ventas: { some: { sucursalId: branchId, deletedAt: null } } } : {}),
-      },
-    }),
-    prisma.cliente.count({
-      where: {
-        deletedAt: null,
-        activo: true,
-        ...(branchId ? { ventas: { some: { sucursalId: branchId, deletedAt: null } } } : {}),
       },
     }),
     prisma.lote.findMany({
@@ -282,19 +206,6 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
       orderBy: { fechaEmision: 'desc' },
       take: 10,
     }),
-    prisma.venta.findMany({
-      where: {
-        ...salesWhere,
-        fechaEmision: { gte: last30Days },
-        estado: { not: EstadoVenta.ANULADA },
-        clienteId: { not: null },
-      },
-      select: {
-        clienteId: true,
-        total: true,
-        cliente: { select: { nombreCompleto: true, razonSocial: true } },
-      },
-    }),
     prisma.lote.groupBy({
       by: ['productoId'],
       where: lotWhere,
@@ -324,64 +235,28 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
         unidadMedida: { select: { simbolo: true } },
       },
     }),
+    prisma.movimientoCaja.findMany({
+      where: {
+        deletedAt: null,
+        ...(branchId ? { aperturaCaja: { caja: { sucursalId: branchId } } } : {}),
+      },
+      select: {
+        id: true,
+        fechaMovimiento: true,
+        tipo: true,
+        operacion: true,
+        monto: true,
+        referencia: true,
+        formaPago: { select: { codigo: true } },
+        createdBy: { select: { nombres: true, apellidos: true } },
+      },
+      orderBy: { fechaMovimiento: 'desc' },
+      take: 15,
+    }),
   ])
 
   const salesTodayTotal = decimalToNumber(salesTodayAggregate._sum.total)
   const averageTicket = salesTodayCount > 0 ? salesTodayTotal / salesTodayCount : 0
-
-  const pendingCollections = decimalToNumber(pendingCollectionsAggregate._sum.saldoPendiente)
-  const purchaseOutstanding = decimalToNumber(purchaseOutstandingAggregate._sum.saldoPendiente)
-  const availableStockUnits = decimalToNumber(availableStockAggregate._sum.stockDisponible)
-  const activeProductsCount = productsInfo.length
-
-  const paymentSummaryMap = new Map<
-    string,
-    { method: string; salesAmount: number; collectedAmount: number; operations: number }
-  >()
-
-  for (const method of paymentMethods) {
-    paymentSummaryMap.set(method.codigo, {
-      method: method.codigo,
-      salesAmount: 0,
-      collectedAmount: 0,
-      operations: 0,
-    })
-  }
-
-  for (const payment of salesTodayPayments) {
-    const summary = paymentSummaryMap.get(payment.formaPago.codigo)
-    if (!summary) continue
-    const amount = decimalToNumber(payment.monto)
-    summary.salesAmount += amount
-    summary.collectedAmount += amount
-    summary.operations += 1
-  }
-
-  const cashPaymentSummary = Array.from(paymentSummaryMap.values()).sort(
-    (a, b) => b.collectedAmount - a.collectedAmount,
-  )
-
-  const topCustomerMap = new Map<
-    string,
-    { customerId: string; name: string; total: number; operations: number }
-  >()
-
-  for (const sale of salesLast30Days) {
-    if (!sale.clienteId) continue
-    const current = topCustomerMap.get(sale.clienteId) ?? {
-      customerId: sale.clienteId,
-      name: sale.cliente?.nombreCompleto ?? sale.cliente?.razonSocial ?? 'Cliente',
-      total: 0,
-      operations: 0,
-    }
-    current.total += decimalToNumber(sale.total)
-    current.operations += 1
-    topCustomerMap.set(sale.clienteId, current)
-  }
-
-  const topCustomers = Array.from(topCustomerMap.values())
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10)
 
   const inventoryMinMap = new Map<string, number>()
   for (const item of inventoryThresholds) {
@@ -446,23 +321,46 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
       })()
     : null
 
+  const lastCashCount = activeCashDrawer
+    ? await prisma.arqueoCaja.findFirst({
+        where: {
+          deletedAt: null,
+          aperturaCajaId: activeCashDrawer.id,
+        },
+        select: {
+          fechaArqueo: true,
+          montoSistemaEfectivo: true,
+          montoDeclaradoEfectivo: true,
+          diferenciaEfectivo: true,
+        },
+        orderBy: { fechaArqueo: 'desc' },
+      })
+    : null
+
   return {
-    kpis: {
-      salesTodayTotal,
-      salesTodayCount,
+    sales: {
+      todayTotal: salesTodayTotal,
+      todayCount: salesTodayCount,
       averageTicket,
-      pendingCollections,
-      purchaseOpenCount,
-      purchaseOutstanding,
-      availableStockUnits,
+    },
+    cash: {
+      activeDrawer: cashDrawer
+        ? {
+            ...cashDrawer,
+            lastCashCount: lastCashCount
+              ? {
+                  createdAt: lastCashCount.fechaArqueo.toISOString(),
+                  expectedCashAmount: decimalToNumber(lastCashCount.montoSistemaEfectivo),
+                  countedCashAmount: decimalToNumber(lastCashCount.montoDeclaradoEfectivo),
+                  differenceCashAmount: decimalToNumber(lastCashCount.diferenciaEfectivo),
+                }
+              : null,
+          }
+        : null,
+    },
+    alerts: {
       expiringLotsCount: expiringLots.length,
       lowStockProductsCount: lowStockRows.length,
-      customersTotalCount,
-      customersActiveCount,
-      activeProductsCount,
-    },
-    cashPaymentSummary,
-    alerts: {
       expiringLots: expiringLots.map((lot) => ({
         id: lot.id,
         branchName: lot.sucursal.nombre,
@@ -475,17 +373,27 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
       })),
       lowStockProducts: lowStockRows.slice(0, 10),
     },
-    topCustomers,
-    recentSales: recentSales.map((sale) => ({
-      id: sale.id,
-      issuedAt: sale.fechaEmision.toISOString(),
-      status: sale.estado,
-      document: sale.serie && sale.numero ? `${sale.serie}-${sale.numero}` : null,
-      receiptType: sale.tipoComprobante,
-      customerName: sale.cliente?.nombreCompleto ?? sale.cliente?.razonSocial ?? null,
-      total: decimalToNumber(sale.total),
-    })),
-    cashDrawer,
+    activity: {
+      recentSales: recentSales.map((sale) => ({
+        id: sale.id,
+        issuedAt: sale.fechaEmision.toISOString(),
+        status: sale.estado,
+        document: sale.serie && sale.numero ? `${sale.serie}-${sale.numero}` : null,
+        receiptType: sale.tipoComprobante,
+        customerName: sale.cliente?.nombreCompleto ?? sale.cliente?.razonSocial ?? null,
+        total: decimalToNumber(sale.total),
+      })),
+      recentCashMovements: recentCashMovements.map((movement) => ({
+        id: movement.id,
+        createdAt: movement.fechaMovimiento.toISOString(),
+        type: movement.tipo,
+        operation: movement.operacion,
+        amount: decimalToNumber(movement.monto),
+        reference: movement.referencia ?? null,
+        paymentMethod: movement.formaPago?.codigo ?? null,
+        actorName: movement.createdBy ? formatFullName(movement.createdBy) : 'Sistema',
+      })),
+    },
     options: {
       branches,
     },

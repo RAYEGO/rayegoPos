@@ -100,6 +100,36 @@ export type SaveCashReconciliationResponse = {
   }
 }
 
+export type CreateCashCountPayload = {
+  openingId: string
+  countedCashAmount: number
+  observations?: string
+}
+
+export type CreateCashCountResponse = {
+  success: boolean
+  cashCountId: string
+  createdAt: string | null
+  expectedCashAmount: number
+  countedCashAmount: number
+  differenceCashAmount: number
+}
+
+export type CashCountRecord = {
+  id: string
+  createdAt: string | null
+  expectedCashAmount: number
+  countedCashAmount: number
+  differenceCashAmount: number
+  observations: string | null
+  actorName: string
+}
+
+export type CashCountsResponse = {
+  openingId: string
+  rows: CashCountRecord[]
+}
+
 export interface BranchOption {
   id: string
   nombre: string

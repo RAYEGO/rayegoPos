@@ -5,6 +5,9 @@ import type {
   CloseCashDrawerPayload,
   CreateCashMovementPayload,
   CashReconciliationPreviewResponse,
+  CashCountsResponse,
+  CreateCashCountPayload,
+  CreateCashCountResponse,
   SaveCashReconciliationPayload,
   SaveCashReconciliationResponse,
 } from '@/types/cashier'
@@ -74,6 +77,22 @@ export const cashierService = {
       method: 'POST',
       accessToken,
       body: payload,
+    })
+  },
+
+  createCashCount(accessToken: string, payload: CreateCashCountPayload) {
+    return apiRequest<CreateCashCountResponse>('/api/cashier/cash-count', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  getCashCounts(accessToken: string, openingId: string) {
+    const searchParams = new URLSearchParams()
+    searchParams.set('openingId', openingId)
+    return apiRequest<CashCountsResponse>(`/api/cashier/cash-counts?${searchParams.toString()}`, {
+      accessToken,
     })
   },
 }

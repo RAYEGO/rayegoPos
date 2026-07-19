@@ -2,8 +2,10 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
   closeCashDrawer,
+  createCashCount,
   createCashMovement,
   getCashierDashboard,
+  getCashCounts,
   getCashReconciliationPreview,
   saveCashReconciliation,
   openCashDrawer,
@@ -44,6 +46,16 @@ const cashReconciliationSchema = z.object({
   observations: z.string().max(255).optional(),
 })
 
+const cashCountSchema = z.object({
+  openingId: z.string().uuid(),
+  countedCashAmount: z.number().nonnegative(),
+  observations: z.string().max(255).optional(),
+})
+
+const cashCountsQuerySchema = z.object({
+  openingId: z.string().uuid(),
+})
+
 export async function cashierRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = cashierDashboardQuerySchema.parse(request.query)
@@ -78,5 +90,15 @@ export async function cashierRoutes(app: FastifyInstance) {
   app.post('/reconciliation', async (request) => {
     const body = cashReconciliationSchema.parse(request.body)
     return saveCashReconciliation(request, body)
+  })
+
+  app.post('/cash-count', async (request) => {
+    const body = cashCountSchema.parse(request.body)
+    return createCashCount(request, body)
+  })
+
+  app.get('/cash-counts', async (request) => {
+    const query = cashCountsQuerySchema.parse(request.query)
+    return getCashCounts(request, query)
   })
 }
