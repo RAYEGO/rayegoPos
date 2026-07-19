@@ -1,4 +1,4 @@
-import { apiRequest, apiRequestBlob } from '@/services/apiClient'
+import { apiRequest } from '@/services/apiClient'
 import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } from '@/types/sales'
 
 type SalesDashboardFilters = {
@@ -60,12 +60,6 @@ export const salesService = {
 
   getReceipt(accessToken: string, saleId: string) {
     return apiRequest<SaleReceiptResponse>(`/api/sales/${saleId}/receipt`, {
-      accessToken,
-    })
-  },
-
-  getReceiptPdf(accessToken: string, saleId: string) {
-    return apiRequestBlob(`/api/sales/${saleId}/receipt/pdf`, {
       accessToken,
     })
   },
