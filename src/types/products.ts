@@ -52,7 +52,9 @@ export type ProductCatalogResponse = {
 export type ProductOptionsResponse = {
   categories: Array<{
     id: string
+    code: string
     name: string
+    color: string | null
     activeCount: number
     skuCount: number
   }>
@@ -77,6 +79,98 @@ export type ProductOptionsResponse = {
     name: string
     productCount: number
   }>
+}
+
+export type MasterCategoryRecord = {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  color: string | null
+  orden: number
+  activo: boolean
+  productCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MasterCategoriesResponse = {
+  rows: MasterCategoryRecord[]
+}
+
+export type UpsertMasterCategoryPayload = {
+  codigo: string
+  nombre: string
+  descripcion?: string
+  color?: string
+  orden?: number
+  activo?: boolean
+}
+
+export type MasterLaboratoryRecord = {
+  id: string
+  nombre: string
+  pais: string | null
+  descripcion: string | null
+  activo: boolean
+  productCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MasterLaboratoriesResponse = {
+  rows: MasterLaboratoryRecord[]
+}
+
+export type UpsertMasterLaboratoryPayload = {
+  nombre: string
+  pais?: string
+  descripcion?: string
+  activo?: boolean
+}
+
+export type MasterPresentationRecord = {
+  id: string
+  nombre: string
+  descripcion: string | null
+  activo: boolean
+  productCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MasterPresentationsResponse = {
+  rows: MasterPresentationRecord[]
+}
+
+export type UpsertMasterPresentationPayload = {
+  nombre: string
+  descripcion?: string
+  activo?: boolean
+}
+
+export type MasterUnitRecord = {
+  id: string
+  codigo: string
+  nombre: string
+  simbolo: string
+  descripcion: string | null
+  activo: boolean
+  productCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MasterUnitsResponse = {
+  rows: MasterUnitRecord[]
+}
+
+export type UpsertMasterUnitPayload = {
+  codigo: string
+  nombre: string
+  simbolo: string
+  descripcion?: string
+  activo?: boolean
 }
 
 export type CreateProductPayload = {

@@ -277,9 +277,7 @@ export async function getProductOptions() {
           deletedAt: null,
           activo: true,
         },
-        orderBy: {
-          nombre: 'asc',
-        },
+        orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
         include: {
           _count: {
             select: {
@@ -355,7 +353,9 @@ export async function getProductOptions() {
   return {
     categories: categories.map((category) => ({
       id: category.id,
+      code: category.codigo,
       name: category.nombre,
+      color: category.color,
       activeCount: category._count.productos,
       skuCount: category._count.productos,
     })),
@@ -381,6 +381,575 @@ export async function getProductOptions() {
       productCount: principle._count.productos,
     })),
   }
+}
+
+type MasterCategoryPayload = {
+  codigo: string
+  nombre: string
+  descripcion?: string
+  color?: string
+  orden?: number
+  activo?: boolean
+}
+
+type MasterLaboratoryPayload = {
+  nombre: string
+  pais?: string
+  descripcion?: string
+  activo?: boolean
+}
+
+type MasterPresentationPayload = {
+  nombre: string
+  descripcion?: string
+  activo?: boolean
+}
+
+type MasterUnitPayload = {
+  codigo: string
+  nombre: string
+  simbolo: string
+  descripcion?: string
+  activo?: boolean
+}
+
+function normalizeCode(value: string) {
+  return value.trim().toUpperCase()
+}
+
+function normalizeName(value: string) {
+  return value.trim()
+}
+
+export async function listMasterCategories() {
+  const categories = await prisma.categoria.findMany({
+    where: {
+      deletedAt: null,
+    },
+    orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+    include: {
+      _count: {
+        select: {
+          productos: {
+            where: {
+              deletedAt: null,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return {
+    rows: categories.map((category) => ({
+      id: category.id,
+      codigo: category.codigo,
+      nombre: category.nombre,
+      descripcion: category.descripcion,
+      color: category.color,
+      orden: category.orden,
+      activo: category.activo,
+      productCount: category._count.productos,
+      createdAt: category.createdAt.toISOString(),
+      updatedAt: category.updatedAt.toISOString(),
+    })),
+  }
+}
+
+export async function createMasterCategory(
+  payload: MasterCategoryPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    const created = await prisma.categoria.create({
+      data: {
+        codigo: normalizeCode(payload.codigo),
+        nombre: normalizeName(payload.nombre),
+        descripcion: toOptionalString(payload.descripcion),
+        color: toOptionalString(payload.color),
+        orden: payload.orden ?? 0,
+        activo: payload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true, id: created.id }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe una categoría con ese código o nombre.')
+    }
+    throw error
+  }
+}
+
+export async function updateMasterCategory(
+  categoryId: string,
+  payload: MasterCategoryPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    await prisma.categoria.update({
+      where: {
+        id: categoryId,
+        deletedAt: null,
+      },
+      data: {
+        codigo: normalizeCode(payload.codigo),
+        nombre: normalizeName(payload.nombre),
+        descripcion: toOptionalString(payload.descripcion),
+        color: toOptionalString(payload.color),
+        orden: payload.orden ?? 0,
+        activo: payload.activo ?? true,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe una categoría con ese código o nombre.')
+    }
+    throw error
+  }
+}
+
+export async function deleteMasterCategory(
+  categoryId: string,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const productCount = await prisma.producto.count({
+    where: {
+      deletedAt: null,
+      categoriaId: categoryId,
+    },
+  })
+
+  if (productCount > 0) {
+    throw createHttpError(
+      409,
+      'No se puede eliminar la categoría porque tiene productos asociados. Desactívala en su lugar.',
+    )
+  }
+
+  await prisma.categoria.update({
+    where: {
+      id: categoryId,
+      deletedAt: null,
+    },
+    data: {
+      deletedAt: new Date(),
+      activo: false,
+      updatedById: userId,
+    },
+  })
+
+  return { success: true }
+}
+
+export async function listMasterLaboratories() {
+  const laboratories = await prisma.laboratorio.findMany({
+    where: {
+      deletedAt: null,
+    },
+    orderBy: [{ nombre: 'asc' }],
+    include: {
+      _count: {
+        select: {
+          productos: {
+            where: {
+              deletedAt: null,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return {
+    rows: laboratories.map((laboratory) => ({
+      id: laboratory.id,
+      nombre: laboratory.nombre,
+      pais: laboratory.pais,
+      descripcion: laboratory.descripcion,
+      activo: laboratory.activo,
+      productCount: laboratory._count.productos,
+      createdAt: laboratory.createdAt.toISOString(),
+      updatedAt: laboratory.updatedAt.toISOString(),
+    })),
+  }
+}
+
+export async function createMasterLaboratory(
+  payload: MasterLaboratoryPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    const created = await prisma.laboratorio.create({
+      data: {
+        nombre: normalizeName(payload.nombre),
+        pais: toOptionalString(payload.pais),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true, id: created.id }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe un laboratorio con ese nombre.')
+    }
+    throw error
+  }
+}
+
+export async function updateMasterLaboratory(
+  laboratoryId: string,
+  payload: MasterLaboratoryPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    await prisma.laboratorio.update({
+      where: {
+        id: laboratoryId,
+        deletedAt: null,
+      },
+      data: {
+        nombre: normalizeName(payload.nombre),
+        pais: toOptionalString(payload.pais),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe un laboratorio con ese nombre.')
+    }
+    throw error
+  }
+}
+
+export async function deleteMasterLaboratory(
+  laboratoryId: string,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const productCount = await prisma.producto.count({
+    where: {
+      deletedAt: null,
+      laboratorioId: laboratoryId,
+    },
+  })
+
+  if (productCount > 0) {
+    throw createHttpError(
+      409,
+      'No se puede eliminar el laboratorio porque tiene productos asociados. Desactívalo en su lugar.',
+    )
+  }
+
+  await prisma.laboratorio.update({
+    where: {
+      id: laboratoryId,
+      deletedAt: null,
+    },
+    data: {
+      deletedAt: new Date(),
+      activo: false,
+      updatedById: userId,
+    },
+  })
+
+  return { success: true }
+}
+
+export async function listMasterPresentations() {
+  const presentations = await prisma.presentacion.findMany({
+    where: {
+      deletedAt: null,
+    },
+    orderBy: [{ nombre: 'asc' }],
+    include: {
+      _count: {
+        select: {
+          productos: {
+            where: {
+              deletedAt: null,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return {
+    rows: presentations.map((presentation) => ({
+      id: presentation.id,
+      nombre: presentation.nombre,
+      descripcion: presentation.descripcion,
+      activo: presentation.activo,
+      productCount: presentation._count.productos,
+      createdAt: presentation.createdAt.toISOString(),
+      updatedAt: presentation.updatedAt.toISOString(),
+    })),
+  }
+}
+
+export async function createMasterPresentation(
+  payload: MasterPresentationPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    const created = await prisma.presentacion.create({
+      data: {
+        nombre: normalizeName(payload.nombre),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true, id: created.id }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe una presentación con ese nombre.')
+    }
+    throw error
+  }
+}
+
+export async function updateMasterPresentation(
+  presentationId: string,
+  payload: MasterPresentationPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    await prisma.presentacion.update({
+      where: {
+        id: presentationId,
+        deletedAt: null,
+      },
+      data: {
+        nombre: normalizeName(payload.nombre),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe una presentación con ese nombre.')
+    }
+    throw error
+  }
+}
+
+export async function deleteMasterPresentation(
+  presentationId: string,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const productCount = await prisma.producto.count({
+    where: {
+      deletedAt: null,
+      presentacionId: presentationId,
+    },
+  })
+
+  if (productCount > 0) {
+    throw createHttpError(
+      409,
+      'No se puede eliminar la presentación porque tiene productos asociados. Desactívala en su lugar.',
+    )
+  }
+
+  await prisma.presentacion.update({
+    where: {
+      id: presentationId,
+      deletedAt: null,
+    },
+    data: {
+      deletedAt: new Date(),
+      activo: false,
+      updatedById: userId,
+    },
+  })
+
+  return { success: true }
+}
+
+export async function listMasterUnits() {
+  const units = await prisma.unidadMedida.findMany({
+    where: {
+      deletedAt: null,
+    },
+    orderBy: [{ nombre: 'asc' }],
+    include: {
+      _count: {
+        select: {
+          productos: {
+            where: {
+              deletedAt: null,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return {
+    rows: units.map((unit) => ({
+      id: unit.id,
+      codigo: unit.codigo,
+      nombre: unit.nombre,
+      simbolo: unit.simbolo,
+      descripcion: unit.descripcion,
+      activo: unit.activo,
+      productCount: unit._count.productos,
+      createdAt: unit.createdAt.toISOString(),
+      updatedAt: unit.updatedAt.toISOString(),
+    })),
+  }
+}
+
+export async function createMasterUnit(
+  payload: MasterUnitPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    const created = await prisma.unidadMedida.create({
+      data: {
+        codigo: normalizeCode(payload.codigo),
+        nombre: normalizeName(payload.nombre),
+        simbolo: normalizeName(payload.simbolo),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true, id: created.id }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe una unidad con ese código, nombre o símbolo.')
+    }
+    throw error
+  }
+}
+
+export async function updateMasterUnit(
+  unitId: string,
+  payload: MasterUnitPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  try {
+    await prisma.unidadMedida.update({
+      where: {
+        id: unitId,
+        deletedAt: null,
+      },
+      data: {
+        codigo: normalizeCode(payload.codigo),
+        nombre: normalizeName(payload.nombre),
+        simbolo: normalizeName(payload.simbolo),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe una unidad con ese código, nombre o símbolo.')
+    }
+    throw error
+  }
+}
+
+export async function deleteMasterUnit(unitId: string, request: FastifyRequest) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const productCount = await prisma.producto.count({
+    where: {
+      deletedAt: null,
+      unidadMedidaId: unitId,
+    },
+  })
+
+  if (productCount > 0) {
+    throw createHttpError(
+      409,
+      'No se puede eliminar la unidad porque tiene productos asociados. Desactívala en su lugar.',
+    )
+  }
+
+  await prisma.unidadMedida.update({
+    where: {
+      id: unitId,
+      deletedAt: null,
+    },
+    data: {
+      deletedAt: new Date(),
+      activo: false,
+      updatedById: userId,
+    },
+  })
+
+  return { success: true }
 }
 
 export async function createProduct(

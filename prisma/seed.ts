@@ -68,18 +68,22 @@ const roleCatalog = [
 const productCatalog = {
   categories: [
     {
+      code: 'ANALG',
       name: 'Analgésicos',
       description: 'Medicamentos para alivio del dolor y fiebre.',
     },
     {
+      code: 'ANTIB',
       name: 'Antibióticos',
       description: 'Tratamientos antimicrobianos de uso controlado.',
     },
     {
+      code: 'VITSUP',
       name: 'Vitaminas y suplementos',
       description: 'Suplementación nutricional y preventiva.',
     },
     {
+      code: 'RESP',
       name: 'Cuidado respiratorio',
       description: 'Línea respiratoria y alivio sintomático.',
     },
@@ -465,19 +469,23 @@ async function main() {
 
   const adminUserId = createdUsers.get('ADMIN') ?? null
 
-  for (const category of productCatalog.categories) {
+  for (const [index, category] of productCatalog.categories.entries()) {
     await prisma.categoria.upsert({
       where: {
         nombre: category.name,
       },
       update: {
+        codigo: category.code,
         descripcion: category.description,
+        orden: index,
         activo: true,
         updatedById: adminUserId,
       },
       create: {
+        codigo: category.code,
         nombre: category.name,
         descripcion: category.description,
+        orden: index,
         activo: true,
         createdById: adminUserId,
         updatedById: adminUserId,

@@ -432,8 +432,11 @@ model RolPermiso {
 /// Módulo: Productos
 model Categoria {
   id          String    @id @default(uuid()) @db.Uuid
+  codigo      String    @unique @db.VarChar(30)
   nombre      String    @unique @db.VarChar(120)
   descripcion String?   @db.VarChar(255)
+  color       String?   @db.VarChar(20)
+  orden       Int       @default(0)
   activo      Boolean   @default(true)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")

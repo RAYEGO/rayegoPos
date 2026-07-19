@@ -56,14 +56,24 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
+import { useAuthorization } from '@/hooks/useAuthorization'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
 import type {
   CreateProductPayload,
+  MasterCategoryRecord,
+  MasterLaboratoryRecord,
+  MasterPresentationRecord,
+  MasterUnitRecord,
   ProductCatalogItem,
   ProductOptionsResponse,
   ProductStatus,
+  UpsertMasterCategoryPayload,
+  UpsertMasterLaboratoryPayload,
+  UpsertMasterPresentationPayload,
+  UpsertMasterUnitPayload,
 } from '@/types/products'
 import { toast } from 'sonner'
 
@@ -86,7 +96,41 @@ const createProductSchema = z.object({
   costoReferencia: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
 })
 
+const masterCategorySchema = z.object({
+  codigo: z.string().min(1, 'El código es obligatorio.').max(30),
+  nombre: z.string().min(2, 'El nombre es obligatorio.').max(120),
+  descripcion: z.string().max(255).optional(),
+  color: z.string().max(20).optional(),
+  orden: z.number().int().nonnegative().optional(),
+  activo: z.boolean().optional(),
+})
+
+const masterLaboratorySchema = z.object({
+  nombre: z.string().min(2, 'El nombre es obligatorio.').max(150),
+  pais: z.string().max(80).optional(),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
+const masterPresentationSchema = z.object({
+  nombre: z.string().min(2, 'El nombre es obligatorio.').max(120),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
+const masterUnitSchema = z.object({
+  codigo: z.string().min(1, 'El código es obligatorio.').max(20),
+  nombre: z.string().min(2, 'El nombre es obligatorio.').max(80),
+  simbolo: z.string().min(1, 'El símbolo es obligatorio.').max(20),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
 type CreateProductFormValues = z.infer<typeof createProductSchema>
+type MasterCategoryFormValues = z.infer<typeof masterCategorySchema>
+type MasterLaboratoryFormValues = z.infer<typeof masterLaboratorySchema>
+type MasterPresentationFormValues = z.infer<typeof masterPresentationSchema>
+type MasterUnitFormValues = z.infer<typeof masterUnitSchema>
 
 const defaultFormValues: CreateProductFormValues = {
   categoriaId: '',
@@ -161,12 +205,17 @@ function FieldError({ message }: { message?: string }) {
 
 export function ProductosPage() {
   const { logout, session } = useAuth()
+  const authorization = useAuthorization()
   const accessToken = session?.accessToken ?? ''
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | ProductStatus>('TODOS')
   const [categoryFilter, setCategoryFilter] = useState('TODAS')
   const [laboratoryFilter, setLaboratoryFilter] = useState('TODOS')
   const [showSummary, setShowSummary] = useState(true)
+  const [mainTab, setMainTab] = useState<'catalogo' | 'maestros'>('catalogo')
+  const [mastersTab, setMastersTab] = useState<
+    'categorias' | 'laboratorios' | 'presentaciones' | 'unidades'
+  >('categorias')
   const [products, setProducts] = useState<ProductCatalogItem[]>([])
   const [summary, setSummary] = useState({
     total: 0,
@@ -187,11 +236,81 @@ export function ProductosPage() {
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isMasterSubmitting, setIsMasterSubmitting] = useState(false)
+  const [masterCategories, setMasterCategories] = useState<MasterCategoryRecord[]>([])
+  const [masterLaboratories, setMasterLaboratories] = useState<MasterLaboratoryRecord[]>([])
+  const [masterPresentations, setMasterPresentations] = useState<MasterPresentationRecord[]>([])
+  const [masterUnits, setMasterUnits] = useState<MasterUnitRecord[]>([])
+  const [isMastersLoading, setIsMastersLoading] = useState(false)
+  const [mastersError, setMastersError] = useState<string | null>(null)
+
+  const [masterDialogOpen, setMasterDialogOpen] = useState(false)
+  const [masterDialogType, setMasterDialogType] = useState<
+    'categoria' | 'laboratorio' | 'presentacion' | 'unidad'
+  >('categoria')
+  const [masterDialogMode, setMasterDialogMode] = useState<'create' | 'edit'>('create')
+  const [masterDialogTargetField, setMasterDialogTargetField] = useState<
+    'categoriaId' | 'laboratorioId' | 'presentacionId' | 'unidadMedidaId' | null
+  >(null)
+  const [editingCategory, setEditingCategory] = useState<MasterCategoryRecord | null>(null)
+  const [editingLaboratory, setEditingLaboratory] = useState<MasterLaboratoryRecord | null>(null)
+  const [editingPresentation, setEditingPresentation] = useState<MasterPresentationRecord | null>(null)
+  const [editingUnit, setEditingUnit] = useState<MasterUnitRecord | null>(null)
 
   const form = useForm<CreateProductFormValues>({
     resolver: zodResolver(createProductSchema),
     defaultValues: defaultFormValues,
   })
+
+  const categoryForm = useForm<MasterCategoryFormValues>({
+    resolver: zodResolver(masterCategorySchema),
+    defaultValues: {
+      codigo: '',
+      nombre: '',
+      descripcion: '',
+      color: '',
+      orden: 0,
+      activo: true,
+    },
+  })
+
+  const laboratoryForm = useForm<MasterLaboratoryFormValues>({
+    resolver: zodResolver(masterLaboratorySchema),
+    defaultValues: {
+      nombre: '',
+      pais: '',
+      descripcion: '',
+      activo: true,
+    },
+  })
+
+  const presentationForm = useForm<MasterPresentationFormValues>({
+    resolver: zodResolver(masterPresentationSchema),
+    defaultValues: {
+      nombre: '',
+      descripcion: '',
+      activo: true,
+    },
+  })
+
+  const unitForm = useForm<MasterUnitFormValues>({
+    resolver: zodResolver(masterUnitSchema),
+    defaultValues: {
+      codigo: '',
+      nombre: '',
+      simbolo: '',
+      descripcion: '',
+      activo: true,
+    },
+  })
+
+  const canManageMasters =
+    authorization.can('*') || authorization.hasAnyRole(['ADMIN', 'SUPERVISOR'])
+
+  const handleUnauthorized = useCallback(async () => {
+    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
+    await logout()
+  }, [logout])
 
   const loadOptions = useCallback(async () => {
     if (!accessToken) {
@@ -204,11 +323,15 @@ export function ProductosPage() {
       const nextOptions = await productsService.getOptions(accessToken)
       setOptions(nextOptions)
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await handleUnauthorized()
+        return
+      }
       toast.error(getApiErrorMessage(error))
     } finally {
       setIsOptionsLoading(false)
     }
-  }, [accessToken])
+  }, [accessToken, handleUnauthorized])
 
   const loadProducts = useCallback(async () => {
     if (!accessToken) {
@@ -228,11 +351,15 @@ export function ProductosPage() {
       setProducts(response.items)
       setSummary(response.summary)
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await handleUnauthorized()
+        return
+      }
       setCatalogError(getApiErrorMessage(error))
     } finally {
       setIsCatalogLoading(false)
     }
-  }, [accessToken, categoryFilter, search, statusFilter])
+  }, [accessToken, categoryFilter, handleUnauthorized, search, statusFilter])
 
   useEffect(() => {
     void loadOptions()
@@ -241,6 +368,45 @@ export function ProductosPage() {
   useEffect(() => {
     void loadProducts()
   }, [loadProducts])
+
+  const loadMasters = useCallback(async () => {
+    if (!accessToken) {
+      return
+    }
+
+    setIsMastersLoading(true)
+    setMastersError(null)
+
+    try {
+      const [categories, laboratories, presentations, units] = await Promise.all([
+        productsService.listMasterCategories(accessToken),
+        productsService.listMasterLaboratories(accessToken),
+        productsService.listMasterPresentations(accessToken),
+        productsService.listMasterUnits(accessToken),
+      ])
+
+      setMasterCategories(categories.rows)
+      setMasterLaboratories(laboratories.rows)
+      setMasterPresentations(presentations.rows)
+      setMasterUnits(units.rows)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setMastersError(getApiErrorMessage(error))
+    } finally {
+      setIsMastersLoading(false)
+    }
+  }, [accessToken, handleUnauthorized])
+
+  useEffect(() => {
+    if (mainTab !== 'maestros') {
+      return
+    }
+
+    void loadMasters()
+  }, [loadMasters, mainTab])
 
   const portfolioMetrics = useMemo(
     () => ({
@@ -254,6 +420,584 @@ export function ProductosPage() {
 
   const masterDataReady =
     options.categories.length > 0 && options.units.length > 0
+
+  const resetMasterDialogState = useCallback(() => {
+    setMasterDialogOpen(false)
+    setMasterDialogTargetField(null)
+    setMasterDialogMode('create')
+    setEditingCategory(null)
+    setEditingLaboratory(null)
+    setEditingPresentation(null)
+    setEditingUnit(null)
+    categoryForm.reset()
+    laboratoryForm.reset()
+    presentationForm.reset()
+    unitForm.reset()
+  }, [categoryForm, laboratoryForm, presentationForm, unitForm])
+
+  const openCreateMaster = useCallback(
+    (
+      type: 'categoria' | 'laboratorio' | 'presentacion' | 'unidad',
+      targetField:
+        | 'categoriaId'
+        | 'laboratorioId'
+        | 'presentacionId'
+        | 'unidadMedidaId'
+        | null = null,
+    ) => {
+      setMasterDialogType(type)
+      setMasterDialogMode('create')
+      setMasterDialogTargetField(targetField)
+      setEditingCategory(null)
+      setEditingLaboratory(null)
+      setEditingPresentation(null)
+      setEditingUnit(null)
+      categoryForm.reset({
+        codigo: '',
+        nombre: '',
+        descripcion: '',
+        color: '',
+        orden: 0,
+        activo: true,
+      })
+      laboratoryForm.reset({
+        nombre: '',
+        pais: '',
+        descripcion: '',
+        activo: true,
+      })
+      presentationForm.reset({
+        nombre: '',
+        descripcion: '',
+        activo: true,
+      })
+      unitForm.reset({
+        codigo: '',
+        nombre: '',
+        simbolo: '',
+        descripcion: '',
+        activo: true,
+      })
+      setMasterDialogOpen(true)
+    },
+    [categoryForm, laboratoryForm, presentationForm, unitForm],
+  )
+
+  const openEditMaster = useCallback(
+    (
+      type: 'categoria' | 'laboratorio' | 'presentacion' | 'unidad',
+      record:
+        | MasterCategoryRecord
+        | MasterLaboratoryRecord
+        | MasterPresentationRecord
+        | MasterUnitRecord,
+    ) => {
+      setMasterDialogType(type)
+      setMasterDialogMode('edit')
+      setMasterDialogTargetField(null)
+
+      if (type === 'categoria') {
+        const row = record as MasterCategoryRecord
+        setEditingCategory(row)
+        categoryForm.reset({
+          codigo: row.codigo,
+          nombre: row.nombre,
+          descripcion: row.descripcion ?? '',
+          color: row.color ?? '',
+          orden: row.orden,
+          activo: row.activo,
+        })
+      }
+
+      if (type === 'laboratorio') {
+        const row = record as MasterLaboratoryRecord
+        setEditingLaboratory(row)
+        laboratoryForm.reset({
+          nombre: row.nombre,
+          pais: row.pais ?? '',
+          descripcion: row.descripcion ?? '',
+          activo: row.activo,
+        })
+      }
+
+      if (type === 'presentacion') {
+        const row = record as MasterPresentationRecord
+        setEditingPresentation(row)
+        presentationForm.reset({
+          nombre: row.nombre,
+          descripcion: row.descripcion ?? '',
+          activo: row.activo,
+        })
+      }
+
+      if (type === 'unidad') {
+        const row = record as MasterUnitRecord
+        setEditingUnit(row)
+        unitForm.reset({
+          codigo: row.codigo,
+          nombre: row.nombre,
+          simbolo: row.simbolo,
+          descripcion: row.descripcion ?? '',
+          activo: row.activo,
+        })
+      }
+
+      setMasterDialogOpen(true)
+    },
+    [categoryForm, laboratoryForm, presentationForm, unitForm],
+  )
+
+  const handleSaveMasterCategory = useCallback(
+    async (values: MasterCategoryFormValues) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      const payload: UpsertMasterCategoryPayload = {
+        codigo: values.codigo.trim().toUpperCase(),
+        nombre: values.nombre.trim(),
+        descripcion: values.descripcion?.trim() || undefined,
+        color: values.color?.trim() || undefined,
+        orden: typeof values.orden === 'number' ? values.orden : undefined,
+        activo: values.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        if (masterDialogMode === 'edit' && editingCategory) {
+          await productsService.updateMasterCategory(accessToken, editingCategory.id, payload)
+          toast.success('Categoría actualizada.')
+        } else {
+          const created = await productsService.createMasterCategory(accessToken, payload)
+          toast.success('Categoría creada.')
+          if (masterDialogTargetField === 'categoriaId') {
+            form.setValue('categoriaId', created.id, { shouldValidate: true })
+          }
+        }
+
+        resetMasterDialogState()
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [
+      accessToken,
+      editingCategory,
+      form,
+      handleUnauthorized,
+      loadMasters,
+      loadOptions,
+      masterDialogMode,
+      masterDialogTargetField,
+      resetMasterDialogState,
+    ],
+  )
+
+  const handleSaveMasterLaboratory = useCallback(
+    async (values: MasterLaboratoryFormValues) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      const payload: UpsertMasterLaboratoryPayload = {
+        nombre: values.nombre.trim(),
+        pais: values.pais?.trim() || undefined,
+        descripcion: values.descripcion?.trim() || undefined,
+        activo: values.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        if (masterDialogMode === 'edit' && editingLaboratory) {
+          await productsService.updateMasterLaboratory(accessToken, editingLaboratory.id, payload)
+          toast.success('Laboratorio actualizado.')
+        } else {
+          const created = await productsService.createMasterLaboratory(accessToken, payload)
+          toast.success('Laboratorio creado.')
+          if (masterDialogTargetField === 'laboratorioId') {
+            form.setValue('laboratorioId', created.id)
+          }
+        }
+
+        resetMasterDialogState()
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [
+      accessToken,
+      editingLaboratory,
+      form,
+      handleUnauthorized,
+      loadMasters,
+      loadOptions,
+      masterDialogMode,
+      masterDialogTargetField,
+      resetMasterDialogState,
+    ],
+  )
+
+  const handleSaveMasterPresentation = useCallback(
+    async (values: MasterPresentationFormValues) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      const payload: UpsertMasterPresentationPayload = {
+        nombre: values.nombre.trim(),
+        descripcion: values.descripcion?.trim() || undefined,
+        activo: values.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        if (masterDialogMode === 'edit' && editingPresentation) {
+          await productsService.updateMasterPresentation(accessToken, editingPresentation.id, payload)
+          toast.success('Presentación actualizada.')
+        } else {
+          const created = await productsService.createMasterPresentation(accessToken, payload)
+          toast.success('Presentación creada.')
+          if (masterDialogTargetField === 'presentacionId') {
+            form.setValue('presentacionId', created.id)
+          }
+        }
+
+        resetMasterDialogState()
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [
+      accessToken,
+      editingPresentation,
+      form,
+      handleUnauthorized,
+      loadMasters,
+      loadOptions,
+      masterDialogMode,
+      masterDialogTargetField,
+      resetMasterDialogState,
+    ],
+  )
+
+  const handleSaveMasterUnit = useCallback(
+    async (values: MasterUnitFormValues) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      const payload: UpsertMasterUnitPayload = {
+        codigo: values.codigo.trim().toUpperCase(),
+        nombre: values.nombre.trim(),
+        simbolo: values.simbolo.trim(),
+        descripcion: values.descripcion?.trim() || undefined,
+        activo: values.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        if (masterDialogMode === 'edit' && editingUnit) {
+          await productsService.updateMasterUnit(accessToken, editingUnit.id, payload)
+          toast.success('Unidad actualizada.')
+        } else {
+          const created = await productsService.createMasterUnit(accessToken, payload)
+          toast.success('Unidad creada.')
+          if (masterDialogTargetField === 'unidadMedidaId') {
+            form.setValue('unidadMedidaId', created.id, { shouldValidate: true })
+          }
+        }
+
+        resetMasterDialogState()
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [
+      accessToken,
+      editingUnit,
+      form,
+      handleUnauthorized,
+      loadMasters,
+      loadOptions,
+      masterDialogMode,
+      masterDialogTargetField,
+      resetMasterDialogState,
+    ],
+  )
+
+  const handleToggleCategoryStatus = useCallback(
+    async (row: MasterCategoryRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      if (row.productCount > 0 && row.activo) {
+        toast.message(`Advertencia: esta categoría tiene ${row.productCount} productos asociados.`)
+      }
+
+      const payload: UpsertMasterCategoryPayload = {
+        codigo: row.codigo,
+        nombre: row.nombre,
+        descripcion: row.descripcion ?? undefined,
+        color: row.color ?? undefined,
+        orden: row.orden,
+        activo: !row.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.updateMasterCategory(accessToken, row.id, payload)
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleDeleteCategory = useCallback(
+    async (row: MasterCategoryRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.deleteMasterCategory(accessToken, row.id)
+        toast.success('Categoría eliminada.')
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleToggleLaboratoryStatus = useCallback(
+    async (row: MasterLaboratoryRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      if (row.productCount > 0 && row.activo) {
+        toast.message(`Advertencia: este laboratorio tiene ${row.productCount} productos asociados.`)
+      }
+
+      const payload: UpsertMasterLaboratoryPayload = {
+        nombre: row.nombre,
+        pais: row.pais ?? undefined,
+        descripcion: row.descripcion ?? undefined,
+        activo: !row.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.updateMasterLaboratory(accessToken, row.id, payload)
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleDeleteLaboratory = useCallback(
+    async (row: MasterLaboratoryRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.deleteMasterLaboratory(accessToken, row.id)
+        toast.success('Laboratorio eliminado.')
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleTogglePresentationStatus = useCallback(
+    async (row: MasterPresentationRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      if (row.productCount > 0 && row.activo) {
+        toast.message(`Advertencia: esta presentación tiene ${row.productCount} productos asociados.`)
+      }
+
+      const payload: UpsertMasterPresentationPayload = {
+        nombre: row.nombre,
+        descripcion: row.descripcion ?? undefined,
+        activo: !row.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.updateMasterPresentation(accessToken, row.id, payload)
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleDeletePresentation = useCallback(
+    async (row: MasterPresentationRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.deleteMasterPresentation(accessToken, row.id)
+        toast.success('Presentación eliminada.')
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleToggleUnitStatus = useCallback(
+    async (row: MasterUnitRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      if (row.productCount > 0 && row.activo) {
+        toast.message(`Advertencia: esta unidad tiene ${row.productCount} productos asociados.`)
+      }
+
+      const payload: UpsertMasterUnitPayload = {
+        codigo: row.codigo,
+        nombre: row.nombre,
+        simbolo: row.simbolo,
+        descripcion: row.descripcion ?? undefined,
+        activo: !row.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.updateMasterUnit(accessToken, row.id, payload)
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
+
+  const handleDeleteUnit = useCallback(
+    async (row: MasterUnitRecord) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        await productsService.deleteMasterUnit(accessToken, row.id)
+        toast.success('Unidad eliminada.')
+        await Promise.all([loadMasters(), loadOptions()])
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [accessToken, handleUnauthorized, loadMasters, loadOptions],
+  )
 
   async function handleCreateProduct(values: CreateProductFormValues) {
     if (!accessToken) {
@@ -344,7 +1088,11 @@ export function ProductosPage() {
       )}
 
       {/* Tabs, Filters, and New Product Button */}
-      <Tabs defaultValue="catalogo" className="w-full">
+      <Tabs
+        value={mainTab}
+        onValueChange={(value) => setMainTab(value as 'catalogo' | 'maestros')}
+        className="w-full"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
@@ -598,57 +1346,380 @@ export function ProductosPage() {
         </TabsContent>
 
         <TabsContent value="maestros" className="space-y-4 pt-4">
+          <Tabs
+            value={mastersTab}
+            onValueChange={(value) =>
+              setMastersTab(value as 'categorias' | 'laboratorios' | 'presentaciones' | 'unidades')
+            }
+            className="w-full"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <TabsList>
+                <TabsTrigger value="categorias">Categorías</TabsTrigger>
+                <TabsTrigger value="laboratorios">Laboratorios</TabsTrigger>
+                <TabsTrigger value="presentaciones">Presentaciones</TabsTrigger>
+                <TabsTrigger value="unidades">Unidades</TabsTrigger>
+              </TabsList>
+
+              {canManageMasters ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    if (mastersTab === 'categorias') openCreateMaster('categoria')
+                    if (mastersTab === 'laboratorios') openCreateMaster('laboratorio')
+                    if (mastersTab === 'presentaciones') openCreateMaster('presentacion')
+                    if (mastersTab === 'unidades') openCreateMaster('unidad')
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Nuevo
+                </Button>
+              ) : null}
+            </div>
+
+            {isMastersLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : mastersError ? (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                {mastersError}
+              </div>
+            ) : null}
+
+            {!isMastersLoading && !mastersError ? (
+              <>
+                <TabsContent value="categorias" className="pt-4">
+                  <Card>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[110px]">Código</TableHead>
+                            <TableHead>Nombre</TableHead>
+                            <TableHead className="hidden md:table-cell">Orden</TableHead>
+                            <TableHead className="hidden md:table-cell">Color</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead className="hidden md:table-cell">Productos</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {masterCategories.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="font-medium text-foreground">{row.codigo}</TableCell>
+                              <TableCell className="min-w-0">
+                                <p className="font-medium text-foreground">{row.nombre}</p>
+                                {row.descripcion ? (
+                                  <p className="text-xs text-muted-foreground line-clamp-1">
+                                    {row.descripcion}
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.orden}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                {row.color ? (
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className="h-3 w-3 rounded-full border"
+                                      style={{ backgroundColor: row.color }}
+                                    />
+                                    <span className="text-xs text-muted-foreground">{row.color}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={row.activo ? 'success' : 'outline'}>
+                                  {row.activo ? 'ACTIVO' : 'INACTIVO'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.productCount}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => openEditMaster('categoria', row)}
+                                  >
+                                    Editar
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => handleToggleCategoryStatus(row)}
+                                  >
+                                    {row.activo ? 'Inactivar' : 'Activar'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={
+                                      !canManageMasters ||
+                                      isMasterSubmitting ||
+                                      row.productCount > 0
+                                    }
+                                    onClick={() => handleDeleteCategory(row)}
+                                  >
+                                    Eliminar
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="laboratorios" className="pt-4">
+                  <Card>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Nombre</TableHead>
+                            <TableHead className="hidden md:table-cell">País</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead className="hidden md:table-cell">Productos</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {masterLaboratories.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="min-w-0">
+                                <p className="font-medium text-foreground">{row.nombre}</p>
+                                {row.descripcion ? (
+                                  <p className="text-xs text-muted-foreground line-clamp-1">
+                                    {row.descripcion}
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.pais ?? '—'}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={row.activo ? 'success' : 'outline'}>
+                                  {row.activo ? 'ACTIVO' : 'INACTIVO'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.productCount}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => openEditMaster('laboratorio', row)}
+                                  >
+                                    Editar
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => handleToggleLaboratoryStatus(row)}
+                                  >
+                                    {row.activo ? 'Inactivar' : 'Activar'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={
+                                      !canManageMasters ||
+                                      isMasterSubmitting ||
+                                      row.productCount > 0
+                                    }
+                                    onClick={() => handleDeleteLaboratory(row)}
+                                  >
+                                    Eliminar
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="presentaciones" className="pt-4">
+                  <Card>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Nombre</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead className="hidden md:table-cell">Productos</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {masterPresentations.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="min-w-0">
+                                <p className="font-medium text-foreground">{row.nombre}</p>
+                                {row.descripcion ? (
+                                  <p className="text-xs text-muted-foreground line-clamp-1">
+                                    {row.descripcion}
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={row.activo ? 'success' : 'outline'}>
+                                  {row.activo ? 'ACTIVO' : 'INACTIVO'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.productCount}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => openEditMaster('presentacion', row)}
+                                  >
+                                    Editar
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => handleTogglePresentationStatus(row)}
+                                  >
+                                    {row.activo ? 'Inactivar' : 'Activar'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={
+                                      !canManageMasters ||
+                                      isMasterSubmitting ||
+                                      row.productCount > 0
+                                    }
+                                    onClick={() => handleDeletePresentation(row)}
+                                  >
+                                    Eliminar
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="unidades" className="pt-4">
+                  <Card>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[100px]">Código</TableHead>
+                            <TableHead>Nombre</TableHead>
+                            <TableHead className="hidden md:table-cell">Símbolo</TableHead>
+                            <TableHead>Estado</TableHead>
+                            <TableHead className="hidden md:table-cell">Productos</TableHead>
+                            <TableHead className="text-right">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {masterUnits.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="font-medium text-foreground">{row.codigo}</TableCell>
+                              <TableCell className="min-w-0">
+                                <p className="font-medium text-foreground">{row.nombre}</p>
+                                {row.descripcion ? (
+                                  <p className="text-xs text-muted-foreground line-clamp-1">
+                                    {row.descripcion}
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.simbolo}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={row.activo ? 'success' : 'outline'}>
+                                  {row.activo ? 'ACTIVO' : 'INACTIVO'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground">
+                                {row.productCount}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => openEditMaster('unidad', row)}
+                                  >
+                                    Editar
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canManageMasters || isMasterSubmitting}
+                                    onClick={() => handleToggleUnitStatus(row)}
+                                  >
+                                    {row.activo ? 'Inactivar' : 'Activar'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="danger"
+                                    disabled={
+                                      !canManageMasters ||
+                                      isMasterSubmitting ||
+                                      row.productCount > 0
+                                    }
+                                    onClick={() => handleDeleteUnit(row)}
+                                  >
+                                    Eliminar
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </>
+            ) : null}
+          </Tabs>
+
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4 text-primary" />
-                  Categorías
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {isOptionsLoading ? (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader className="h-5 w-5" />
-                  </div>
-                ) : (
-                  options.categories.map((category) => (
-                    <div key={category.id} className="rounded-lg border p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-sm text-foreground">{category.name}</p>
-                        <Badge variant="outline" className="text-xs">{category.skuCount} SKU</Badge>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <TestTubeDiagonal className="h-4 w-4 text-primary" />
-                  Laboratorios
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {isOptionsLoading ? (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader className="h-5 w-5" />
-                  </div>
-                ) : (
-                  options.laboratories.map((laboratory) => (
-                    <div key={laboratory.id} className="rounded-lg border p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-sm text-foreground">{laboratory.name}</p>
-                        <Badge variant="info" className="text-xs">{laboratory.country ?? 'Sin país'}</Badge>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -671,6 +1742,28 @@ export function ProductosPage() {
                     </div>
                   ))
                 )}
+              </CardContent>
+            </Card>
+
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4 text-primary" />
+                  Próximos maestros
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-2 sm:grid-cols-2">
+                {[
+                  'Marcas',
+                  'Formas farmacéuticas',
+                  'Vías de administración',
+                  'Impuestos',
+                ].map((label) => (
+                  <div key={label} className="rounded-xl border border-dashed p-3">
+                    <p className="text-sm font-medium text-foreground">{label}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">En preparación.</p>
+                  </div>
+                ))}
               </CardContent>
             </Card>
           </div>
@@ -710,7 +1803,20 @@ export function ProductosPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium">Categoría</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium">Categoría</label>
+                  {canManageMasters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openCreateMaster('categoria', 'categoriaId')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
                 <Controller
                   control={form.control}
                   name="categoriaId"
@@ -731,7 +1837,20 @@ export function ProductosPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium">Laboratorio</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium">Laboratorio</label>
+                  {canManageMasters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openCreateMaster('laboratorio', 'laboratorioId')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
                 <Controller
                   control={form.control}
                   name="laboratorioId"
@@ -755,7 +1874,59 @@ export function ProductosPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium">Unidad de medida</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium">Presentación</label>
+                  {canManageMasters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openCreateMaster('presentacion', 'presentacionId')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
+                <Controller
+                  control={form.control}
+                  name="presentacionId"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value || 'none'}
+                      onValueChange={(value) => field.onChange(value === 'none' ? '' : value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Opcional" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sin presentación</SelectItem>
+                        {options.presentations.map((presentation) => (
+                          <SelectItem key={presentation.id} value={presentation.id}>
+                            {presentation.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium">Unidad de medida</label>
+                  {canManageMasters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openCreateMaster('unidad', 'unidadMedidaId')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
                 <Controller
                   control={form.control}
                   name="unidadMedidaId"
@@ -851,6 +2022,273 @@ export function ProductosPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={masterDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetMasterDialogState()
+            return
+          }
+          setMasterDialogOpen(open)
+        }}
+      >
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              {masterDialogMode === 'edit' ? 'Editar' : 'Crear'}{' '}
+              {masterDialogType === 'categoria'
+                ? 'categoría'
+                : masterDialogType === 'laboratorio'
+                  ? 'laboratorio'
+                  : masterDialogType === 'presentacion'
+                    ? 'presentación'
+                    : 'unidad'}
+            </DialogTitle>
+            <DialogDescription>
+              Este registro se reutiliza en el catálogo de productos.
+            </DialogDescription>
+          </DialogHeader>
+
+          {masterDialogType === 'categoria' ? (
+            <form className="grid gap-4" onSubmit={categoryForm.handleSubmit(handleSaveMasterCategory)}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Código</label>
+                  <Input {...categoryForm.register('codigo')} placeholder="ANALG" disabled={isMasterSubmitting} />
+                  <FieldError message={categoryForm.formState.errors.codigo?.message} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Orden</label>
+                  <Input
+                    type="number"
+                    {...categoryForm.register('orden', { valueAsNumber: true })}
+                    disabled={isMasterSubmitting}
+                  />
+                  <FieldError message={categoryForm.formState.errors.orden?.message} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Nombre</label>
+                  <Input {...categoryForm.register('nombre')} placeholder="Analgésicos" disabled={isMasterSubmitting} />
+                  <FieldError message={categoryForm.formState.errors.nombre?.message} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea {...categoryForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <FieldError message={categoryForm.formState.errors.descripcion?.message} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Color (opcional)</label>
+                  <Input
+                    {...categoryForm.register('color')}
+                    placeholder="#10B981"
+                    disabled={isMasterSubmitting}
+                  />
+                  <FieldError message={categoryForm.formState.errors.color?.message} />
+                </div>
+              </div>
+
+              <Controller
+                control={categoryForm.control}
+                name="activo"
+                render={({ field }) => (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Activo</p>
+                      <p className="text-xs text-muted-foreground">Disponible en selects de Producto.</p>
+                    </div>
+                    <Switch
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                      disabled={isMasterSubmitting}
+                    />
+                  </label>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={resetMasterDialogState}
+                  disabled={isMasterSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={!canManageMasters || isMasterSubmitting}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+
+          {masterDialogType === 'laboratorio' ? (
+            <form className="grid gap-4" onSubmit={laboratoryForm.handleSubmit(handleSaveMasterLaboratory)}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Nombre</label>
+                  <Input {...laboratoryForm.register('nombre')} disabled={isMasterSubmitting} />
+                  <FieldError message={laboratoryForm.formState.errors.nombre?.message} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">País (opcional)</label>
+                  <Input {...laboratoryForm.register('pais')} disabled={isMasterSubmitting} />
+                  <FieldError message={laboratoryForm.formState.errors.pais?.message} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea {...laboratoryForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <FieldError message={laboratoryForm.formState.errors.descripcion?.message} />
+                </div>
+              </div>
+
+              <Controller
+                control={laboratoryForm.control}
+                name="activo"
+                render={({ field }) => (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Activo</p>
+                      <p className="text-xs text-muted-foreground">Disponible en selects de Producto.</p>
+                    </div>
+                    <Switch
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                      disabled={isMasterSubmitting}
+                    />
+                  </label>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={resetMasterDialogState}
+                  disabled={isMasterSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={!canManageMasters || isMasterSubmitting}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+
+          {masterDialogType === 'presentacion' ? (
+            <form className="grid gap-4" onSubmit={presentationForm.handleSubmit(handleSaveMasterPresentation)}>
+              <div className="grid gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Nombre</label>
+                  <Input {...presentationForm.register('nombre')} disabled={isMasterSubmitting} />
+                  <FieldError message={presentationForm.formState.errors.nombre?.message} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea {...presentationForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <FieldError message={presentationForm.formState.errors.descripcion?.message} />
+                </div>
+              </div>
+
+              <Controller
+                control={presentationForm.control}
+                name="activo"
+                render={({ field }) => (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Activo</p>
+                      <p className="text-xs text-muted-foreground">Disponible en selects de Producto.</p>
+                    </div>
+                    <Switch
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                      disabled={isMasterSubmitting}
+                    />
+                  </label>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={resetMasterDialogState}
+                  disabled={isMasterSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={!canManageMasters || isMasterSubmitting}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+
+          {masterDialogType === 'unidad' ? (
+            <form className="grid gap-4" onSubmit={unitForm.handleSubmit(handleSaveMasterUnit)}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Código</label>
+                  <Input {...unitForm.register('codigo')} disabled={isMasterSubmitting} />
+                  <FieldError message={unitForm.formState.errors.codigo?.message} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Símbolo</label>
+                  <Input {...unitForm.register('simbolo')} disabled={isMasterSubmitting} />
+                  <FieldError message={unitForm.formState.errors.simbolo?.message} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Nombre</label>
+                  <Input {...unitForm.register('nombre')} disabled={isMasterSubmitting} />
+                  <FieldError message={unitForm.formState.errors.nombre?.message} />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea {...unitForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <FieldError message={unitForm.formState.errors.descripcion?.message} />
+                </div>
+              </div>
+
+              <Controller
+                control={unitForm.control}
+                name="activo"
+                render={({ field }) => (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Activo</p>
+                      <p className="text-xs text-muted-foreground">Disponible en selects de Producto.</p>
+                    </div>
+                    <Switch
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                      disabled={isMasterSubmitting}
+                    />
+                  </label>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={resetMasterDialogState}
+                  disabled={isMasterSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={!canManageMasters || isMasterSubmitting}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>
