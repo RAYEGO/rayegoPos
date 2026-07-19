@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -18,6 +18,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Loader } from '@/components/ui/loader'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -26,13 +34,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cashDrawers, cashPaymentSummary } from '@/modules/cashier/mock-data'
-import { customerRecords } from '@/modules/customers/mock-data'
-import { inventoryLots } from '@/modules/inventory/mock-data'
-import { productRecords } from '@/modules/products/mock-data'
-import { purchaseOrders } from '@/modules/purchases/mock-data'
-import { recentSales } from '@/modules/sales/mock-data'
-import { supplierAlerts, supplierDocuments } from '@/modules/suppliers/mock-data'
+import { useAuth } from '@/hooks/useAuth'
+import { ApiError, ApiNetworkError } from '@/services/apiClient'
+import { dashboardService } from '@/services/dashboardService'
+import type { DashboardOverviewResponse } from '@/types/dashboard'
+import { toast } from 'sonner'
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-PE', {
@@ -46,64 +52,171 @@ function formatPercent(value: number) {
   return `${Math.round(value)}%`
 }
 
+const defaultDashboard: DashboardOverviewResponse = {
+  kpis: {
+    salesTodayTotal: 0,
+    salesTodayCount: 0,
+    averageTicket: 0,
+    pendingCollections: 0,
+    purchaseOpenCount: 0,
+    purchaseOutstanding: 0,
+    availableStockUnits: 0,
+    expiringLotsCount: 0,
+    lowStockProductsCount: 0,
+    customersTotalCount: 0,
+    customersActiveCount: 0,
+    activeProductsCount: 0,
+  },
+  cashPaymentSummary: [],
+  alerts: {
+    expiringLots: [],
+    lowStockProducts: [],
+  },
+  topCustomers: [],
+  recentSales: [],
+  cashDrawer: null,
+  options: {
+    branches: [],
+  },
+}
+
+function getApiErrorMessage(error: unknown) {
+  if (error instanceof ApiError || error instanceof ApiNetworkError) {
+    return error.message
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return 'No fue posible cargar el dashboard.'
+}
+
 export function DashboardPage() {
+  const { logout, session } = useAuth()
+  const accessToken = session?.accessToken ?? ''
+
   const [showSummary, setShowSummary] = useState(false)
-  const emittedSales = recentSales.filter((sale) => sale.status === 'EMITIDA')
-  const grossSales = emittedSales.reduce((sum, sale) => sum + sale.totalAmount, 0)
-  const activePurchases = purchaseOrders.filter(
-    (order) => order.status === 'EMITIDA' || order.status === 'RECIBIDA_PARCIAL',
+  const [branchId, setBranchId] = useState<string>('all')
+  const [dashboard, setDashboard] = useState<DashboardOverviewResponse>(defaultDashboard)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleUnauthorized = useCallback(async () => {
+    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
+    await logout()
+  }, [logout])
+
+  const loadDashboard = useCallback(async () => {
+    if (!accessToken) {
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await dashboardService.getOverview(accessToken, {
+        branchId: branchId === 'all' ? undefined : branchId,
+      })
+      setDashboard(response)
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+
+      setDashboard(defaultDashboard)
+      setError(getApiErrorMessage(nextError))
+    } finally {
+      setIsLoading(false)
+    }
+  }, [accessToken, branchId, handleUnauthorized])
+
+  useEffect(() => {
+    void loadDashboard()
+  }, [loadDashboard])
+
+  const kpis = dashboard.kpis
+  const cashDrawer = dashboard.cashDrawer
+
+  const collectedVsSales = useMemo(
+    () =>
+      dashboard.cashPaymentSummary.reduce(
+        (sum, item) => sum + item.collectedAmount - item.salesAmount,
+        0,
+      ),
+    [dashboard.cashPaymentSummary],
   )
-  const committedPurchases = activePurchases.reduce(
-    (sum, order) => sum + order.totalAmount,
-    0,
-  )
-  const availableStock = inventoryLots.reduce((sum, lot) => sum + lot.availableUnits, 0)
-  const activeCustomers = customerRecords.filter((customer) => customer.status === 'ACTIVO')
-  const averageTicket =
-    emittedSales.length > 0 ? grossSales / emittedSales.length : 0
-  const activeCatalog = productRecords.filter((product) => product.status === 'ACTIVO')
-  const expiringLots = inventoryLots.filter((lot) => lot.status === 'POR_VENCER')
-  const pendingDocs = supplierDocuments.filter((document) => document.status === 'POR_VENCER')
-  const activeDrawer =
-    cashDrawers.find((drawer) => drawer.status !== 'CERRADA') ?? cashDrawers[0]
-  const collectedVsSales = cashPaymentSummary.reduce(
-    (sum, item) => sum + item.collectedAmount - item.salesAmount,
-    0,
-  )
-  const topCustomers = [...customerRecords]
-    .sort((left, right) => right.totalSpent - left.totalSpent)
-    .slice(0, 4)
+
+  const branchOptions = dashboard.options.branches
+  const selectedBranchLabel =
+    branchId === 'all'
+      ? 'Todas las sucursales'
+      : branchOptions.find((branch) => branch.id === branchId)?.nombre ?? 'Sucursal'
 
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
-        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
-          Resumen
-          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger className="h-9 w-[220px]">
+              <SelectValue placeholder={selectedBranchLabel} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las sucursales</SelectItem>
+              {branchOptions.map((branch) => (
+                <SelectItem key={branch.id} value={branch.id}>
+                  {branch.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
+            Resumen
+            <ChevronDown
+              className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`}
+            />
+          </Button>
+        </div>
       </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader className="h-8 w-8" />
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
       {showSummary && (
         <div className="flex flex-wrap gap-3">
           <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{formatCurrency(grossSales)}</span>
+              <span className="text-lg font-bold text-foreground">
+                {formatCurrency(kpis.salesTodayTotal)}
+              </span>
               <span className="text-xs text-muted-foreground">Ventas</span>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
             <Boxes className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{availableStock}</span>
+              <span className="text-lg font-bold text-foreground">
+                {Math.round(kpis.availableStockUnits)}
+              </span>
               <span className="text-xs text-muted-foreground">Stock</span>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
             <Users className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{activeCustomers.length}</span>
+              <span className="text-lg font-bold text-foreground">{kpis.customersActiveCount}</span>
               <span className="text-xs text-muted-foreground">Clientes</span>
             </div>
           </div>
@@ -120,9 +233,11 @@ export function DashboardPage() {
             <ShoppingCart className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">{formatCurrency(grossSales)}</p>
+            <p className="text-display text-foreground">
+              {formatCurrency(kpis.salesTodayTotal)}
+            </p>
             <p className="text-small text-muted-foreground">
-              ticket promedio {formatCurrency(averageTicket)}
+              {kpis.salesTodayCount} operaciones · ticket {formatCurrency(kpis.averageTicket)}
             </p>
           </CardContent>
         </Card>
@@ -137,10 +252,10 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-display text-foreground">
-              {formatCurrency(committedPurchases)}
+              {formatCurrency(kpis.purchaseOutstanding)}
             </p>
             <p className="text-small text-muted-foreground">
-              {activePurchases.length} ordenes activas
+              {kpis.purchaseOpenCount} ordenes con saldo pendiente
             </p>
           </CardContent>
         </Card>
@@ -154,9 +269,11 @@ export function DashboardPage() {
             <Boxes className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">{availableStock}</p>
+            <p className="text-display text-foreground">
+              {Math.round(kpis.availableStockUnits)}
+            </p>
             <p className="text-small text-muted-foreground">
-              {expiringLots.length} lotes por vencer
+              {kpis.expiringLotsCount} lotes por vencer · {kpis.lowStockProductsCount} bajo stock
             </p>
           </CardContent>
         </Card>
@@ -170,9 +287,9 @@ export function DashboardPage() {
             <Users className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">{activeCustomers.length}</p>
+            <p className="text-display text-foreground">{kpis.customersActiveCount}</p>
             <p className="text-small text-muted-foreground">
-              {topCustomers.length} clientes con mayor valor
+              {dashboard.topCustomers.length} clientes con mayor valor
             </p>
           </CardContent>
         </Card>
@@ -192,7 +309,7 @@ export function DashboardPage() {
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="rounded-2xl border p-4">
               <p className="font-medium text-foreground">Catalogo activo</p>
-              <p className="mt-2 text-display text-foreground">{activeCatalog.length}</p>
+              <p className="mt-2 text-display text-foreground">{kpis.activeProductsCount}</p>
               <p className="text-small text-muted-foreground">
                 SKU listos para venta y reposicion.
               </p>
@@ -200,10 +317,10 @@ export function DashboardPage() {
             <div className="rounded-2xl border p-4">
               <p className="font-medium text-foreground">Caja del turno</p>
               <p className="mt-2 text-display text-foreground">
-                {formatCurrency(activeDrawer.expectedAmount)}
+                {cashDrawer ? formatCurrency(cashDrawer.expectedAmount) : '—'}
               </p>
               <p className="text-small text-muted-foreground">
-                diferencia actual {formatCurrency(activeDrawer.differenceAmount)}
+                diferencia actual {cashDrawer ? formatCurrency(cashDrawer.differenceAmount) : '—'}
               </p>
             </div>
             <div className="rounded-2xl border p-4">
@@ -216,10 +333,12 @@ export function DashboardPage() {
               </p>
             </div>
             <div className="rounded-2xl border p-4">
-              <p className="font-medium text-foreground">Documentos por vencer</p>
-              <p className="mt-2 text-display text-foreground">{pendingDocs.length}</p>
+              <p className="font-medium text-foreground">Cobranza pendiente</p>
+              <p className="mt-2 text-display text-foreground">
+                {formatCurrency(kpis.pendingCollections)}
+              </p>
               <p className="text-small text-muted-foreground">
-                soporte de proveedor para revisar.
+                saldo de ventas emitidas por cobrar.
               </p>
             </div>
           </CardContent>
@@ -239,7 +358,7 @@ export function DashboardPage() {
             <div className="rounded-2xl border p-4">
               <div className="flex items-center justify-between gap-4">
                 <p className="font-medium text-foreground">Lotes por vencer</p>
-                <Badge variant="warning">{expiringLots.length}</Badge>
+                <Badge variant="warning">{kpis.expiringLotsCount}</Badge>
               </div>
               <p className="mt-2 text-small text-muted-foreground">
                 Priorizar salida FIFO y campañas para productos cercanos a vencimiento.
@@ -248,8 +367,12 @@ export function DashboardPage() {
             <div className="rounded-2xl border p-4">
               <div className="flex items-center justify-between gap-4">
                 <p className="font-medium text-foreground">Diferencia de caja</p>
-                <Badge variant={activeDrawer.differenceAmount === 0 ? 'success' : 'warning'}>
-                  {formatCurrency(activeDrawer.differenceAmount)}
+                <Badge
+                  variant={
+                    cashDrawer && cashDrawer.differenceAmount === 0 ? 'success' : 'warning'
+                  }
+                >
+                  {cashDrawer ? formatCurrency(cashDrawer.differenceAmount) : '—'}
                 </Badge>
               </div>
               <p className="mt-2 text-small text-muted-foreground">
@@ -258,11 +381,11 @@ export function DashboardPage() {
             </div>
             <div className="rounded-2xl border p-4">
               <div className="flex items-center justify-between gap-4">
-                <p className="font-medium text-foreground">Alertas proveedor</p>
-                <Badge variant="info">{supplierAlerts.length}</Badge>
+                <p className="font-medium text-foreground">Stock bajo</p>
+                <Badge variant="info">{kpis.lowStockProductsCount}</Badge>
               </div>
               <p className="mt-2 text-small text-muted-foreground">
-                Seguimiento comercial activo en documentos y nivel de servicio.
+                Productos con stock por debajo del mínimo configurado (o 20 por defecto).
               </p>
             </div>
           </CardContent>
@@ -282,31 +405,19 @@ export function DashboardPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Cliente</TableHead>
-                  <TableHead>Segmento</TableHead>
-                  <TableHead>Visitas</TableHead>
-                  <TableHead>Ultima compra</TableHead>
+                  <TableHead>Operaciones</TableHead>
                   <TableHead>Valor acumulado</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {topCustomers.map((customer) => (
-                  <TableRow key={customer.id}>
+                {dashboard.topCustomers.slice(0, 10).map((customer) => (
+                  <TableRow key={customer.customerId}>
                     <TableCell className="font-medium text-foreground">
-                      {customer.fullName}
+                      {customer.name}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={customer.segment === 'CORPORATIVO' ? 'success' : 'info'}>
-                        {customer.segment}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {customer.visitCount}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {customer.lastPurchaseAt}
-                    </TableCell>
+                    <TableCell className="text-muted-foreground">{customer.operations}</TableCell>
                     <TableCell className="font-medium text-foreground">
-                      {formatCurrency(customer.totalSpent)}
+                      {formatCurrency(customer.total)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -326,8 +437,9 @@ export function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {cashPaymentSummary.map((item) => {
-              const width = item.salesAmount > 0 ? (item.collectedAmount / item.salesAmount) * 100 : 0
+            {dashboard.cashPaymentSummary.map((item) => {
+              const width =
+                item.salesAmount > 0 ? (item.collectedAmount / item.salesAmount) * 100 : 0
 
               return (
                 <div key={item.method} className="space-y-2">

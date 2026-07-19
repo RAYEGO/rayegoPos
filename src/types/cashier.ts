@@ -22,6 +22,7 @@ export type CashDrawerRecord = {
 
 export type CashMovementRecord = {
   id: string
+  openingId: string
   createdAt: string | null
   type: CashMovementType
   description: string
@@ -43,6 +44,60 @@ export type CashPaymentSummaryRecord = {
   salesAmount: number
   collectedAmount: number
   operations: number
+}
+
+export type CashReconciliationRow = {
+  paymentMethodId: string
+  code: 'EFECTIVO' | 'TARJETA' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'OTRO'
+  name: string
+  expectedAmount: number
+  countedAmount: number
+  differenceAmount: number
+}
+
+export type CashReconciliationPreviewResponse = {
+  opening: {
+    id: string
+    branchName: string
+    cashDrawerCode: string
+    openedAt: string | null
+  }
+  rows: CashReconciliationRow[]
+  totals: {
+    expectedAmount: number
+    countedAmount: number
+    differenceAmount: number
+  }
+  lastSaved: {
+    id: string
+    createdAt: string | null
+    observations: string | null
+  } | null
+  history: Array<{
+    id: string
+    createdAt: string | null
+    expectedAmount: number
+    countedAmount: number
+    differenceAmount: number
+    observations: string | null
+    actorName: string
+  }>
+}
+
+export type SaveCashReconciliationPayload = {
+  openingId: string
+  counted: Record<string, number>
+  observations?: string
+}
+
+export type SaveCashReconciliationResponse = {
+  success: boolean
+  reconciliationId: string
+  totals: {
+    expectedAmount: number
+    countedAmount: number
+    differenceAmount: number
+  }
 }
 
 export interface BranchOption {

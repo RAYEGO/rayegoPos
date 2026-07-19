@@ -4,6 +4,9 @@ import type {
   OpenCashDrawerPayload,
   CloseCashDrawerPayload,
   CreateCashMovementPayload,
+  CashReconciliationPreviewResponse,
+  SaveCashReconciliationPayload,
+  SaveCashReconciliationResponse,
 } from '@/types/cashier'
 
 type CashierDashboardFilters = {
@@ -49,6 +52,25 @@ export const cashierService = {
 
   createMovement(accessToken: string, payload: CreateCashMovementPayload) {
     return apiRequest<{ success: boolean; movementId: string }>('/api/cashier/movement', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  getReconciliationPreview(accessToken: string, openingId: string) {
+    const searchParams = new URLSearchParams()
+    searchParams.set('openingId', openingId)
+    return apiRequest<CashReconciliationPreviewResponse>(
+      `/api/cashier/reconciliation/preview?${searchParams.toString()}`,
+      {
+        accessToken,
+      },
+    )
+  },
+
+  saveReconciliation(accessToken: string, payload: SaveCashReconciliationPayload) {
+    return apiRequest<SaveCashReconciliationResponse>('/api/cashier/reconciliation', {
       method: 'POST',
       accessToken,
       body: payload,

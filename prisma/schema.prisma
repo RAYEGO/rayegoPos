@@ -248,6 +248,7 @@ model Usuario {
   comprasResponsables  Compra[]       @relation("CompraUsuarioResponsable")
   aperturasCaja        AperturaCaja[] @relation("AperturaCajaUsuario")
   cierresCaja          CierreCaja[]   @relation("CierreCajaUsuario")
+  conciliacionesCaja   ConciliacionCaja[] @relation("ConciliacionCajaUsuario")
   auditoriasActor      Auditoria[]    @relation("AuditoriaActor")
 
   empresasCreadas                   Empresa[]                    @relation("EmpresaCreatedBy")
@@ -312,8 +313,12 @@ model Usuario {
   aperturasActualizadas             AperturaCaja[]               @relation("AperturaCajaUpdatedBy")
   cierresCreados                    CierreCaja[]                 @relation("CierreCajaCreatedBy")
   cierresActualizados               CierreCaja[]                 @relation("CierreCajaUpdatedBy")
+  conciliacionesCajaCreadas         ConciliacionCaja[]           @relation("ConciliacionCajaCreatedBy")
+  conciliacionesCajaActualizadas    ConciliacionCaja[]           @relation("ConciliacionCajaUpdatedBy")
   movimientosCajaCreados            MovimientoCaja[]             @relation("MovimientoCajaCreatedBy")
   movimientosCajaActualizados       MovimientoCaja[]             @relation("MovimientoCajaUpdatedBy")
+  conciliacionCajaDetallesCreados        ConciliacionCajaDetalle[] @relation("ConciliacionCajaDetalleCreatedBy")
+  conciliacionCajaDetallesActualizados   ConciliacionCajaDetalle[] @relation("ConciliacionCajaDetalleUpdatedBy")
   ingresosCreados                   Ingreso[]                    @relation("IngresoCreatedBy")
   ingresosActualizados              Ingreso[]                    @relation("IngresoUpdatedBy")
   egresosCreados                    Egreso[]                     @relation("EgresoCreatedBy")
@@ -1019,6 +1024,7 @@ model FormaPago {
   compraPagos     CompraPago[]
   ventaPagos      VentaPago[]
   movimientosCaja MovimientoCaja[]
+  conciliacionesCaja ConciliacionCajaDetalle[]
 
   @@index([activo, orden])
   @@index([deletedAt])
@@ -1096,12 +1102,64 @@ model AperturaCaja {
   createdBy   Usuario?         @relation("AperturaCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy   Usuario?         @relation("AperturaCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   cierre      CierreCaja?
+  conciliaciones ConciliacionCaja[]
   movimientos MovimientoCaja[]
 
   @@index([cajaId, estado])
   @@index([usuarioId, fechaApertura])
   @@index([deletedAt])
   @@map("apertura_caja")
+}
+
+model ConciliacionCaja {
+  id               String    @id @default(uuid()) @db.Uuid
+  aperturaCajaId   String    @map("apertura_caja_id") @db.Uuid
+  usuarioId        String    @map("usuario_id") @db.Uuid
+  fechaConciliacion DateTime @default(now()) @map("fecha_conciliacion")
+  montoSistemaTotal Decimal  @default(0) @map("monto_sistema_total") @db.Decimal(14, 2)
+  montoDeclaradoTotal Decimal @default(0) @map("monto_declarado_total") @db.Decimal(14, 2)
+  diferenciaTotal  Decimal   @default(0) @map("diferencia_total") @db.Decimal(14, 2)
+  observaciones    String?   @db.VarChar(255)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
+  createdById      String?   @map("created_by") @db.Uuid
+  updatedById      String?   @map("updated_by") @db.Uuid
+
+  aperturaCaja AperturaCaja               @relation(fields: [aperturaCajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  usuario      Usuario                    @relation("ConciliacionCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy    Usuario?                   @relation("ConciliacionCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy    Usuario?                   @relation("ConciliacionCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  detalles     ConciliacionCajaDetalle[]
+
+  @@index([usuarioId, fechaConciliacion])
+  @@index([aperturaCajaId, fechaConciliacion])
+  @@index([deletedAt])
+  @@map("conciliacion_caja")
+}
+
+model ConciliacionCajaDetalle {
+  id                 String    @id @default(uuid()) @db.Uuid
+  conciliacionCajaId String    @map("conciliacion_caja_id") @db.Uuid
+  formaPagoId        String    @map("forma_pago_id") @db.Uuid
+  montoSistema       Decimal   @default(0) @map("monto_sistema") @db.Decimal(14, 2)
+  montoDeclarado     Decimal   @default(0) @map("monto_declarado") @db.Decimal(14, 2)
+  diferencia         Decimal   @default(0) @db.Decimal(14, 2)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+  createdById        String?   @map("created_by") @db.Uuid
+  updatedById        String?   @map("updated_by") @db.Uuid
+
+  conciliacionCaja ConciliacionCaja @relation(fields: [conciliacionCajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  formaPago        FormaPago        @relation(fields: [formaPagoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy        Usuario?         @relation("ConciliacionCajaDetalleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy        Usuario?         @relation("ConciliacionCajaDetalleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([conciliacionCajaId, formaPagoId])
+  @@index([formaPagoId])
+  @@index([deletedAt])
+  @@map("conciliacion_caja_detalle")
 }
 
 model CierreCaja {

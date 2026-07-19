@@ -4,6 +4,8 @@ import {
   closeCashDrawer,
   createCashMovement,
   getCashierDashboard,
+  getCashReconciliationPreview,
+  saveCashReconciliation,
   openCashDrawer,
 } from '../modules/cashier/cashier.service.js'
 
@@ -32,6 +34,16 @@ const createCashMovementSchema = z.object({
   observations: z.string().max(255).optional(),
 })
 
+const cashReconciliationPreviewQuerySchema = z.object({
+  openingId: z.string().uuid(),
+})
+
+const cashReconciliationSchema = z.object({
+  openingId: z.string().uuid(),
+  counted: z.record(z.string().uuid(), z.number().nonnegative()),
+  observations: z.string().max(255).optional(),
+})
+
 export async function cashierRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = cashierDashboardQuerySchema.parse(request.query)
@@ -56,5 +68,15 @@ export async function cashierRoutes(app: FastifyInstance) {
   app.post('/movement', async (request) => {
     const body = createCashMovementSchema.parse(request.body)
     return createCashMovement(request, body)
+  })
+
+  app.get('/reconciliation/preview', async (request) => {
+    const query = cashReconciliationPreviewQuerySchema.parse(request.query)
+    return getCashReconciliationPreview(request, query)
+  })
+
+  app.post('/reconciliation', async (request) => {
+    const body = cashReconciliationSchema.parse(request.body)
+    return saveCashReconciliation(request, body)
   })
 }

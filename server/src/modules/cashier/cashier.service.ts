@@ -312,6 +312,7 @@ export async function getCashierDashboard(
 
     return {
       id: movement.id,
+      openingId: movement.aperturaCajaId,
       createdAt: formatDateTime(movement.fechaMovimiento),
       type,
       description,
@@ -479,6 +480,16 @@ export async function closeCashDrawer(
       deletedAt: null,
     },
     include: {
+      conciliaciones: {
+        where: { deletedAt: null },
+        orderBy: { fechaConciliacion: 'desc' },
+        take: 1,
+        include: {
+          detalles: {
+            where: { deletedAt: null },
+          },
+        },
+      },
       movimientos: true,
     },
   })
@@ -493,6 +504,25 @@ export async function closeCashDrawer(
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
     throw createHttpError(400, 'La caja ya está cerrada.')
+  }
+
+  const latestReconciliation = opening.conciliaciones[0] ?? null
+
+  if (!latestReconciliation) {
+    throw createHttpError(
+      400,
+      'Debes realizar la conciliación antes de cerrar el turno.',
+    )
+  }
+
+  const reconciliationDifference = decimalToNumber(latestReconciliation.diferenciaTotal)
+  const reconciliationObservations = latestReconciliation.observaciones?.trim() ?? ''
+
+  if (reconciliationDifference !== 0 && reconciliationObservations.length === 0) {
+    throw createHttpError(
+      400,
+      'Debes registrar observaciones en la conciliación cuando exista diferencia.',
+    )
   }
 
   // Calculate expected amount
@@ -634,5 +664,302 @@ export async function createCashMovement(
   return {
     success: true,
     movementId: movement.id,
+  }
+}
+
+type CashReconciliationPreviewQuery = {
+  openingId: string
+}
+
+type CashReconciliationPayload = {
+  openingId: string
+  counted: Record<string, number>
+  observations?: string
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+async function buildExpectedByPaymentMethod(openingId: string) {
+  const paymentMethods = await prisma.formaPago.findMany({
+    where: {
+      deletedAt: null,
+      activo: true,
+    },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+      orden: true,
+    },
+    orderBy: [{ orden: 'asc' }, { codigo: 'asc' }],
+  })
+
+  const cashMethod = paymentMethods.find((method) => method.codigo === CodigoFormaPago.EFECTIVO)
+  if (!cashMethod) {
+    throw createHttpError(500, 'No existe la forma de pago EFECTIVO.')
+  }
+
+  const opening = await prisma.aperturaCaja.findFirst({
+    where: {
+      id: openingId,
+      deletedAt: null,
+    },
+    select: {
+      montoAperturaEfectivo: true,
+      movimientos: {
+        where: { deletedAt: null },
+        select: {
+          tipo: true,
+          operacion: true,
+          monto: true,
+          formaPagoId: true,
+        },
+      },
+    },
+  })
+
+  if (!opening) {
+    throw createHttpError(404, 'Apertura de caja no encontrada.')
+  }
+
+  const expectedMap = new Map<string, number>()
+  for (const method of paymentMethods) {
+    expectedMap.set(method.id, 0)
+  }
+
+  expectedMap.set(
+    cashMethod.id,
+    roundMoney(decimalToNumber(opening.montoAperturaEfectivo)),
+  )
+
+  for (const movement of opening.movimientos) {
+    if (movement.tipo === TipoMovimientoCaja.APERTURA) continue
+    if (movement.tipo === TipoMovimientoCaja.CIERRE) continue
+
+    const methodId = movement.formaPagoId ?? cashMethod.id
+    const amount = decimalToNumber(movement.monto)
+    const signed = movement.operacion === OperacionCaja.INGRESO ? amount : -amount
+    expectedMap.set(methodId, roundMoney((expectedMap.get(methodId) ?? 0) + signed))
+  }
+
+  return { paymentMethods, expectedMap, cashMethodId: cashMethod.id }
+}
+
+export async function getCashReconciliationPreview(
+  request: FastifyRequest,
+  query: CashReconciliationPreviewQuery,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const opening = await prisma.aperturaCaja.findFirst({
+    where: {
+      id: query.openingId,
+      deletedAt: null,
+    },
+    include: {
+      caja: {
+        include: {
+          sucursal: true,
+        },
+      },
+      conciliaciones: {
+        where: { deletedAt: null },
+        orderBy: { fechaConciliacion: 'desc' },
+        take: 1,
+        include: {
+          detalles: {
+            where: { deletedAt: null },
+          },
+        },
+      },
+    },
+  })
+
+  if (!opening) {
+    throw createHttpError(404, 'Apertura de caja no encontrada.')
+  }
+
+  if (opening.usuarioId !== userId) {
+    throw createHttpError(403, 'No tienes permisos para conciliar esta caja.')
+  }
+
+  if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
+    throw createHttpError(400, 'La caja no está abierta.')
+  }
+
+  const { paymentMethods, expectedMap } = await buildExpectedByPaymentMethod(opening.id)
+
+  const existingReconciliation = opening.conciliaciones[0] ?? null
+
+  const history = await prisma.conciliacionCaja.findMany({
+    where: {
+      deletedAt: null,
+      aperturaCajaId: opening.id,
+    },
+    orderBy: { fechaConciliacion: 'desc' },
+    take: 10,
+    select: {
+      id: true,
+      fechaConciliacion: true,
+      montoSistemaTotal: true,
+      montoDeclaradoTotal: true,
+      diferenciaTotal: true,
+      observaciones: true,
+      createdBy: { select: { nombres: true, apellidos: true } },
+    },
+  })
+
+  const rows = paymentMethods.map((method) => {
+    const expectedAmount = roundMoney(expectedMap.get(method.id) ?? 0)
+    const existingDetail = existingReconciliation?.detalles.find(
+      (detail) => detail.formaPagoId === method.id,
+    )
+    const countedAmount = existingDetail
+      ? roundMoney(decimalToNumber(existingDetail.montoDeclarado))
+      : expectedAmount
+    const differenceAmount = roundMoney(countedAmount - expectedAmount)
+
+    return {
+      paymentMethodId: method.id,
+      code: method.codigo,
+      name: method.nombre,
+      expectedAmount,
+      countedAmount,
+      differenceAmount,
+    }
+  })
+
+  const totalExpected = roundMoney(rows.reduce((sum, row) => sum + row.expectedAmount, 0))
+  const totalCounted = roundMoney(rows.reduce((sum, row) => sum + row.countedAmount, 0))
+  const totalDifference = roundMoney(totalCounted - totalExpected)
+
+  return {
+    opening: {
+      id: opening.id,
+      branchName: opening.caja.sucursal.nombre,
+      cashDrawerCode: opening.caja.codigo,
+      openedAt: formatDateTime(opening.fechaApertura),
+    },
+    rows,
+    totals: {
+      expectedAmount: totalExpected,
+      countedAmount: totalCounted,
+      differenceAmount: totalDifference,
+    },
+    lastSaved: existingReconciliation
+      ? {
+          id: existingReconciliation.id,
+          createdAt: formatDateTime(existingReconciliation.fechaConciliacion),
+          observations: existingReconciliation.observaciones ?? null,
+        }
+      : null,
+    history: history.map((entry) => ({
+      id: entry.id,
+      createdAt: formatDateTime(entry.fechaConciliacion),
+      expectedAmount: decimalToNumber(entry.montoSistemaTotal),
+      countedAmount: decimalToNumber(entry.montoDeclaradoTotal),
+      differenceAmount: decimalToNumber(entry.diferenciaTotal),
+      observations: entry.observaciones ?? null,
+      actorName: entry.createdBy ? formatFullName(entry.createdBy) : 'Sistema',
+    })),
+  }
+}
+
+export async function saveCashReconciliation(
+  request: FastifyRequest,
+  payload: CashReconciliationPayload,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const opening = await prisma.aperturaCaja.findFirst({
+    where: {
+      id: payload.openingId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      usuarioId: true,
+      estado: true,
+    },
+  })
+
+  if (!opening) {
+    throw createHttpError(404, 'Apertura de caja no encontrada.')
+  }
+
+  if (opening.usuarioId !== userId) {
+    throw createHttpError(403, 'No tienes permisos para conciliar esta caja.')
+  }
+
+  if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
+    throw createHttpError(400, 'La caja no está abierta.')
+  }
+
+  const { paymentMethods, expectedMap } = await buildExpectedByPaymentMethod(opening.id)
+
+  const rows = paymentMethods.map((method) => {
+    const expectedAmount = roundMoney(expectedMap.get(method.id) ?? 0)
+    const countedAmount = roundMoney(payload.counted[method.id] ?? expectedAmount)
+    return {
+      paymentMethodId: method.id,
+      expectedAmount,
+      countedAmount,
+      differenceAmount: roundMoney(countedAmount - expectedAmount),
+    }
+  })
+
+  const totalExpected = roundMoney(rows.reduce((sum, row) => sum + row.expectedAmount, 0))
+  const totalCounted = roundMoney(rows.reduce((sum, row) => sum + row.countedAmount, 0))
+  const totalDifference = roundMoney(totalCounted - totalExpected)
+
+  const observations = toOptionalString(payload.observations)
+  if (totalDifference !== 0 && !observations) {
+    throw createHttpError(
+      400,
+      'Debes registrar observaciones cuando exista diferencia en la conciliación.',
+    )
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const created = await tx.conciliacionCaja.create({
+      data: {
+        aperturaCajaId: opening.id,
+        usuarioId: userId,
+        montoSistemaTotal: toDecimal(totalExpected, 2),
+        montoDeclaradoTotal: toDecimal(totalCounted, 2),
+        diferenciaTotal: toDecimal(totalDifference, 2),
+        observaciones: observations,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    for (const row of rows) {
+      await tx.conciliacionCajaDetalle.create({
+        data: {
+          conciliacionCajaId: created.id,
+          formaPagoId: row.paymentMethodId,
+          montoSistema: toDecimal(row.expectedAmount, 2),
+          montoDeclarado: toDecimal(row.countedAmount, 2),
+          diferencia: toDecimal(row.differenceAmount, 2),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+    }
+
+    return created.id
+  })
+
+  return {
+    success: true,
+    reconciliationId: result,
+    totals: {
+      expectedAmount: totalExpected,
+      countedAmount: totalCounted,
+      differenceAmount: totalDifference,
+    },
   }
 }
