@@ -1,7 +1,7 @@
 import { EstadoVenta, TipoComprobante } from '@prisma/client'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { cancelSale, createSale, getSaleReceipt, getSalesDashboard } from '../modules/sales/sales.service.js'
+import { cancelSale, createSale, getSaleReceipt, getSaleReceiptPdf, getSalesDashboard } from '../modules/sales/sales.service.js'
 
 const salesDashboardQuerySchema = z.object({
   search: z.string().optional(),
@@ -57,6 +57,14 @@ export async function salesRoutes(app: FastifyInstance) {
   app.get('/:id/receipt', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
     return getSaleReceipt(params.id, request)
+  })
+
+  app.get('/:id/receipt/pdf', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const pdf = await getSaleReceiptPdf(params.id, request)
+    reply.header('Content-Type', 'application/pdf')
+    reply.header('Content-Disposition', `attachment; filename="${pdf.fileName}"`)
+    return reply.send(pdf.buffer)
   })
 
   app.patch('/:id/cancel', async (request) => {

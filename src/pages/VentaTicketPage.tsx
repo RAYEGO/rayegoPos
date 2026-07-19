@@ -28,16 +28,6 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value))
 }
 
-function normalizeWhatsAppPhone(rawPhone: string) {
-  const trimmed = rawPhone.trim()
-  if (!trimmed) return null
-
-  const digits = trimmed.replace(/[^\d+]/g, '')
-  const withoutPlus = digits.startsWith('+') ? digits.slice(1) : digits
-  const normalized = withoutPlus.startsWith('51') ? withoutPlus : `51${withoutPlus}`
-  return normalized.replace(/\D/g, '')
-}
-
 async function copyToClipboard(value: string) {
   await navigator.clipboard.writeText(value)
 }
@@ -106,10 +96,6 @@ export function VentaTicketPage() {
     [receipt],
   )
 
-  const whatsappPhone = receipt?.customer?.telefono
-    ? normalizeWhatsAppPhone(receipt.customer.telefono)
-    : null
-
   const whatsAppMessage = useMemo(() => {
     if (!receipt) return null
 
@@ -140,38 +126,44 @@ export function VentaTicketPage() {
   }, [])
 
   const handleShare = useCallback(async () => {
-    if (!receipt) return
-
-    const shareUrl = `${window.location.origin}/print/sales/${saleId}`
+    if (!receipt || !accessToken || !saleId) return
 
     const message = whatsAppMessage ?? `Ticket ${receipt.document.correlativo}`
 
-    if (navigator.share) {
-      try {
+    try {
+      const blob = await salesService.getReceiptPdf(accessToken, saleId)
+      const fileName = `ticket-${receipt.document.correlativo}.pdf`
+      const file = new File([blob], fileName, { type: 'application/pdf' })
+
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
         await navigator.share({
           title: `Ticket ${receipt.document.correlativo}`,
           text: message,
-          url: shareUrl,
+          files: [file],
         })
         return
-      } catch {
+      }
+
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = fileName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+
+      await copyToClipboard(message)
+      toast.success('PDF descargado. Mensaje copiado para compartir.')
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        await handleUnauthorized()
         return
       }
-    }
 
-    if (!whatsappPhone) {
-      try {
-        await copyToClipboard(shareUrl)
-        toast.success('Link del ticket copiado. Adjunta el PDF en WhatsApp.')
-      } catch {
-        toast.error('No fue posible compartir automáticamente.')
-      }
-      return
+      toast.error(getApiErrorMessage(nextError))
     }
-
-    const url = `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(message)}`
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }, [receipt, saleId, whatsappPhone, whatsAppMessage])
+  }, [accessToken, handleUnauthorized, receipt, saleId, whatsAppMessage])
 
   useEffect(() => {
     if (!receipt) return

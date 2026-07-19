@@ -67,3 +67,35 @@ export async function apiRequest<T>(
     )
   }
 }
+
+export async function apiRequestBlob(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<Blob> {
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: options.method ?? 'GET',
+      headers: {
+        ...(options.accessToken
+          ? { Authorization: `Bearer ${options.accessToken}` }
+          : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    })
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null
+      throw new ApiError(payload?.message ?? 'La API respondió con un error.', response.status)
+    }
+
+    return response.blob()
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+
+    throw new ApiNetworkError(
+      'No fue posible conectar con la API. Verifica que el backend esté levantado.',
+    )
+  }
+}

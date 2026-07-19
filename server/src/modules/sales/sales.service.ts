@@ -11,6 +11,7 @@ import {
   TipoMovimientoInventario,
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
+import puppeteer from 'puppeteer'
 import { prisma } from '../../lib/prisma.js'
 
 const saleInclude = {
@@ -205,6 +206,156 @@ function formatDocumentNumber({
 }) {
   if (serie && numero) return `${serie}-${numero}`
   return null
+}
+
+type SaleReceiptPayload = Awaited<ReturnType<typeof getSaleReceipt>>
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function renderReceipt80mmHtml(receipt: SaleReceiptPayload) {
+  const itemsHtml = receipt.items
+    .map((item) => {
+      const quantity = item.quantity.toFixed(2).replace(/\.00$/, '')
+      return `
+        <div class="item">
+          <div class="row">
+            <div class="item-name">
+              <div class="bold">${escapeHtml(item.name)}</div>
+              <div class="muted">${escapeHtml(item.sku)}</div>
+              <div class="muted">${quantity} ${escapeHtml(item.unitSymbol)} x ${item.unitPrice.toFixed(2)}</div>
+            </div>
+            <div class="item-total bold">${item.total.toFixed(2)}</div>
+          </div>
+        </div>
+      `
+    })
+    .join('')
+
+  const paymentsHtml = receipt.payments
+    .map(
+      (payment) => `
+        <div class="row">
+          <div>${escapeHtml(payment.methodName)}</div>
+          <div>${payment.amount.toFixed(2)}</div>
+        </div>
+      `,
+    )
+    .join('')
+
+  const customerName = receipt.customer?.nombre ?? 'Mostrador'
+  const customerDoc = receipt.customer?.numeroDocumento
+    ? `${escapeHtml(receipt.customer.tipoDocumento ?? 'DOC')}: ${escapeHtml(receipt.customer.numeroDocumento ?? '')}`
+    : ''
+
+  return `
+    <!DOCTYPE html>
+    <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          @page { size: 80mm auto; margin: 6mm 4mm; }
+          html, body { padding: 0; margin: 0; }
+          body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
+          .center { text-align: center; }
+          .bold { font-weight: 700; }
+          .muted { opacity: 0.8; font-size: 10px; }
+          .hr { border-top: 1px dashed rgba(0,0,0,0.55); margin: 10px 0; }
+          .row { display: flex; justify-content: space-between; gap: 10px; }
+          .item { margin: 8px 0; }
+          .item-name { flex: 1; min-width: 0; }
+          .item-total { white-space: nowrap; }
+        </style>
+      </head>
+      <body>
+        <div class="center">
+          <div class="bold">${escapeHtml(receipt.company.nombreComercial ?? receipt.company.razonSocial)}</div>
+          <div>RUC: ${escapeHtml(receipt.company.ruc)}</div>
+          ${receipt.company.direccion ? `<div>${escapeHtml(receipt.company.direccion)}</div>` : ''}
+          ${receipt.company.telefono ? `<div>${escapeHtml(receipt.company.telefono)}</div>` : ''}
+          <div class="bold" style="margin-top: 6px">${escapeHtml(receipt.branch.nombre)}</div>
+          ${receipt.branch.direccion ? `<div>${escapeHtml(receipt.branch.direccion)}</div>` : ''}
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="bold">Comprobante</div>
+          <div class="bold">${escapeHtml(receipt.document.correlativo)}</div>
+        </div>
+        <div class="row">
+          <div>Fecha</div>
+          <div>${escapeHtml(receipt.issuedAt ?? '')}</div>
+        </div>
+        <div class="row">
+          <div>Cajero</div>
+          <div>${escapeHtml(receipt.cashierName)}</div>
+        </div>
+        <div style="margin-top: 8px">
+          <div class="bold">Cliente</div>
+          <div>${escapeHtml(customerName)}</div>
+          ${customerDoc ? `<div class="muted">${customerDoc}</div>` : ''}
+        </div>
+
+        <div class="hr"></div>
+
+        ${itemsHtml}
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div>Subtotal</div>
+          <div>${receipt.totals.subtotal.toFixed(2)}</div>
+        </div>
+        ${
+          receipt.totals.discountTotal > 0
+            ? `<div class="row"><div>Descuento</div><div>-${receipt.totals.discountTotal.toFixed(2)}</div></div>`
+            : ''
+        }
+        ${
+          receipt.totals.taxTotal > 0
+            ? `<div class="row"><div>Impuestos</div><div>${receipt.totals.taxTotal.toFixed(2)}</div></div>`
+            : ''
+        }
+        <div class="row bold" style="font-size: 12px; margin-top: 2px">
+          <div>Total</div>
+          <div>${receipt.totals.total.toFixed(2)}</div>
+        </div>
+        ${
+          receipt.totals.changeAmount > 0
+            ? `<div class="row"><div>Vuelto</div><div>${receipt.totals.changeAmount.toFixed(2)}</div></div>`
+            : ''
+        }
+        ${
+          receipt.totals.outstandingAmount > 0
+            ? `<div class="row bold"><div>Pendiente</div><div>${receipt.totals.outstandingAmount.toFixed(2)}</div></div>`
+            : ''
+        }
+
+        <div class="hr"></div>
+
+        <div class="bold" style="margin-bottom: 6px">Pagos</div>
+        ${paymentsHtml}
+
+        ${
+          receipt.observations
+            ? `<div class="hr"></div><div class="bold">Observaciones</div><div>${escapeHtml(receipt.observations)}</div>`
+            : ''
+        }
+
+        <div class="center" style="margin-top: 14px">
+          <div class="bold">Gracias por su compra</div>
+        </div>
+      </body>
+    </html>
+  `
 }
 
 function isColdChainProduct(productName: string) {
@@ -1389,6 +1540,38 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
       observations: payment.observaciones,
     })),
     observations: sale.observaciones,
+  }
+}
+
+export async function getSaleReceiptPdf(saleId: string, request: FastifyRequest) {
+  const receipt = await getSaleReceipt(saleId, request)
+  const html = renderReceipt80mmHtml(receipt)
+
+  const browser = await puppeteer.launch({
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: true,
+  })
+
+  try {
+    const page = await browser.newPage()
+    await page.setContent(html, { waitUntil: 'load' })
+    const pdf = await page.pdf({
+      width: '80mm',
+      printBackground: true,
+      margin: {
+        top: '6mm',
+        bottom: '6mm',
+        left: '4mm',
+        right: '4mm',
+      },
+    })
+
+    return {
+      fileName: `ticket-${receipt.document.correlativo}.pdf`,
+      buffer: Buffer.from(pdf),
+    }
+  } finally {
+    await browser.close()
   }
 }
 
