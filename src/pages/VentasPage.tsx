@@ -13,6 +13,7 @@ import {
   ChevronDown,
   MoreVertical,
   History,
+  ClipboardList,
   Pill,
   CircleDollarSign,
 } from 'lucide-react'
@@ -50,10 +51,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { ReceiptDialog } from '@/components/sales/ReceiptDialog'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { salesService } from '@/services/salesService'
-import type { CreateSalePayload, SalesDashboardResponse } from '@/types/sales'
+import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } from '@/types/sales'
 import { toast } from 'sonner'
 
 const saleCheckoutSchema = z.object({
@@ -202,7 +204,12 @@ export function VentasPage() {
   const [isCheckoutDialogOpen, setIsCheckoutDialogOpen] = useState(false)
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
   const [receiptSale, setReceiptSale] = useState<{ id: string; code: string } | null>(null)
+  const [receiptPayload, setReceiptPayload] = useState<SaleReceiptResponse | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleUnauthorized = useCallback(async () => {
+    await logout()
+  }, [logout])
 
   const checkoutForm = useForm<SaleCheckoutFormValues>({
     resolver: zodResolver(saleCheckoutSchema),
@@ -477,6 +484,12 @@ export function VentasPage() {
 
       setReceiptSale({ id: response.item.id, code: response.item.code })
       setIsReceiptDialogOpen(true)
+      try {
+        const receipt = await salesService.getReceipt(accessToken, response.item.id)
+        setReceiptPayload(receipt)
+      } catch (error) {
+        setReceiptPayload(null)
+      }
       setCartItems([])
       setIsCheckoutDialogOpen(false)
       checkoutForm.reset(defaultCheckoutFormValues)
@@ -496,30 +509,11 @@ export function VentasPage() {
     }
   }
 
-  const openReceipt = useCallback(
-    (mode: 'view' | 'print') => {
-      if (!receiptSale) {
-        return
-      }
-
-      const url =
-        mode === 'print'
-          ? `/print/sales/${receiptSale.id}?print=1`
-          : `/print/sales/${receiptSale.id}`
-
-      window.open(url, '_blank', 'noopener,noreferrer')
-    },
-    [receiptSale],
-  )
-
-  const shareReceipt = useCallback(() => {
-    if (!receiptSale) {
-      return
-    }
-
-    const url = `/print/sales/${receiptSale.id}?share=1`
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }, [receiptSale])
+  const openReceiptDialog = useCallback((saleId: string, saleCode: string) => {
+    setReceiptSale({ id: saleId, code: saleCode })
+    setReceiptPayload(null)
+    setIsReceiptDialogOpen(true)
+  }, [])
 
   const [showSummary, setShowSummary] = useState(true)
 
@@ -838,6 +832,10 @@ export function VentasPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openReceiptDialog(sale.id, sale.code)}>
+                          <ClipboardList className="h-4 w-4 mr-2" />
+                          Ver comprobante
+                        </DropdownMenuItem>
                         <DropdownMenuItem>
                           <History className="h-4 w-4 mr-2" />
                           Ver detalles
@@ -946,6 +944,10 @@ export function VentasPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openReceiptDialog(sale.id, sale.code)}>
+                                  <ClipboardList className="h-4 w-4 mr-2" />
+                                  Ver comprobante
+                                </DropdownMenuItem>
                                 <DropdownMenuItem>
                                   <History className="h-4 w-4 mr-2" />
                                   Ver detalles
@@ -1398,39 +1400,20 @@ export function VentasPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <ReceiptDialog
         open={isReceiptDialogOpen}
-        onOpenChange={(open) => {
-          setIsReceiptDialogOpen(open)
-          if (!open) {
+        onOpenChange={(nextOpen) => {
+          setIsReceiptDialogOpen(nextOpen)
+          if (!nextOpen) {
             setReceiptSale(null)
+            setReceiptPayload(null)
           }
         }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Ticket 80mm</DialogTitle>
-            <DialogDescription>
-              Venta {receiptSale?.code ?? '—'}. Para WhatsApp: imprime y guarda como PDF, luego adjunta el archivo en el chat.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-2">
-            <Button type="button" onClick={() => openReceipt('print')} disabled={!receiptSale}>
-              Imprimir / Guardar PDF
-            </Button>
-            <Button type="button" variant="outline" onClick={shareReceipt} disabled={!receiptSale}>
-              Compartir
-            </Button>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setIsReceiptDialogOpen(false)}>
-              Cerrar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        accessToken={accessToken}
+        sale={receiptSale}
+        initialReceipt={receiptPayload}
+        onUnauthorized={handleUnauthorized}
+      />
     </div>
   )
 }

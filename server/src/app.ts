@@ -9,6 +9,7 @@ import { purchaseRoutes } from './routes/purchases.js'
 import { productRoutes } from './routes/products.js'
 import { salesRoutes } from './routes/sales.js'
 import { cashierRoutes } from './routes/cashier.js'
+import { auditRoutes } from './routes/audit.js'
 import suppliersRoutes from './routes/suppliers.js'
 import customersRoutes from './routes/customers.js'
 import dashboardRoutes from './routes/dashboard.js'
@@ -79,6 +80,10 @@ export function createApp() {
 
     instance.register(reportsRoutes, {
       prefix: '/api/reports',
+    })
+
+    instance.register(auditRoutes, {
+      prefix: '/api/audit',
     })
   })
 

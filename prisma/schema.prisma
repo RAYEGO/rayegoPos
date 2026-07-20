@@ -17,6 +17,10 @@ enum AccionAuditoria {
   LOGIN
   LOGOUT
   ANULAR
+  VIEW_RECEIPT
+  PRINT_RECEIPT
+  DOWNLOAD_RECEIPT_PDF
+  SHARE_RECEIPT
 }
 
 /// Tipos de documento soportados para personas y entidades.
