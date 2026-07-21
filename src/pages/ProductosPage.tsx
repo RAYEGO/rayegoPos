@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
@@ -80,6 +80,10 @@ const createProductSchema = z.object({
   laboratorioId: z.string().optional(),
   presentacionId: z.string().optional(),
   unidadMedidaId: z.string().uuid({ message: 'Selecciona una unidad.' }),
+  modoEmpaque: z.enum(['SIMPLE', 'BLISTER']),
+  unidadesPorBlister: z.number().int().positive('Las unidades por blíster deben ser mayor a 0.').optional(),
+  blistersPorCaja: z.number().int().positive('Los blíster por caja deben ser mayor a 0.').optional(),
+  precioVentaBlister: z.number().nonnegative('El precio por blíster debe ser mayor o igual a 0.').optional(),
   principioActivoId: z.string().optional(),
   sku: z.string().min(3, 'Ingresa un SKU válido.').max(50),
   codigoInterno: z.string().max(50).optional(),
@@ -92,6 +96,26 @@ const createProductSchema = z.object({
   esControlado: z.boolean(),
   precioVenta: z.number().nonnegative('El precio debe ser mayor o igual a 0.'),
   costoReferencia: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
+}).superRefine((values, ctx) => {
+  if (values.modoEmpaque !== 'BLISTER') {
+    return
+  }
+
+  if (!values.unidadesPorBlister || values.unidadesPorBlister <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Define las unidades por blíster.',
+      path: ['unidadesPorBlister'],
+    })
+  }
+
+  if (!values.blistersPorCaja || values.blistersPorCaja <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Define los blíster por caja.',
+      path: ['blistersPorCaja'],
+    })
+  }
 })
 
 const masterCategorySchema = z.object({
@@ -135,6 +159,10 @@ const defaultFormValues: CreateProductFormValues = {
   laboratorioId: '',
   presentacionId: '',
   unidadMedidaId: '',
+  modoEmpaque: 'SIMPLE',
+  unidadesPorBlister: undefined,
+  blistersPorCaja: undefined,
+  precioVentaBlister: undefined,
   principioActivoId: '',
   sku: '',
   codigoInterno: '',
@@ -232,6 +260,10 @@ export function ProductosPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isMasterSubmitting, setIsMasterSubmitting] = useState(false)
+  const [isPackagingDialogOpen, setIsPackagingDialogOpen] = useState(false)
+  const createDialogContentRef = useRef<HTMLDivElement | null>(null)
+  const createDialogScrollTopRef = useRef(0)
+  const previousPackagingOpenRef = useRef(false)
 
   const [masterDialogOpen, setMasterDialogOpen] = useState(false)
   const [masterDialogType, setMasterDialogType] = useState<
@@ -250,6 +282,34 @@ export function ProductosPage() {
     resolver: zodResolver(createProductSchema),
     defaultValues: defaultFormValues,
   })
+
+  const watchedPackagingMode = form.watch('modoEmpaque')
+  const watchedUnitsPerBlister = form.watch('unidadesPorBlister')
+  const watchedBlistersPerBox = form.watch('blistersPorCaja')
+
+  useEffect(() => {
+    const wasOpen = previousPackagingOpenRef.current
+    previousPackagingOpenRef.current = isPackagingDialogOpen
+
+    if (wasOpen && !isPackagingDialogOpen) {
+      const scrollTop = createDialogScrollTopRef.current
+      const container = createDialogContentRef.current
+      if (!container) {
+        return
+      }
+
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          container.scrollTop = scrollTop
+        })
+        return
+      }
+
+      setTimeout(() => {
+        container.scrollTop = scrollTop
+      }, 0)
+    }
+  }, [isPackagingDialogOpen])
 
   const categoryForm = useForm<MasterCategoryFormValues>({
     resolver: zodResolver(masterCategorySchema),
@@ -680,10 +740,16 @@ export function ProductosPage() {
       return
     }
 
+    const packagingMode = values.modoEmpaque ?? 'SIMPLE'
+
     const payload: CreateProductPayload = {
       ...values,
       laboratorioId: values.laboratorioId || undefined,
       presentacionId: values.presentacionId || undefined,
+      modoEmpaque: packagingMode === 'BLISTER' ? 'BLISTER' : undefined,
+      unidadesPorBlister: packagingMode === 'BLISTER' ? values.unidadesPorBlister : undefined,
+      blistersPorCaja: packagingMode === 'BLISTER' ? values.blistersPorCaja : undefined,
+      precioVentaBlister: packagingMode === 'BLISTER' ? values.precioVentaBlister : undefined,
       principioActivoId: values.principioActivoId || undefined,
       codigoInterno: values.codigoInterno?.trim() || undefined,
       codigoBarras: values.codigoBarras?.trim() || undefined,
@@ -1030,7 +1096,10 @@ export function ProductosPage() {
       </Tabs>
 
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent
+          ref={createDialogContentRef}
+          className={`max-h-[88vh] sm:max-w-2xl ${isPackagingDialogOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
+        >
           <DialogHeader>
             <DialogTitle>Registrar producto</DialogTitle>
             <DialogDescription>
@@ -1042,6 +1111,7 @@ export function ProductosPage() {
             className="grid gap-4"
             onSubmit={form.handleSubmit(handleCreateProduct)}
           >
+            <input type="hidden" {...form.register('modoEmpaque')} />
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium">SKU</label>
@@ -1226,6 +1296,33 @@ export function ProductosPage() {
                 />
                 <FieldError message={form.formState.errors.costoReferencia?.message} />
               </div>
+
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-xs font-medium">Empaque y conversión</label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-between gap-3"
+                  onClick={() => {
+                    createDialogScrollTopRef.current = createDialogContentRef.current?.scrollTop ?? 0
+                    setIsPackagingDialogOpen(true)
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <Layers className="h-4 w-4" />
+                    Configurar empaque
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {watchedPackagingMode === 'BLISTER'
+                      ? `Blíster · ${
+                          (watchedUnitsPerBlister ?? 0) > 0 && (watchedBlistersPerBox ?? 0) > 0
+                            ? `1 caja = ${(watchedUnitsPerBlister ?? 0) * (watchedBlistersPerBox ?? 0)} und`
+                            : 'definir factores'
+                        }`
+                      : 'Simple'}
+                  </span>
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-3 rounded-xl border p-3 md:grid-cols-2">
@@ -1281,6 +1378,130 @@ export function ProductosPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isPackagingDialogOpen} onOpenChange={setIsPackagingDialogOpen}>
+        <DialogContent className="bottom-0 left-0 top-auto h-[92vh] w-full max-w-none translate-x-0 translate-y-0 rounded-t-2xl rounded-b-none p-4 overflow-y-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-auto sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Empaque y conversión</DialogTitle>
+            <DialogDescription>
+              Configura cómo se compra y vende este producto sin duplicar stock.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Modo de empaque</label>
+              <Controller
+                control={form.control}
+                name="modoEmpaque"
+                render={({ field }) => (
+                  <Select
+                    value={field.value}
+                    onValueChange={(value) => {
+                      field.onChange(value)
+                      if (value !== 'BLISTER') {
+                        form.setValue('unidadesPorBlister', undefined, { shouldValidate: true })
+                        form.setValue('blistersPorCaja', undefined, { shouldValidate: true })
+                        form.setValue('precioVentaBlister', undefined, { shouldValidate: true })
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SIMPLE">Simple (sin fraccionar)</SelectItem>
+                      <SelectItem value="BLISTER">Caja / Blíster / Unidad</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+
+            {watchedPackagingMode === 'BLISTER' ? (
+              <div className="grid gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium">Unidades por blíster</label>
+                    <Input
+                      type="number"
+                      step="1"
+                      {...form.register('unidadesPorBlister', {
+                        valueAsNumber: true,
+                        setValueAs: (value) =>
+                          value === '' || value === null || value === undefined
+                            ? undefined
+                            : Number(value),
+                      })}
+                    />
+                    <FieldError message={form.formState.errors.unidadesPorBlister?.message} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium">Blíster por caja</label>
+                    <Input
+                      type="number"
+                      step="1"
+                      {...form.register('blistersPorCaja', {
+                        valueAsNumber: true,
+                        setValueAs: (value) =>
+                          value === '' || value === null || value === undefined
+                            ? undefined
+                            : Number(value),
+                      })}
+                    />
+                    <FieldError message={form.formState.errors.blistersPorCaja?.message} />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Precio venta blíster (opcional)</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="Se calcula automáticamente si lo dejas vacío"
+                    {...form.register('precioVentaBlister', {
+                      valueAsNumber: true,
+                      setValueAs: (value) =>
+                        value === '' || value === null || value === undefined
+                          ? undefined
+                          : Number(value),
+                    })}
+                  />
+                  <FieldError message={form.formState.errors.precioVentaBlister?.message} />
+                </div>
+
+                <div className="rounded-xl border bg-muted/20 p-3">
+                  <p className="text-sm font-medium text-foreground">Resumen</p>
+                  <div className="mt-2 grid gap-1 text-sm text-muted-foreground">
+                    <p>
+                      1 Blíster = {(watchedUnitsPerBlister ?? 0).toString()} und
+                    </p>
+                    <p>
+                      1 Caja = {(
+                        (watchedUnitsPerBlister ?? 0) * (watchedBlistersPerBox ?? 0)
+                      ).toString()}{' '}
+                      und
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
+                Usa este modo para productos que se compran y venden en la misma unidad (ej. frascos).
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsPackagingDialogOpen(false)}>
+              Cerrar
+            </Button>
+            <Button type="button" size="sm" onClick={() => setIsPackagingDialogOpen(false)}>
+              Listo
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
