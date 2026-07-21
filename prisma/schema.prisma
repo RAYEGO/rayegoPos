@@ -436,6 +436,7 @@ model RolPermiso {
 /// Módulo: Productos
 model Categoria {
   id          String    @id @default(uuid()) @db.Uuid
+  parentId    String?   @map("parent_id") @db.Uuid
   codigo      String    @unique @db.VarChar(30)
   nombre      String    @unique @db.VarChar(120)
   descripcion String?   @db.VarChar(255)
@@ -448,11 +449,14 @@ model Categoria {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
+  parent   Categoria?  @relation("CategoriaHierarchy", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  children Categoria[] @relation("CategoriaHierarchy")
   createdBy Usuario?   @relation("CategoriaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario?   @relation("CategoriaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
   @@index([deletedAt])
+  @@index([parentId])
   @@map("categorias")
 }
 

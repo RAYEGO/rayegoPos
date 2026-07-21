@@ -12,6 +12,7 @@ import { MasterStats } from './MasterStats'
 import { MasterTable } from './MasterTable'
 import { MasterToolbar } from './MasterToolbar'
 import type { MasterStatusFilter } from './MasterToolbar'
+import { ProductCategoriesManager } from '@/components/products/categories-manager/ProductCategoriesManager'
 import {
   buildInitialMastersStore,
   getCatalogConfig,
@@ -29,7 +30,17 @@ function normalizeForSearch(value: string) {
   return value.trim().toLowerCase()
 }
 
-export function ProductMastersCenter() {
+export type ProductMastersCenterProps = {
+  accessToken: string
+  onCategoriesChanged?: () => void
+  canManageMasters: boolean
+}
+
+export function ProductMastersCenter({
+  accessToken,
+  onCategoriesChanged,
+  canManageMasters,
+}: ProductMastersCenterProps) {
   const [activeKey, setActiveKey] = useState<MasterCatalogKey>('categorias')
   const [store, setStore] = useState<MasterStore>(() => buildInitialMastersStore())
   const [query, setQuery] = useState('')
@@ -39,6 +50,7 @@ export function ProductMastersCenter() {
   const [dialog, setDialog] = useState<DialogState>({ open: false, mode: 'create', record: null })
 
   const catalog = useMemo(() => getCatalogConfig(activeKey), [activeKey])
+  const isCategoryModule = activeKey === 'categorias'
 
   const rows = store[activeKey]
 
@@ -168,89 +180,102 @@ export function ProductMastersCenter() {
       <MasterSidebar activeKey={activeKey} onSelect={handleSelectCatalog} />
 
       <section className="space-y-4">
-        <MasterStats store={store} />
+        {isCategoryModule ? (
+          <ProductCategoriesManager
+            accessToken={accessToken}
+            onCategoriesChanged={onCategoriesChanged}
+            canManage={canManageMasters}
+          />
+        ) : (
+          <>
+            <MasterStats store={store} />
 
-        <div className="rounded-xl border bg-card p-4 shadow-softSm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <p className="text-base font-semibold text-foreground">{catalog.label}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{catalog.description}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Card className="rounded-xl border bg-muted/20 px-3 py-2 shadow-none">
-                  <p className="text-xs text-muted-foreground">Registros</p>
-                  <p className="text-sm font-semibold text-foreground">{recordCountLabel}</p>
-                </Card>
-                <Card className="rounded-xl border bg-muted/20 px-3 py-2 shadow-none">
-                  <p className="text-xs text-muted-foreground">Activos</p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {quickStats.activeCount.toLocaleString('es-PE')}
-                  </p>
-                </Card>
-                <Card className="rounded-xl border bg-muted/20 px-3 py-2 shadow-none">
-                  <p className="text-xs text-muted-foreground">Inactivos</p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {quickStats.inactiveCount.toLocaleString('es-PE')}
-                  </p>
-                </Card>
+            <div className="rounded-xl border bg-card p-4 shadow-softSm">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0">
+                  <p className="text-base font-semibold text-foreground">{catalog.label}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{catalog.description}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Card className="rounded-xl border bg-muted/20 px-3 py-2 shadow-none">
+                      <p className="text-xs text-muted-foreground">Registros</p>
+                      <p className="text-sm font-semibold text-foreground">{recordCountLabel}</p>
+                    </Card>
+                    <Card className="rounded-xl border bg-muted/20 px-3 py-2 shadow-none">
+                      <p className="text-xs text-muted-foreground">Activos</p>
+                      <p className="text-sm font-semibold text-foreground">
+                        {quickStats.activeCount.toLocaleString('es-PE')}
+                      </p>
+                    </Card>
+                    <Card className="rounded-xl border bg-muted/20 px-3 py-2 shadow-none">
+                      <p className="text-xs text-muted-foreground">Inactivos</p>
+                      <p className="text-sm font-semibold text-foreground">
+                        {quickStats.inactiveCount.toLocaleString('es-PE')}
+                      </p>
+                    </Card>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Button type="button" variant="outline" onClick={() => setImportDialogOpen(true)}>
+                    <UploadCloud className="h-4 w-4" />
+                    Importar Catálogo Base
+                  </Button>
+                  <Button type="button" onClick={openCreate}>
+                    <Plus className="h-4 w-4" />
+                    Nuevo
+                  </Button>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Button type="button" variant="outline" onClick={() => setImportDialogOpen(true)}>
-                <UploadCloud className="h-4 w-4" />
-                Importar Catálogo Base
-              </Button>
-              <Button type="button" onClick={openCreate}>
-                <Plus className="h-4 w-4" />
-                Nuevo
-              </Button>
-            </div>
-          </div>
-        </div>
+            <MasterToolbar
+              query={query}
+              onQueryChange={(value) => {
+                setQuery(value)
+                setPage(1)
+              }}
+              placeholder={catalog.searchPlaceholder}
+              status={status}
+              onStatusChange={(value) => {
+                setStatus(value)
+                setPage(1)
+              }}
+            />
 
-        <MasterToolbar
-          query={query}
-          onQueryChange={(value) => {
-            setQuery(value)
-            setPage(1)
-          }}
-          placeholder={catalog.searchPlaceholder}
-          status={status}
-          onStatusChange={(value) => {
-            setStatus(value)
-            setPage(1)
-          }}
-        />
-
-        {filteredRows.length === 0 ? (
-          <MasterEmpty actionLabel="Crear primero" onAction={openCreate} />
-        ) : (
-          <MasterTable
-            rows={filteredRows}
-            page={page}
-            pageSize={10}
-            onPageChange={setPage}
-            onEdit={openEdit}
-            onDuplicate={openDuplicate}
-            onToggleStatus={handleToggleStatus}
-            onDelete={handleDelete}
-          />
+            {filteredRows.length === 0 ? (
+              <MasterEmpty actionLabel="Crear primero" onAction={openCreate} />
+            ) : (
+              <MasterTable
+                rows={filteredRows}
+                page={page}
+                pageSize={10}
+                onPageChange={setPage}
+                onEdit={openEdit}
+                onDuplicate={openDuplicate}
+                onToggleStatus={handleToggleStatus}
+                onDelete={handleDelete}
+              />
+            )}
+          </>
         )}
       </section>
 
-      <MasterDialog
-        open={dialog.open}
-        onOpenChange={(open) => {
-          if (!open) closeDialog()
-        }}
-        catalog={catalog}
-        mode={dialog.mode}
-        record={dialog.record}
-        onSubmit={handleSubmitDialog}
-      />
+      {!isCategoryModule ? (
+        <>
+          <MasterDialog
+            open={dialog.open}
+            onOpenChange={(open) => {
+              if (!open) closeDialog()
+            }}
+            catalog={catalog}
+            mode={dialog.mode}
+            record={dialog.record}
+            onSubmit={handleSubmitDialog}
+          />
 
-      <MasterImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} />
+          <MasterImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} />
+        </>
+      ) : null}
     </div>
   )
 }
-

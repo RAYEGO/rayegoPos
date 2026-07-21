@@ -52,11 +52,13 @@ export type ProductCatalogResponse = {
 export type ProductOptionsResponse = {
   categories: Array<{
     id: string
+    parentId: string | null
     code: string
     name: string
     color: string | null
     activeCount: number
     skuCount: number
+    childCount: number
   }>
   laboratories: Array<{
     id: string
@@ -83,6 +85,7 @@ export type ProductOptionsResponse = {
 
 export type MasterCategoryRecord = {
   id: string
+  parentId: string | null
   codigo: string
   nombre: string
   descripcion: string | null
@@ -90,6 +93,7 @@ export type MasterCategoryRecord = {
   orden: number
   activo: boolean
   productCount: number
+  childCount: number
   createdAt: string
   updatedAt: string
 }
@@ -99,6 +103,7 @@ export type MasterCategoriesResponse = {
 }
 
 export type UpsertMasterCategoryPayload = {
+  parentId?: string | null
   codigo: string
   nombre: string
   descripcion?: string

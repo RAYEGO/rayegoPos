@@ -286,6 +286,11 @@ export async function getProductOptions() {
                   deletedAt: null,
                 },
               },
+              children: {
+                where: {
+                  deletedAt: null,
+                },
+              },
             },
           },
         },
@@ -353,11 +358,13 @@ export async function getProductOptions() {
   return {
     categories: categories.map((category) => ({
       id: category.id,
+      parentId: category.parentId,
       code: category.codigo,
       name: category.nombre,
       color: category.color,
       activeCount: category._count.productos,
       skuCount: category._count.productos,
+      childCount: category._count.children,
     })),
     laboratories: laboratories.map((laboratory) => ({
       id: laboratory.id,
@@ -384,6 +391,7 @@ export async function getProductOptions() {
 }
 
 type MasterCategoryPayload = {
+  parentId?: string | null
   codigo: string
   nombre: string
   descripcion?: string
@@ -435,6 +443,11 @@ export async function listMasterCategories() {
               deletedAt: null,
             },
           },
+          children: {
+            where: {
+              deletedAt: null,
+            },
+          },
         },
       },
     },
@@ -443,6 +456,7 @@ export async function listMasterCategories() {
   return {
     rows: categories.map((category) => ({
       id: category.id,
+      parentId: category.parentId,
       codigo: category.codigo,
       nombre: category.nombre,
       descripcion: category.descripcion,
@@ -450,6 +464,7 @@ export async function listMasterCategories() {
       orden: category.orden,
       activo: category.activo,
       productCount: category._count.productos,
+      childCount: category._count.children,
       createdAt: category.createdAt.toISOString(),
       updatedAt: category.updatedAt.toISOString(),
     })),
@@ -462,9 +477,23 @@ export async function createMasterCategory(
 ) {
   const userId = await getAuthenticatedUserId(request)
 
+  if (payload.parentId) {
+    const parent = await prisma.categoria.findFirst({
+      where: {
+        id: payload.parentId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    })
+    if (!parent) {
+      throw createHttpError(404, 'La categoría padre no existe.')
+    }
+  }
+
   try {
     const created = await prisma.categoria.create({
       data: {
+        parentId: payload.parentId ?? null,
         codigo: normalizeCode(payload.codigo),
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
@@ -495,6 +524,23 @@ export async function updateMasterCategory(
 ) {
   const userId = await getAuthenticatedUserId(request)
 
+  if (payload.parentId === categoryId) {
+    throw createHttpError(400, 'La categoría padre no puede ser la misma categoría.')
+  }
+
+  if (payload.parentId) {
+    const parent = await prisma.categoria.findFirst({
+      where: {
+        id: payload.parentId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    })
+    if (!parent) {
+      throw createHttpError(404, 'La categoría padre no existe.')
+    }
+  }
+
   try {
     await prisma.categoria.update({
       where: {
@@ -502,6 +548,7 @@ export async function updateMasterCategory(
         deletedAt: null,
       },
       data: {
+        parentId: payload.parentId ?? null,
         codigo: normalizeCode(payload.codigo),
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
@@ -529,6 +576,20 @@ export async function deleteMasterCategory(
   request: FastifyRequest,
 ) {
   const userId = await getAuthenticatedUserId(request)
+
+  const childCount = await prisma.categoria.count({
+    where: {
+      deletedAt: null,
+      parentId: categoryId,
+    },
+  })
+
+  if (childCount > 0) {
+    throw createHttpError(
+      409,
+      'No se puede eliminar la categoría porque tiene subcategorías. Reasigna o elimina las subcategorías primero.',
+    )
+  }
 
   const productCount = await prisma.producto.count({
     where: {

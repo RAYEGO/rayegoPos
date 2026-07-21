@@ -49,6 +49,7 @@ const createProductSchema = z.object({
 })
 
 const masterCategorySchema = z.object({
+  parentId: z.string().uuid().nullable().optional(),
   codigo: z.string().min(1).max(30),
   nombre: z.string().min(2).max(120),
   descripcion: z.string().max(255).optional(),

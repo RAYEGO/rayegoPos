@@ -7,7 +7,6 @@ import {
   Boxes,
   Building2,
   FlaskConical,
-  Layers,
   Package,
   Tags,
   ThermometerSnowflake,
@@ -22,7 +21,6 @@ export type MasterCatalogGroup =
 
 export type MasterCatalogKey =
   | 'categorias'
-  | 'subcategorias'
   | 'laboratorios'
   | 'marcas'
   | 'principiosActivos'
@@ -62,7 +60,7 @@ export type MasterCatalogConfig = {
 export const masterGroups: Array<{ key: MasterCatalogGroup; label: string }> = [
   { key: 'clasificacion', label: 'Clasificación' },
   { key: 'farmaceutica', label: 'Información Farmacéutica' },
-  { key: 'inventario', label: 'Inventario' },
+  { key: 'inventario', label: 'Empaque y Almacenamiento' },
   { key: 'configuracion', label: 'Configuración' },
 ]
 
@@ -75,15 +73,6 @@ export const masterCatalogs: MasterCatalogConfig[] = [
     description: 'Organiza el catálogo de medicamentos por familias comerciales.',
     searchPlaceholder: 'Buscar categoría...',
     codePrefix: 'CAT',
-  },
-  {
-    key: 'subcategorias',
-    label: 'Subcategorías',
-    group: 'clasificacion',
-    icon: Layers,
-    description: 'Segmentación adicional para análisis y reportes más precisos.',
-    searchPlaceholder: 'Buscar subcategoría...',
-    codePrefix: 'SUB',
   },
   {
     key: 'laboratorios',
@@ -263,7 +252,6 @@ export function buildInitialMastersStore(): MasterStore {
       'Gastroenterología',
       'Cardiología',
     ]),
-    subcategorias: buildRecords('SUB', 12),
     laboratorios: buildRecords('LAB', 95, [
       'Bayer',
       'Abbott',

@@ -371,6 +371,41 @@ export function ProductosPage() {
   const masterDataReady =
     options.categories.length > 0 && options.units.length > 0
 
+  const categoryLeafOptions = useMemo(() => {
+    const byId = new Map(options.categories.map((category) => [category.id, category]))
+    const cache = new Map<string, string>()
+
+    const resolvePath = (id: string) => {
+      const cached = cache.get(id)
+      if (cached) return cached
+
+      const parts: string[] = []
+      const visited = new Set<string>()
+      let currentId: string | null = id
+
+      while (currentId) {
+        if (visited.has(currentId)) break
+        visited.add(currentId)
+        const current = byId.get(currentId)
+        if (!current) break
+        parts.unshift(current.name)
+        currentId = current.parentId
+      }
+
+      const label = parts.join(' > ')
+      cache.set(id, label)
+      return label
+    }
+
+    return options.categories
+      .filter((category) => category.childCount === 0)
+      .map((category) => ({
+        id: category.id,
+        label: resolvePath(category.id),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'es'))
+  }, [options.categories])
+
   const resetMasterDialogState = useCallback(() => {
     setMasterDialogOpen(false)
     setMasterDialogTargetField(null)
@@ -775,8 +810,8 @@ export function ProductosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TODAS">Todas</SelectItem>
-                  {options.categories.map((category) => (
-                    <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
+                  {categoryLeafOptions.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -986,7 +1021,11 @@ export function ProductosPage() {
         </TabsContent>
 
         <TabsContent value="maestros" className="space-y-4 pt-4">
-          <ProductMastersCenter />
+          <ProductMastersCenter
+            accessToken={accessToken}
+            onCategoriesChanged={loadOptions}
+            canManageMasters={canManageMasters}
+          />
         </TabsContent>
       </Tabs>
 
@@ -1046,9 +1085,9 @@ export function ProductosPage() {
                         <SelectValue placeholder="Selecciona categoría" />
                       </SelectTrigger>
                       <SelectContent>
-                        {options.categories.map((category) => (
-                          <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
-                        ))}
+                      {categoryLeafOptions.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>
+                      ))}
                       </SelectContent>
                     </Select>
                   )}
