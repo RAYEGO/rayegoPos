@@ -1,4 +1,4 @@
-import { Plus, PlusCircle, MoreVertical, Copy, Edit, Power, Trash2 } from 'lucide-react'
+import { Plus, MoreVertical, Copy, Edit, Power, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,10 +11,8 @@ import type { CategoryRecord } from './types'
 
 export type CategoryToolbarProps = {
   selected: CategoryRecord | null
-  canCreateSubcategory: boolean
   disabled?: boolean
-  onCreateRoot: () => void
-  onCreateChild: () => void
+  onCreate: () => void
   onEdit: () => void
   onDuplicate: () => void
   onToggleActive: () => void
@@ -23,10 +21,8 @@ export type CategoryToolbarProps = {
 
 export function CategoryToolbar({
   selected,
-  canCreateSubcategory,
   disabled,
-  onCreateRoot,
-  onCreateChild,
+  onCreate,
   onEdit,
   onDuplicate,
   onToggleActive,
@@ -38,19 +34,9 @@ export function CategoryToolbar({
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Button type="button" onClick={onCreateRoot} className="w-full sm:w-auto" disabled={isDisabled}>
+        <Button type="button" onClick={onCreate} className="w-full sm:w-auto" disabled={isDisabled}>
           <Plus className="h-4 w-4" />
           Nueva categoría
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onCreateChild}
-          disabled={isDisabled || !canCreateSubcategory}
-          className="w-full sm:w-auto"
-        >
-          <PlusCircle className="h-4 w-4" />
-          Nueva subcategoría
         </Button>
       </div>
 

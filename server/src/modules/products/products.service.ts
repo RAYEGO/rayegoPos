@@ -587,7 +587,7 @@ export async function deleteMasterCategory(
   if (childCount > 0) {
     throw createHttpError(
       409,
-      'No se puede eliminar la categoría porque tiene subcategorías. Reasigna o elimina las subcategorías primero.',
+      'No se puede eliminar la categoría porque tiene categorías hijas. Reasigna o elimina las categorías hijas primero.',
     )
   }
 

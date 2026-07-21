@@ -97,14 +97,12 @@ export function CategoryForm({
       ? 'Editar categoría'
       : mode === 'duplicate'
         ? 'Duplicar categoría'
-        : parentId !== 'NONE'
-          ? 'Nueva subcategoría'
-          : 'Nueva categoría'
+        : 'Nueva categoría'
 
   const subtitle =
     mode === 'edit'
       ? 'Actualiza la información de la categoría seleccionada.'
-      : 'Crea un registro para mantener una jerarquía clara y consistente.'
+      : 'Crea una categoría y define su categoría padre solo si lo necesitas.'
 
   const parentPreview = useMemo(() => {
     if (parentId === 'NONE') return 'Ninguna'

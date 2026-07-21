@@ -60,7 +60,7 @@ export function CategoryDetails({ selected, records, childCount, className }: Ca
         <div className="rounded-xl border bg-background p-4">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Layers className="h-4 w-4" />
-            <span>Cantidad de subcategorías</span>
+            <span>Categorías hijas</span>
           </div>
           <p className="mt-2 text-lg font-semibold text-foreground">{childCount.toLocaleString('es-PE')}</p>
         </div>
@@ -98,7 +98,7 @@ export function CategoryDetails({ selected, records, childCount, className }: Ca
               <p className="mt-1 text-sm font-semibold text-foreground">{parentLabel}</p>
             </div>
             <Badge variant="outline" className="text-xs">
-              {selected.parentId ? 'Subcategoría' : 'Principal'}
+              {selected.parentId ? 'Hija' : 'Principal'}
             </Badge>
           </div>
         </div>

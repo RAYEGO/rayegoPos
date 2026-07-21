@@ -144,24 +144,12 @@ export function ProductCategoriesManager({
     [records],
   )
 
-  const openCreateRoot = useCallback(() => {
+  const openCreate = useCallback(() => {
     if (canManage === false) {
       toast.error('No tienes permisos para gestionar categorías.')
       return
     }
-    setDialog({ open: true, mode: 'create', defaultParentId: null, record: null })
-  }, [canManage])
-
-  const openCreateChild = useCallback(() => {
-    if (canManage === false) {
-      toast.error('No tienes permisos para gestionar categorías.')
-      return
-    }
-    if (!selected) {
-      toast.message('Selecciona una categoría para crear una subcategoría.')
-      return
-    }
-    setDialog({ open: true, mode: 'create', defaultParentId: selected.id, record: null })
+    setDialog({ open: true, mode: 'create', defaultParentId: selected?.id ?? null, record: null })
   }, [canManage, selected])
 
   const openEdit = useCallback(() => {
@@ -289,10 +277,8 @@ export function ProductCategoriesManager({
             <div className="mt-4">
               <CategoryToolbar
                 selected={selected}
-                canCreateSubcategory={Boolean(selected)}
                 disabled={canManage === false}
-                onCreateRoot={openCreateRoot}
-                onCreateChild={openCreateChild}
+                onCreate={openCreate}
                 onEdit={openEdit}
                 onDuplicate={openDuplicate}
                 onToggleActive={handleToggleActive}
@@ -317,7 +303,7 @@ export function ProductCategoriesManager({
                 title="No existen registros."
                 description="Crea tu primera categoría para comenzar."
                 actionLabel="Crear primero"
-                onAction={openCreateRoot}
+                onAction={openCreate}
               />
             ) : selected ? (
               <CategoryDetails selected={selected} records={records} childCount={childCount} />
@@ -326,7 +312,7 @@ export function ProductCategoriesManager({
                 title="Selecciona una categoría"
                 description="Elige un elemento del árbol para ver su información."
                 actionLabel="Nueva categoría"
-                onAction={openCreateRoot}
+                onAction={openCreate}
               />
             )}
           </div>

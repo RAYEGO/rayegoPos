@@ -26,7 +26,7 @@ export function CategoryStats({ stats, className }: CategoryStatsProps) {
     },
     {
       key: 'subcategoryCount',
-      label: 'Subcategorías',
+      label: 'Categorías hijas',
       icon: Layers,
       tone: 'muted',
     },
