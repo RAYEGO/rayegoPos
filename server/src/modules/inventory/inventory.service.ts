@@ -58,7 +58,11 @@ function createHttpError(statusCode: number, message: string) {
   return error
 }
 
-function decimalToNumber(value: Prisma.Decimal | null | undefined) {
+function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
+  if (typeof value === 'number') {
+    return value
+  }
+
   return Number(value ?? 0)
 }
 
@@ -918,10 +922,10 @@ export async function createInventoryLot(
           fechaFabricacion: manufacturedAt ?? undefined,
           fechaVencimiento: expiryDate,
           costoUnitario: toDecimal(Number(payload.costoUnitario), 6),
-          stockInicial: toDecimal(stockInitial, 4),
-          stockDisponible: toDecimal(availableUnits, 4),
-          stockReservado: toDecimal(reservedUnits, 4),
-          stockBloqueado: toDecimal(blockedUnits, 4),
+          stockInicial: stockInitial,
+          stockDisponible: availableUnits,
+          stockReservado: reservedUnits,
+          stockBloqueado: blockedUnits,
           estado: resolveLotStatus({
             expiryDate,
             availableUnits,
@@ -960,9 +964,9 @@ export async function createInventoryLot(
           motivoId: openingReason.id,
           tipo: TipoMovimientoInventario.ENTRADA,
           origen: OrigenMovimientoInventario.APERTURA,
-          cantidad: toDecimal(stockInitial, 4),
+          cantidad: stockInitial,
           costoUnitario: toDecimal(Number(payload.costoUnitario), 6),
-          stockResultante: toDecimal(stockInitial, 4),
+          stockResultante: stockInitial,
           referencia: `Alta inicial lote ${lot.numeroLote}`,
           observaciones: toOptionalString(payload.observaciones),
           createdById: userId,
@@ -979,9 +983,9 @@ export async function createInventoryLot(
             motivoId: reserveReason.id,
             tipo: TipoMovimientoInventario.RESERVA,
             origen: OrigenMovimientoInventario.APERTURA,
-            cantidad: toDecimal(-reservedUnits, 4),
+            cantidad: -reservedUnits,
             costoUnitario: toDecimal(Number(payload.costoUnitario), 6),
-            stockResultante: toDecimal(stockInitial - reservedUnits, 4),
+            stockResultante: stockInitial - reservedUnits,
             referencia: `Reserva inicial lote ${lot.numeroLote}`,
             createdById: userId,
             updatedById: userId,
@@ -998,9 +1002,9 @@ export async function createInventoryLot(
             motivoId: blockReason.id,
             tipo: TipoMovimientoInventario.AJUSTE,
             origen: OrigenMovimientoInventario.APERTURA,
-            cantidad: toDecimal(-blockedUnits, 4),
+            cantidad: -blockedUnits,
             costoUnitario: toDecimal(Number(payload.costoUnitario), 6),
-            stockResultante: toDecimal(availableUnits, 4),
+            stockResultante: availableUnits,
             referencia: `Bloqueo inicial lote ${lot.numeroLote}`,
             createdById: userId,
             updatedById: userId,
@@ -1049,7 +1053,7 @@ export async function adjustInventoryLot(
   const userId = await getAuthenticatedUserId(request)
   const quantity = Number(payload.quantity)
 
-  if (!Number.isFinite(quantity) || quantity <= 0) {
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
     throw createHttpError(400, 'La cantidad del ajuste debe ser mayor a 0.')
   }
 
@@ -1167,9 +1171,9 @@ export async function adjustInventoryLot(
         id: lot.id,
       },
       data: {
-        stockDisponible: toDecimal(nextAvailable, 4),
-        stockReservado: toDecimal(nextReserved, 4),
-        stockBloqueado: toDecimal(nextBlocked, 4),
+        stockDisponible: nextAvailable,
+        stockReservado: nextReserved,
+        stockBloqueado: nextBlocked,
         estado: status,
         observaciones: toOptionalString(payload.observaciones) ?? lot.observaciones ?? undefined,
         updatedById: userId,
@@ -1184,9 +1188,9 @@ export async function adjustInventoryLot(
         motivoId: reason.id,
         tipo: movementType,
         origen: OrigenMovimientoInventario.AJUSTE,
-        cantidad: toDecimal(signedQuantity, 4),
+        cantidad: signedQuantity,
         costoUnitario: lot.costoUnitario,
-        stockResultante: toDecimal(nextAvailable, 4),
+        stockResultante: nextAvailable,
         referencia: reference,
         observaciones: toOptionalString(payload.observaciones),
         createdById: userId,
@@ -1209,7 +1213,7 @@ export async function transferInventoryLot(
   const userId = await getAuthenticatedUserId(request)
   const quantity = Number(payload.quantity)
 
-  if (!Number.isFinite(quantity) || quantity <= 0) {
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
     throw createHttpError(400, 'La cantidad a transferir debe ser mayor a 0.')
   }
 
@@ -1267,7 +1271,7 @@ export async function transferInventoryLot(
         id: sourceLot.id,
       },
       data: {
-        stockDisponible: toDecimal(nextSourceAvailable, 4),
+        stockDisponible: nextSourceAvailable,
         estado: sourceStatus,
         updatedById: userId,
       },
@@ -1294,10 +1298,10 @@ export async function transferInventoryLot(
         fechaVencimiento: sourceLot.fechaVencimiento,
         costoUnitario: sourceLot.costoUnitario,
         stockInicial: {
-          increment: toDecimal(quantity, 4),
+          increment: quantity,
         },
         stockDisponible: {
-          increment: toDecimal(quantity, 4),
+          increment: quantity,
         },
         estado: resolveLotStatus({
           expiryDate: sourceLot.fechaVencimiento,
@@ -1317,10 +1321,10 @@ export async function transferInventoryLot(
         fechaFabricacion: sourceLot.fechaFabricacion ?? undefined,
         fechaVencimiento: sourceLot.fechaVencimiento,
         costoUnitario: sourceLot.costoUnitario,
-        stockInicial: toDecimal(quantity, 4),
-        stockDisponible: toDecimal(quantity, 4),
-        stockReservado: toDecimal(0, 4),
-        stockBloqueado: toDecimal(0, 4),
+        stockInicial: quantity,
+        stockDisponible: quantity,
+        stockReservado: 0,
+        stockBloqueado: 0,
         estado: resolveLotStatus({
           expiryDate: sourceLot.fechaVencimiento,
           availableUnits: quantity,
@@ -1377,9 +1381,9 @@ export async function transferInventoryLot(
           motivoId: transferReason.id,
           tipo: TipoMovimientoInventario.TRANSFERENCIA,
           origen: OrigenMovimientoInventario.TRANSFERENCIA,
-          cantidad: toDecimal(-quantity, 4),
+          cantidad: -quantity,
           costoUnitario: sourceLot.costoUnitario,
-          stockResultante: toDecimal(nextSourceAvailable, 4),
+          stockResultante: nextSourceAvailable,
           referencia: transferReference,
           observaciones: toOptionalString(payload.observaciones),
           createdById: userId,
@@ -1392,7 +1396,7 @@ export async function transferInventoryLot(
           motivoId: transferReason.id,
           tipo: TipoMovimientoInventario.TRANSFERENCIA,
           origen: OrigenMovimientoInventario.TRANSFERENCIA,
-          cantidad: toDecimal(quantity, 4),
+          cantidad: quantity,
           costoUnitario: sourceLot.costoUnitario,
           stockResultante: updatedDestinationLot.stockDisponible,
           referencia: `Transferencia ${sourceLot.numeroLote} desde ${sourceLot.sucursal.nombre}`,

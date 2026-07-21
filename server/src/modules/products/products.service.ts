@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client'
+import { ModoEmpaqueProducto, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 
@@ -70,6 +70,10 @@ type CreateProductPayload = {
   laboratorioId?: string
   presentacionId?: string
   unidadMedidaId: string
+  modoEmpaque?: ModoEmpaqueProducto
+  unidadesPorBlister?: number
+  blistersPorCaja?: number
+  precioVentaBlister?: number
   principioActivoId?: string
   sku: string
   codigoInterno?: string
@@ -101,7 +105,11 @@ function toOptionalString(value?: string | null) {
   return normalized ? normalized : undefined
 }
 
-function decimalToNumber(value: Prisma.Decimal | null | undefined) {
+function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
+  if (typeof value === 'number') {
+    return value
+  }
+
   return Number(value ?? 0)
 }
 
@@ -1019,10 +1027,52 @@ export async function createProduct(
 ) {
   const userId = await getAuthenticatedUserId(request)
   const normalizedName = payload.nombre.trim()
+  const packagingMode = payload.modoEmpaque ?? ModoEmpaqueProducto.SIMPLE
+  let unitsPerBlister: number | null = null
+  let blistersPerBox: number | null = null
   const salePrice = Number(payload.precioVenta)
+  const blisterPrice =
+    packagingMode === ModoEmpaqueProducto.BLISTER &&
+    payload.precioVentaBlister !== undefined
+      ? Number(payload.precioVentaBlister)
+      : null
   const costPrice = Number(payload.costoReferencia)
   const marginReference =
     costPrice > 0 ? (salePrice - costPrice) / costPrice : null
+
+  if (packagingMode === ModoEmpaqueProducto.BLISTER) {
+    const nextUnitsPerBlister = Number(payload.unidadesPorBlister)
+    const nextBlistersPerBox = Number(payload.blistersPorCaja)
+
+    if (
+      !Number.isFinite(nextUnitsPerBlister) ||
+      !Number.isInteger(nextUnitsPerBlister) ||
+      nextUnitsPerBlister <= 1
+    ) {
+      throw createHttpError(
+        400,
+        'Las unidades por blíster deben ser un entero mayor a 1.',
+      )
+    }
+
+    if (
+      !Number.isFinite(nextBlistersPerBox) ||
+      !Number.isInteger(nextBlistersPerBox) ||
+      nextBlistersPerBox <= 0
+    ) {
+      throw createHttpError(
+        400,
+        'Los blísteres por caja deben ser un entero mayor a 0.',
+      )
+    }
+
+    if (blisterPrice !== null && (!Number.isFinite(blisterPrice) || blisterPrice < 0)) {
+      throw createHttpError(400, 'El precio de venta por blíster no es válido.')
+    }
+
+    unitsPerBlister = nextUnitsPerBlister
+    blistersPerBox = nextBlistersPerBox
+  }
 
   try {
     const product = await prisma.producto.create({
@@ -1031,6 +1081,9 @@ export async function createProduct(
         laboratorioId: toOptionalString(payload.laboratorioId),
         presentacionId: toOptionalString(payload.presentacionId),
         unidadMedidaId: payload.unidadMedidaId,
+        modoEmpaque: packagingMode,
+        unidadesPorBlister: unitsPerBlister,
+        blistersPorCaja: blistersPerBox,
         sku: payload.sku.trim().toUpperCase(),
         codigoInterno: toOptionalString(payload.codigoInterno),
         codigoBarras: toOptionalString(payload.codigoBarras),
@@ -1041,6 +1094,8 @@ export async function createProduct(
         requiereReceta: payload.requiereReceta,
         esControlado: payload.esControlado,
         precioVenta: new Prisma.Decimal(salePrice.toFixed(2)),
+        precioVentaBlister:
+          blisterPrice === null ? undefined : new Prisma.Decimal(blisterPrice.toFixed(2)),
         costoReferencia: new Prisma.Decimal(costPrice.toFixed(2)),
         margenReferencia:
           marginReference === null

@@ -1,7 +1,9 @@
 import {
   CodigoFormaPago,
+  EmpaqueProducto,
   EstadoCompra,
   EstadoLote,
+  ModoEmpaqueProducto,
   OrigenMovimientoInventario,
   Prisma,
   TipoComprobante,
@@ -101,6 +103,7 @@ type CreatePurchaseOrderPayload = {
   items: Array<{
     productoId: string
     cantidad: number
+    empaque?: EmpaqueProducto
     costoUnitario: number
     porcentajeImpuesto?: number
   }>
@@ -167,7 +170,11 @@ function createHttpError(statusCode: number, message: string) {
   return error
 }
 
-function decimalToNumber(value: Prisma.Decimal | null | undefined) {
+function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
+  if (typeof value === 'number') {
+    return value
+  }
+
   return Number(value ?? 0)
 }
 
@@ -679,6 +686,12 @@ function mapPurchaseReceipts(
         (sum, lot) => sum + decimalToNumber(lot.stockInicial),
         0,
       )
+      const packFactor = detail.factorEmpaque ?? null
+      const orderedPacks = detail.cantidadEmpaque ?? null
+      const receivedPacks = packFactor ? Number((receivedUnits / packFactor).toFixed(4)) : null
+      const pendingPacks = packFactor
+        ? Number(((orderedUnits - receivedUnits) / packFactor).toFixed(4))
+        : null
       const latestLot = [...detail.lotes].sort(
         (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
       )[0]
@@ -702,6 +715,11 @@ function mapPurchaseReceipts(
         receivedUnits,
         orderedUnits,
         pendingUnits: Math.max(0, Number((orderedUnits - receivedUnits).toFixed(4))),
+        packaging: detail.empaque ?? null,
+        packFactor,
+        orderedPacks,
+        receivedPacks,
+        pendingPacks: pendingPacks === null ? null : Math.max(0, pendingPacks),
         returnedUnits,
         returnedAmount,
         availableUnits: decimalToNumber(latestLot?.stockDisponible),
@@ -775,6 +793,9 @@ export async function getPurchaseDashboard(filters: PurchaseDashboardFilters) {
         id: true,
         nombre: true,
         sku: true,
+        modoEmpaque: true,
+        unidadesPorBlister: true,
+        blistersPorCaja: true,
         costoReferencia: true,
         unidadMedida: {
           select: {
@@ -983,6 +1004,9 @@ export async function getPurchaseDashboard(filters: PurchaseDashboardFilters) {
         sku: product.sku,
         unitSymbol: product.unidadMedida.simbolo,
         referenceCost: decimalToNumber(product.costoReferencia),
+        packagingMode: product.modoEmpaque,
+        unitsPerBlister: product.unidadesPorBlister,
+        blistersPerBox: product.blistersPorCaja,
       })),
     },
   }
@@ -1063,6 +1087,9 @@ export async function createPurchaseOrder(
           id: true,
           nombre: true,
           sku: true,
+          modoEmpaque: true,
+          unidadesPorBlister: true,
+          blistersPorCaja: true,
           unidadMedida: {
             select: {
               simbolo: true,
@@ -1094,15 +1121,40 @@ export async function createPurchaseOrder(
     const productMap = new Map(products.map((product) => [product.id, product]))
 
     const lineItems = payload.items.map((item) => {
-      const quantity = Number(item.cantidad)
-      const unitCost = Number(item.costoUnitario)
+      const requestedQuantity = Number(item.cantidad)
+      const requestedUnitCost = Number(item.costoUnitario)
       const taxRate = Number(item.porcentajeImpuesto ?? 18)
+      const product = productMap.get(item.productoId)!
+      const packType =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? (item.empaque ?? EmpaqueProducto.CAJA)
+          : null
+      const packFactor =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? packType === EmpaqueProducto.UNIDAD
+            ? 1
+            : packType === EmpaqueProducto.BLISTER
+              ? product.unidadesPorBlister ?? null
+              : packType === EmpaqueProducto.CAJA
+                ? product.unidadesPorBlister && product.blistersPorCaja
+                  ? product.unidadesPorBlister * product.blistersPorCaja
+                  : null
+                : null
+          : null
+      const quantity =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? requestedQuantity * Number(packFactor)
+          : requestedQuantity
+      const unitCost =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? requestedUnitCost / Number(packFactor)
+          : requestedUnitCost
 
-      if (!Number.isFinite(quantity) || quantity <= 0) {
+      if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
         throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
       }
 
-      if (!Number.isFinite(unitCost) || unitCost < 0) {
+      if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
         throw createHttpError(
           400,
           'El costo unitario de cada línea debe ser mayor o igual a 0.',
@@ -1116,6 +1168,31 @@ export async function createPurchaseOrder(
         )
       }
 
+      if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
+        if (!Number.isInteger(requestedQuantity)) {
+          throw createHttpError(
+            400,
+            'La cantidad debe ser un entero al comprar por caja o blíster.',
+          )
+        }
+
+        if (!packFactor || !Number.isFinite(Number(packFactor)) || Number(packFactor) <= 0) {
+          throw createHttpError(400, 'La configuración de empaque del producto no es válida.')
+        }
+
+        if (!Number.isInteger(Number(packFactor))) {
+          throw createHttpError(400, 'El factor de empaque debe ser un entero.')
+        }
+
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+        }
+
+        if (!Number.isFinite(unitCost) || unitCost < 0) {
+          throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
+        }
+      }
+
       const baseAmount = quantity * unitCost
       const taxAmount = baseAmount * (taxRate / 100)
       const totalAmount = baseAmount + taxAmount
@@ -1124,11 +1201,17 @@ export async function createPurchaseOrder(
         productoId: item.productoId,
         cantidad: quantity,
         costoUnitario: unitCost,
+        requestedUnitCost,
         porcentajeImpuesto: taxRate,
         subtotal: baseAmount,
         impuestoTotal: taxAmount,
         total: totalAmount,
-        product: productMap.get(item.productoId)!,
+        product,
+        pack: {
+          type: packType,
+          quantity: product.modoEmpaque === ModoEmpaqueProducto.BLISTER ? requestedQuantity : null,
+          factor: packFactor,
+        },
       }
     })
 
@@ -1158,7 +1241,16 @@ export async function createPurchaseOrder(
         detalles: {
           create: lineItems.map((item) => ({
             productoId: item.productoId,
-            cantidad: toDecimal(item.cantidad, 4),
+            cantidad: item.cantidad,
+            empaque: item.pack.type ?? undefined,
+            cantidadEmpaque:
+              item.pack.quantity === null || item.pack.quantity === undefined
+                ? undefined
+                : Math.trunc(item.pack.quantity),
+            factorEmpaque:
+              item.pack.factor === null || item.pack.factor === undefined
+                ? undefined
+                : Math.trunc(item.pack.factor),
             costoUnitario: toDecimal(item.costoUnitario, 6),
             descuentoTotal: toDecimal(0, 2),
             porcentajeImpuesto: toDecimal(item.porcentajeImpuesto, 4),
@@ -1211,8 +1303,11 @@ export async function createPurchaseOrder(
         productName: item.product.nombre,
         sku: item.product.sku,
         unitSymbol: item.product.unidadMedida.simbolo,
-        quantity: item.cantidad,
-        unitCost: item.costoUnitario,
+        quantity: item.pack.quantity ?? item.cantidad,
+        unitCost:
+          item.pack.quantity === null || item.pack.quantity === undefined
+            ? item.costoUnitario
+            : item.requestedUnitCost,
         taxRate: item.porcentajeImpuesto,
         total: Number(item.total.toFixed(2)),
       })),
@@ -1392,28 +1487,20 @@ export async function receivePurchaseItem(
   request: FastifyRequest,
 ) {
   const userId = await getAuthenticatedUserId(request)
-  const receivedUnits = Number(payload.cantidadRecibida)
-  const reservedUnits = Number(payload.stockReservado ?? 0)
-  const blockedUnits = Number(payload.stockBloqueado ?? 0)
-  const availableUnits = receivedUnits - reservedUnits - blockedUnits
+  const receivedInput = Number(payload.cantidadRecibida)
+  const reservedInput = Number(payload.stockReservado ?? 0)
+  const blockedInput = Number(payload.stockBloqueado ?? 0)
   const expiryDate = new Date(`${payload.fechaVencimiento}T00:00:00`)
   const manufacturedAt = payload.fechaFabricacion
     ? new Date(`${payload.fechaFabricacion}T00:00:00`)
     : null
 
-  if (!Number.isFinite(receivedUnits) || receivedUnits <= 0) {
+  if (!Number.isFinite(receivedInput) || receivedInput <= 0) {
     throw createHttpError(400, 'La cantidad recibida debe ser mayor a 0.')
   }
 
-  if (reservedUnits < 0 || blockedUnits < 0) {
+  if (reservedInput < 0 || blockedInput < 0) {
     throw createHttpError(400, 'El stock reservado y bloqueado no puede ser negativo.')
-  }
-
-  if (availableUnits < 0) {
-    throw createHttpError(
-      400,
-      'La suma de stock reservado y bloqueado no puede superar lo recibido.',
-    )
   }
 
   if (Number.isNaN(expiryDate.getTime())) {
@@ -1498,6 +1585,31 @@ export async function receivePurchaseItem(
         )
       }
 
+      const packFactor = detail.factorEmpaque ? Number(detail.factorEmpaque) : 1
+      const receivedUnits = detail.factorEmpaque ? receivedInput * packFactor : receivedInput
+      const reservedUnits = detail.factorEmpaque ? reservedInput * packFactor : reservedInput
+      const blockedUnits = detail.factorEmpaque ? blockedInput * packFactor : blockedInput
+      const availableUnits = receivedUnits - reservedUnits - blockedUnits
+
+      if (detail.factorEmpaque) {
+        if (!Number.isInteger(receivedInput)) {
+          throw createHttpError(400, 'La cantidad recibida debe ser un entero.')
+        }
+        if (!Number.isInteger(reservedInput) || !Number.isInteger(blockedInput)) {
+          throw createHttpError(400, 'El stock reservado y bloqueado debe ser un entero.')
+        }
+        if (!Number.isFinite(packFactor) || !Number.isInteger(packFactor) || packFactor <= 0) {
+          throw createHttpError(400, 'El factor de empaque configurado no es válido.')
+        }
+      }
+
+      if (availableUnits < 0) {
+        throw createHttpError(
+          400,
+          'La suma de stock reservado y bloqueado no puede superar lo recibido.',
+        )
+      }
+
       if (receivedUnits - pendingUnits > 0.0001) {
         throw createHttpError(
           400,
@@ -1559,10 +1671,10 @@ export async function receivePurchaseItem(
           fechaFabricacion: manufacturedAt ?? undefined,
           fechaVencimiento: expiryDate,
           costoUnitario: detail.costoUnitario,
-          stockInicial: toDecimal(receivedUnits, 4),
-          stockDisponible: toDecimal(availableUnits, 4),
-          stockReservado: toDecimal(reservedUnits, 4),
-          stockBloqueado: toDecimal(blockedUnits, 4),
+          stockInicial: receivedUnits,
+          stockDisponible: availableUnits,
+          stockReservado: reservedUnits,
+          stockBloqueado: blockedUnits,
           estado: resolveLotStatus({
             expiryDate,
             availableUnits,
@@ -1586,9 +1698,9 @@ export async function receivePurchaseItem(
           detalleCompraId: detail.id,
           tipo: TipoMovimientoInventario.ENTRADA,
           origen: OrigenMovimientoInventario.COMPRA,
-          cantidad: toDecimal(receivedUnits, 4),
+          cantidad: receivedUnits,
           costoUnitario: detail.costoUnitario,
-          stockResultante: toDecimal(receivedUnits, 4),
+          stockResultante: receivedUnits,
           referencia: baseReference,
           observaciones: toOptionalString(payload.observaciones),
           createdById: userId,
@@ -1606,9 +1718,9 @@ export async function receivePurchaseItem(
             detalleCompraId: detail.id,
             tipo: TipoMovimientoInventario.RESERVA,
             origen: OrigenMovimientoInventario.COMPRA,
-            cantidad: toDecimal(-reservedUnits, 4),
+            cantidad: -reservedUnits,
             costoUnitario: detail.costoUnitario,
-            stockResultante: toDecimal(receivedUnits - reservedUnits, 4),
+            stockResultante: receivedUnits - reservedUnits,
             referencia: `Reserva en recepción lote ${lot.numeroLote}`,
             observaciones: toOptionalString(payload.observaciones),
             createdById: userId,
@@ -1627,9 +1739,9 @@ export async function receivePurchaseItem(
             detalleCompraId: detail.id,
             tipo: TipoMovimientoInventario.AJUSTE,
             origen: OrigenMovimientoInventario.COMPRA,
-            cantidad: toDecimal(-blockedUnits, 4),
+            cantidad: -blockedUnits,
             costoUnitario: detail.costoUnitario,
-            stockResultante: toDecimal(availableUnits, 4),
+            stockResultante: availableUnits,
             referencia: `Bloqueo en recepción lote ${lot.numeroLote}`,
             observaciones: toOptionalString(payload.observaciones),
             createdById: userId,
@@ -1681,7 +1793,7 @@ export async function returnPurchaseItem(
   const userId = await getAuthenticatedUserId(request)
   const quantity = Number(payload.quantity)
 
-  if (!Number.isFinite(quantity) || quantity <= 0) {
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
     throw createHttpError(400, 'La cantidad a devolver debe ser mayor a 0.')
   }
 
@@ -1772,9 +1884,9 @@ export async function returnPurchaseItem(
         id: lot.id,
       },
       data: {
-        stockDisponible: toDecimal(nextAvailable, 4),
-        stockReservado: toDecimal(nextReserved, 4),
-        stockBloqueado: toDecimal(nextBlocked, 4),
+        stockDisponible: nextAvailable,
+        stockReservado: nextReserved,
+        stockBloqueado: nextBlocked,
         estado: status,
         observaciones: toOptionalString(payload.observaciones) ?? lot.observaciones ?? undefined,
         updatedById: userId,
@@ -1790,9 +1902,9 @@ export async function returnPurchaseItem(
         detalleCompraId: lot.detalleCompra.id,
         tipo: TipoMovimientoInventario.SALIDA,
         origen: OrigenMovimientoInventario.DEVOLUCION_COMPRA,
-        cantidad: toDecimal(-quantity, 4),
+        cantidad: -quantity,
         costoUnitario: lot.costoUnitario,
-        stockResultante: toDecimal(nextAvailable, 4),
+        stockResultante: nextAvailable,
         referencia: reference,
         observaciones: toOptionalString(payload.observaciones),
         createdById: userId,

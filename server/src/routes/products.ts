@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { ModoEmpaqueProducto } from '@prisma/client'
 import {
   createProduct,
   getProductOptions,
@@ -33,6 +34,10 @@ const createProductSchema = z.object({
   laboratorioId: z.string().uuid().optional(),
   presentacionId: z.string().uuid().optional(),
   unidadMedidaId: z.string().uuid(),
+  modoEmpaque: z.nativeEnum(ModoEmpaqueProducto).optional(),
+  unidadesPorBlister: z.number().int().positive().optional(),
+  blistersPorCaja: z.number().int().positive().optional(),
+  precioVentaBlister: z.number().nonnegative().optional(),
   principioActivoId: z.string().uuid().optional(),
   sku: z.string().min(1).max(50),
   codigoInterno: z.string().max(50).optional(),

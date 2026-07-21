@@ -1,8 +1,10 @@
 import {
   CodigoFormaPago,
+  EmpaqueProducto,
   EstadoLote,
   EstadoVenta,
   EstadoAperturaCaja,
+  ModoEmpaqueProducto,
   TipoMovimientoCaja,
   OperacionCaja,
   OrigenMovimientoInventario,
@@ -110,6 +112,7 @@ type CreateSalePayload = {
   items: Array<{
     productoId: string
     cantidad: number
+    empaque?: EmpaqueProducto
     descuentoTotal?: number
   }>
   payments: Array<{
@@ -126,9 +129,9 @@ type LotCandidate = {
   numeroLote: string
   fechaVencimiento: Date
   costoUnitario: Prisma.Decimal
-  stockDisponible: Prisma.Decimal
-  stockReservado: Prisma.Decimal
-  stockBloqueado: Prisma.Decimal
+  stockDisponible: number
+  stockReservado: number
+  stockBloqueado: number
   estado: EstadoLote
 }
 
@@ -138,7 +141,11 @@ function createHttpError(statusCode: number, message: string) {
   return error
 }
 
-function decimalToNumber(value: Prisma.Decimal | null | undefined) {
+function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
+  if (typeof value === 'number') {
+    return value
+  }
+
   return Number(value ?? 0)
 }
 
@@ -627,7 +634,15 @@ export async function getSalesDashboard(filters: SalesDashboardFilters) {
         presentationName: product.presentacion?.nombre ?? 'Presentación general',
         unitSymbol: product.unidadMedida.simbolo,
         salePrice: decimalToNumber(product.precioVenta),
+        packagingMode: product.modoEmpaque,
+        unitsPerBlister: product.unidadesPorBlister,
+        blistersPerBox: product.blistersPorCaja,
+        blisterPrice: decimalToNumber(product.precioVentaBlister) || null,
         availableUnits: Number(availableUnits.toFixed(2)),
+        availableBlisters:
+          product.modoEmpaque === 'BLISTER' && product.unidadesPorBlister
+            ? Math.floor(availableUnits / product.unidadesPorBlister)
+            : null,
         requiresPrescription: product.requiereReceta,
         isControlled: product.esControlado,
         coldChain: isColdChainProduct(product.nombre),
@@ -752,7 +767,11 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           id: true,
           nombre: true,
           sku: true,
+          modoEmpaque: true,
+          unidadesPorBlister: true,
+          blistersPorCaja: true,
           precioVenta: true,
+          precioVentaBlister: true,
           costoReferencia: true,
           requiereReceta: true,
           esControlado: true,
@@ -890,15 +909,67 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     const paymentMethodMap = new Map(paymentMethods.map((method) => [method.id, method]))
 
     const lineItems = payload.items.map((item) => {
-      const quantity = Number(item.cantidad)
+      const requestedQuantity = Number(item.cantidad)
       const discountTotal = Number(item.descuentoTotal ?? 0)
       const product = productMap.get(item.productoId)!
-      const unitPrice = decimalToNumber(product.precioVenta)
-      const grossAmount = quantity * unitPrice
+      const baseUnitPrice = decimalToNumber(product.precioVenta)
+      const packType =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? (item.empaque ?? EmpaqueProducto.UNIDAD)
+          : null
+      const packFactor =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? packType === EmpaqueProducto.UNIDAD
+            ? 1
+            : packType === EmpaqueProducto.BLISTER
+              ? product.unidadesPorBlister ?? null
+              : null
+          : null
+      const packQuantity =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER ? requestedQuantity : null
+      const quantity =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+          ? Number(packQuantity) * Number(packFactor)
+          : requestedQuantity
 
-      if (!Number.isFinite(quantity) || quantity <= 0) {
+      if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
         throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
       }
+
+      if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
+        if (!Number.isInteger(requestedQuantity)) {
+          throw createHttpError(
+            400,
+            'La cantidad debe ser un entero al vender por unidad o blíster.',
+          )
+        }
+
+        if (packType === EmpaqueProducto.CAJA) {
+          throw createHttpError(400, 'La venta por caja no está disponible.')
+        }
+
+        if (!packFactor || !Number.isFinite(Number(packFactor)) || Number(packFactor) <= 0) {
+          throw createHttpError(400, 'La configuración de empaque del producto no es válida.')
+        }
+
+        if (!Number.isInteger(Number(packFactor))) {
+          throw createHttpError(400, 'El factor de empaque debe ser un entero.')
+        }
+
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+        }
+      }
+
+      const blisterPrice =
+        product.modoEmpaque === ModoEmpaqueProducto.BLISTER &&
+        packType === EmpaqueProducto.BLISTER
+          ? decimalToNumber(product.precioVentaBlister) ||
+            baseUnitPrice * Number(packFactor)
+          : null
+      const unitPrice =
+        blisterPrice !== null && packFactor ? blisterPrice / Number(packFactor) : baseUnitPrice
+      const grossAmount = quantity * unitPrice
 
       if (!Number.isFinite(discountTotal) || discountTotal < 0 || discountTotal > grossAmount) {
         throw createHttpError(
@@ -915,6 +986,11 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         subtotal: grossAmount - discountTotal,
         total: grossAmount - discountTotal,
         product,
+        pack: {
+          type: packType,
+          quantity: packQuantity,
+          factor: packFactor,
+        },
       }
     })
 
@@ -1023,7 +1099,16 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         detalles: {
           create: lineItems.map((item) => ({
             productoId: item.productoId,
-            cantidad: toDecimal(item.quantity, 4),
+            cantidad: item.quantity,
+            empaque: item.pack.type ?? undefined,
+            cantidadEmpaque:
+              item.pack.quantity === null || item.pack.quantity === undefined
+                ? undefined
+                : Math.trunc(item.pack.quantity),
+            factorEmpaque:
+              item.pack.factor === null || item.pack.factor === undefined
+                ? undefined
+                : Math.trunc(item.pack.factor),
             precioUnitario: toDecimal(item.unitPrice, 6),
             descuentoTotal: toDecimal(item.discountTotal, 2),
             impuestoTotal: toDecimal(0, 2),
@@ -1098,7 +1183,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       let remaining = item.quantity
 
       for (const candidate of candidates) {
-        if (remaining <= 0.0001) {
+        if (remaining <= 0) {
           break
         }
 
@@ -1122,7 +1207,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
             id: candidate.id,
           },
           data: {
-            stockDisponible: toDecimal(nextAvailable, 4),
+            stockDisponible: nextAvailable,
             estado: nextStatus,
             updatedById: userId,
           },
@@ -1132,7 +1217,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           data: {
             detalleVentaId: detail.id,
             loteId: candidate.id,
-            cantidad: toDecimal(allocated, 4),
+            cantidad: allocated,
             costoUnitario: availability.unitCost,
             createdById: userId,
             updatedById: userId,
@@ -1149,9 +1234,9 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
             detalleVentaLoteId: detailSaleLot.id,
             tipo: TipoMovimientoInventario.SALIDA,
             origen: OrigenMovimientoInventario.VENTA,
-            cantidad: toDecimal(-allocated, 4),
+            cantidad: -allocated,
             costoUnitario: availability.unitCost,
-            stockResultante: toDecimal(nextAvailable, 4),
+            stockResultante: nextAvailable,
             referencia: `Venta ${sale.id.slice(0, 8).toUpperCase()} lote ${availability.lotCode}`,
             observaciones: toOptionalString(payload.observaciones),
             createdById: userId,
@@ -1284,6 +1369,9 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
         select: {
           id: true,
           cantidad: true,
+          empaque: true,
+          cantidadEmpaque: true,
+          factorEmpaque: true,
           precioUnitario: true,
           descuentoTotal: true,
           subtotal: true,
@@ -1361,17 +1449,27 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
         }
       : null,
     cashierName: formatFullName(sale.usuarioResponsable),
-    items: sale.detalles.map((detail) => ({
-      id: detail.id,
-      sku: detail.producto.sku,
-      name: detail.producto.nombre,
-      unitSymbol: detail.producto.unidadMedida.simbolo,
-      quantity: decimalToNumber(detail.cantidad),
-      unitPrice: decimalToNumber(detail.precioUnitario),
-      discountAmount: decimalToNumber(detail.descuentoTotal),
-      subtotal: decimalToNumber(detail.subtotal),
-      total: decimalToNumber(detail.total),
-    })),
+    items: sale.detalles.map((detail) => {
+      const baseQuantity = decimalToNumber(detail.cantidad)
+      const baseUnitPrice = decimalToNumber(detail.precioUnitario)
+      const factor = detail.factorEmpaque ?? 1
+      const packQuantity = detail.cantidadEmpaque ?? baseQuantity
+      const unitSymbol =
+        detail.empaque === 'BLISTER' ? 'BLÍS' : detail.producto.unidadMedida.simbolo
+      const unitPrice = baseUnitPrice * factor
+
+      return {
+        id: detail.id,
+        sku: detail.producto.sku,
+        name: detail.producto.nombre,
+        unitSymbol,
+        quantity: packQuantity,
+        unitPrice,
+        discountAmount: decimalToNumber(detail.descuentoTotal),
+        subtotal: decimalToNumber(detail.subtotal),
+        total: decimalToNumber(detail.total),
+      }
+    }),
     totals: {
       subtotal: decimalToNumber(sale.subtotal),
       discountTotal: decimalToNumber(sale.descuentoTotal),
@@ -1455,7 +1553,7 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
         await tx.lote.update({
           where: { id: lot.id },
           data: {
-            stockDisponible: toDecimal(nextAvailable, 4),
+            stockDisponible: nextAvailable,
             estado: nextStatus,
             updatedById: userId,
           },
@@ -1471,9 +1569,9 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
             detalleVentaLoteId: lotAssignment.id,
             tipo: TipoMovimientoInventario.ENTRADA,
             origen: OrigenMovimientoInventario.DEVOLUCION_VENTA,
-            cantidad: toDecimal(allocatedAmount, 4),
+            cantidad: allocatedAmount,
             costoUnitario: lotAssignment.costoUnitario,
-            stockResultante: toDecimal(nextAvailable, 4),
+            stockResultante: nextAvailable,
             referencia: `Anulación venta ${saleId.slice(0, 8).toUpperCase()} lote ${lot.numeroLote}`,
             observaciones: toOptionalString(observaciones),
             createdById: userId,

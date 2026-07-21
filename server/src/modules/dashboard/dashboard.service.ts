@@ -123,7 +123,7 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
       where: {
         ...lotWhere,
         fechaVencimiento: { lte: expiringUntil },
-        stockDisponible: { gt: new Prisma.Decimal(0) },
+        stockDisponible: { gt: 0 },
       },
       select: {
         id: true,

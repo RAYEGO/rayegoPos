@@ -75,9 +75,15 @@ const createLotSchema = z
     fechaFabricacion: z.string().optional(),
     fechaVencimiento: z.string().min(1, 'Selecciona la fecha de vencimiento.'),
     costoUnitario: z.number().nonnegative('El costo unitario no puede ser negativo.'),
-    stockInicial: z.number().positive('El stock inicial debe ser mayor a 0.'),
-    stockReservado: z.number().nonnegative('El stock reservado no puede ser negativo.'),
-    stockBloqueado: z.number().nonnegative('El stock bloqueado no puede ser negativo.'),
+    stockInicial: z.number().int().positive('El stock inicial debe ser mayor a 0.'),
+    stockReservado: z
+      .number()
+      .int()
+      .min(0, 'El stock reservado no puede ser negativo.'),
+    stockBloqueado: z
+      .number()
+      .int()
+      .min(0, 'El stock bloqueado no puede ser negativo.'),
     almacen: z.string().max(120).optional(),
     observaciones: z.string().max(255).optional(),
   })
@@ -107,14 +113,14 @@ const adjustLotSchema = z.object({
   lotId: z.string().uuid({ message: 'Selecciona un lote.' }),
   target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
   operation: z.enum(['SUMAR', 'RESTAR']),
-  quantity: z.number().positive('Ingresa una cantidad mayor a 0.'),
+  quantity: z.number().int().positive('Ingresa una cantidad mayor a 0.'),
   observaciones: z.string().max(255).optional(),
 })
 
 const transferLotSchema = z.object({
   lotId: z.string().uuid({ message: 'Selecciona un lote.' }),
   destinationBranchId: z.string().uuid({ message: 'Selecciona una sucursal destino.' }),
-  quantity: z.number().positive('Ingresa una cantidad mayor a 0.'),
+  quantity: z.number().int().positive('Ingresa una cantidad mayor a 0.'),
   destinationWarehouse: z.string().max(120).optional(),
   observaciones: z.string().max(255).optional(),
 })
@@ -180,7 +186,7 @@ const emptyDashboard: InventoryDashboardResponse = {
 function formatQuantity(value: number) {
   return new Intl.NumberFormat('es-PE', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 0,
   }).format(value)
 }
 
@@ -1190,7 +1196,7 @@ export function InventarioPage() {
                 <label className="text-sm font-medium">Stock inicial</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...createForm.register('stockInicial', { valueAsNumber: true })}
                 />
                 <FieldError message={createForm.formState.errors.stockInicial?.message} />
@@ -1200,7 +1206,7 @@ export function InventarioPage() {
                 <label className="text-sm font-medium">Stock reservado</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...createForm.register('stockReservado', { valueAsNumber: true })}
                 />
                 <FieldError message={createForm.formState.errors.stockReservado?.message} />
@@ -1210,7 +1216,7 @@ export function InventarioPage() {
                 <label className="text-sm font-medium">Stock bloqueado</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...createForm.register('stockBloqueado', { valueAsNumber: true })}
                 />
                 <FieldError message={createForm.formState.errors.stockBloqueado?.message} />
@@ -1359,7 +1365,7 @@ export function InventarioPage() {
                 <label className="text-sm font-medium">Cantidad</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...adjustForm.register('quantity', { valueAsNumber: true })}
                 />
                 <FieldError message={adjustForm.formState.errors.quantity?.message} />
@@ -1492,7 +1498,7 @@ export function InventarioPage() {
                 <label className="text-sm font-medium">Cantidad a transferir</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...transferForm.register('quantity', { valueAsNumber: true })}
                 />
                 <FieldError message={transferForm.formState.errors.quantity?.message} />

@@ -58,6 +58,11 @@ export type PurchasesDashboardResponse = {
     receivedUnits: number
     orderedUnits: number
     pendingUnits: number
+    packaging: 'UNIDAD' | 'BLISTER' | 'CAJA' | null
+    packFactor: number | null
+    orderedPacks: number | null
+    receivedPacks: number | null
+    pendingPacks: number | null
     returnedUnits: number
     returnedAmount: number
     availableUnits: number
@@ -114,6 +119,9 @@ export type PurchasesDashboardResponse = {
       sku: string
       unitSymbol: string
       referenceCost: number
+      packagingMode: 'SIMPLE' | 'BLISTER'
+      unitsPerBlister: number | null
+      blistersPerBox: number | null
     }>
   }
 }
@@ -128,6 +136,7 @@ export type CreatePurchaseOrderPayload = {
   items: Array<{
     productoId: string
     cantidad: number
+    empaque?: 'UNIDAD' | 'BLISTER' | 'CAJA'
     costoUnitario: number
     porcentajeImpuesto?: number
   }>

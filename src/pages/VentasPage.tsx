@@ -83,8 +83,14 @@ type LocalCartItem = {
   sku: string
   unitSymbol: string
   salePrice: number
+  blisterPrice: number | null
+  packagingMode: 'SIMPLE' | 'BLISTER'
+  unitsPerBlister: number | null
+  blistersPerBox: number | null
+  empaque: 'UNIDAD' | 'BLISTER'
   quantity: number
   availableUnits: number
+  availableBlisters: number | null
   requiresPrescription: boolean
   isControlled: boolean
   coldChain: boolean
@@ -185,6 +191,37 @@ function clampQuantity(value: number, max: number) {
   return Math.min(Math.max(1, value), Math.max(1, Math.floor(max)))
 }
 
+function getCartItemMax(item: LocalCartItem) {
+  if (item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER') {
+    const maxFromServer = item.availableBlisters ?? null
+    if (typeof maxFromServer === 'number' && Number.isFinite(maxFromServer)) {
+      return Math.max(0, Math.floor(maxFromServer))
+    }
+
+    const factor = item.unitsPerBlister ?? 0
+    if (!factor) return 0
+    return Math.max(0, Math.floor(item.availableUnits / factor))
+  }
+
+  return Math.max(0, Math.floor(item.availableUnits))
+}
+
+function getCartItemUnitPrice(item: LocalCartItem) {
+  if (item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER') {
+    return item.blisterPrice ?? item.salePrice * (item.unitsPerBlister ?? 1)
+  }
+
+  return item.salePrice
+}
+
+function getCartItemReservedUnits(item: LocalCartItem) {
+  if (item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER') {
+    return item.quantity * (item.unitsPerBlister ?? 0)
+  }
+
+  return item.quantity
+}
+
 function getStockVariant(product: any) {
   if (product.availableUnits === 0) return 'destructive'
   if (product.availableUnits <= 20) return 'warning'
@@ -265,11 +302,14 @@ export function VentasPage() {
   const dispensations = dashboard?.dispensations ?? []
 
   const cartMetrics = useMemo(() => {
-    const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.salePrice, 0)
+    const subtotal = cartItems.reduce(
+      (sum, item) => sum + item.quantity * getCartItemUnitPrice(item),
+      0,
+    )
 
     return {
       itemCount: cartItems.length,
-      totalUnits: cartItems.reduce((sum, item) => sum + item.quantity, 0),
+      totalUnits: cartItems.reduce((sum, item) => sum + getCartItemReservedUnits(item), 0),
       subtotal,
       total: subtotal,
       prescriptionItems: cartItems.filter((item) => item.requiresPrescription).length,
@@ -304,10 +344,17 @@ export function VentasPage() {
     cartMetrics.total - Math.min(cartMetrics.total, watchedPaymentTotal),
   )
 
-  function syncCartWithProduct(current: LocalCartItem, nextProduct?: SalesDashboardResponse['products'][number]) {
+  function syncCartWithProduct(
+    current: LocalCartItem,
+    nextProduct?: SalesDashboardResponse['products'][number],
+  ) {
     if (!nextProduct) {
       return current
     }
+
+    const nextPackagingMode = nextProduct.packagingMode
+    const nextEmpaque =
+      nextPackagingMode === 'BLISTER' ? current.empaque : ('UNIDAD' as const)
 
     return {
       ...current,
@@ -315,7 +362,13 @@ export function VentasPage() {
       sku: nextProduct.sku,
       unitSymbol: nextProduct.unitSymbol,
       salePrice: nextProduct.salePrice,
+      blisterPrice: nextProduct.blisterPrice,
+      packagingMode: nextPackagingMode,
+      unitsPerBlister: nextProduct.unitsPerBlister,
+      blistersPerBox: nextProduct.blistersPerBox,
+      empaque: nextEmpaque,
       availableUnits: nextProduct.availableUnits,
+      availableBlisters: nextProduct.availableBlisters,
       requiresPrescription: nextProduct.requiresPrescription,
       isControlled: nextProduct.isControlled,
       coldChain: nextProduct.coldChain,
@@ -341,9 +394,10 @@ export function VentasPage() {
             return item
           }
 
+          const synced = syncCartWithProduct(item, product)
           return {
-            ...syncCartWithProduct(item, product),
-            quantity: clampQuantity(item.quantity, product.availableUnits),
+            ...synced,
+            quantity: clampQuantity(item.quantity, getCartItemMax(synced)),
           }
         })
         .filter((item) => item.availableUnits > 0),
@@ -362,7 +416,8 @@ export function VentasPage() {
       const existing = current.find((item) => item.productId === product.id)
 
       if (existing) {
-        if (existing.quantity >= Math.floor(product.availableUnits)) {
+        const synced = syncCartWithProduct(existing, product)
+        if (existing.quantity >= getCartItemMax(synced)) {
           toast.error('Ya alcanzaste el stock disponible para este producto.')
           return current
         }
@@ -388,8 +443,14 @@ export function VentasPage() {
           sku: product.sku,
           unitSymbol: product.unitSymbol,
           salePrice: product.salePrice,
+          blisterPrice: product.blisterPrice,
+          packagingMode: product.packagingMode,
+          unitsPerBlister: product.unitsPerBlister,
+          blistersPerBox: product.blistersPerBox,
+          empaque: 'UNIDAD',
           quantity: 1,
           availableUnits: product.availableUnits,
+          availableBlisters: product.availableBlisters,
           requiresPrescription: product.requiresPrescription,
           isControlled: product.isControlled,
           coldChain: product.coldChain,
@@ -406,10 +467,25 @@ export function VentasPage() {
         item.productId === productId
           ? {
               ...item,
-              quantity: clampQuantity(nextQuantity, item.availableUnits),
+              quantity: clampQuantity(nextQuantity, getCartItemMax(item)),
             }
           : item,
       ),
+    )
+  }
+
+  function updateCartEmpaque(productId: string, empaque: 'UNIDAD' | 'BLISTER') {
+    setCartItems((current) =>
+      current.map((item) => {
+        if (item.productId !== productId) return item
+        if (item.packagingMode !== 'BLISTER') return item
+
+        const next: LocalCartItem = { ...item, empaque }
+        return {
+          ...next,
+          quantity: clampQuantity(next.quantity, getCartItemMax(next)),
+        }
+      }),
     )
   }
 
@@ -464,6 +540,7 @@ export function VentasPage() {
       items: cartItems.map((item) => ({
         productoId: item.productId,
         cantidad: item.quantity,
+        empaque: item.packagingMode === 'BLISTER' ? item.empaque : undefined,
       })),
       payments: values.payments.map((payment) => ({
         formaPagoId: payment.formaPagoId,
@@ -628,7 +705,8 @@ export function VentasPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   {availableProducts.map((product) => {
                     const cartEntry = cartItems.find((item) => item.productId === product.id)
-                    const remainingUnits = product.availableUnits - (cartEntry?.quantity ?? 0)
+                    const reservedUnits = cartEntry ? getCartItemReservedUnits(cartEntry) : 0
+                    const remainingUnits = product.availableUnits - reservedUnits
 
                     return (
                       <Card key={product.id} className="p-4">
@@ -644,6 +722,12 @@ export function VentasPage() {
                           <Badge variant={getStockVariant(product)}>
                             {product.availableUnits.toFixed(0)} {product.unitSymbol}
                           </Badge>
+                          {product.packagingMode === 'BLISTER' &&
+                            typeof product.availableBlisters === 'number' && (
+                              <Badge variant="outline">
+                                {product.availableBlisters.toFixed(0)} BLÍS
+                              </Badge>
+                            )}
                           {product.requiresPrescription && <Badge variant="warning">R</Badge>}
                           {product.isControlled && <Badge variant="destructive">C</Badge>}
                           {product.coldChain && <Badge variant="info">❄️</Badge>}
@@ -703,12 +787,33 @@ export function VentasPage() {
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium text-foreground">{item.name}</p>
                               <p className="mt-1 text-xs text-muted-foreground">
-                                {formatCurrency(item.salePrice)} / {item.unitSymbol}
+                                {formatCurrency(getCartItemUnitPrice(item))} /{' '}
+                                {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
+                                  ? 'BLÍS'
+                                  : item.unitSymbol}
                               </p>
+                              {item.packagingMode === 'BLISTER' && (
+                                <div className="mt-2 w-full max-w-[160px]">
+                                  <Select
+                                    value={item.empaque}
+                                    onValueChange={(value) =>
+                                      updateCartEmpaque(item.productId, value as 'UNIDAD' | 'BLISTER')
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="UNIDAD">Unidad</SelectItem>
+                                      <SelectItem value="BLISTER">Blíster</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
                             </div>
                             <div className="text-right">
                               <p className="font-medium text-foreground">
-                                {formatCurrency(item.quantity * item.salePrice)}
+                                {formatCurrency(item.quantity * getCartItemUnitPrice(item))}
                               </p>
                             </div>
                           </div>
@@ -729,7 +834,7 @@ export function VentasPage() {
                               <Input
                                 type="number"
                                 min={1}
-                                max={Math.max(1, Math.floor(item.availableUnits))}
+                                max={Math.max(1, getCartItemMax(item))}
                                 value={item.quantity}
                                 onChange={(event) =>
                                   updateCartQuantity(
@@ -747,7 +852,7 @@ export function VentasPage() {
                                 onClick={() =>
                                   updateCartQuantity(item.productId, item.quantity + 1)
                                 }
-                                disabled={item.quantity >= Math.floor(item.availableUnits)}
+                                disabled={item.quantity >= getCartItemMax(item)}
                               >
                                 <Plus className="h-4 w-4" />
                               </Button>
@@ -1312,7 +1417,10 @@ export function VentasPage() {
                           <div className="space-y-1">
                             <p className="font-medium text-foreground">{item.name}</p>
                             <p className="text-small text-muted-foreground">
-                              {item.sku} · {formatCurrency(item.salePrice)} · {item.unitSymbol}
+                              {item.sku} · {formatCurrency(getCartItemUnitPrice(item))} ·{' '}
+                              {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
+                                ? 'BLÍS'
+                                : item.unitSymbol}
                             </p>
                           </div>
                         </TableCell>
@@ -1323,10 +1431,13 @@ export function VentasPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {item.quantity.toFixed(0)}
+                          {item.quantity.toFixed(0)}{' '}
+                          {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
+                            ? 'BLÍS'
+                            : item.unitSymbol}
                         </TableCell>
                         <TableCell className="font-medium text-foreground">
-                          {formatCurrency(item.quantity * item.salePrice)}
+                          {formatCurrency(item.quantity * getCartItemUnitPrice(item))}
                         </TableCell>
                       </TableRow>
                     ))}

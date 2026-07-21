@@ -165,7 +165,7 @@ export async function getReportsOverview(filters: ReportsFilters, request: Fasti
           estado: 'ACTIVO',
           ...(branchId ? { sucursalId: branchId } : {}),
           fechaVencimiento: { lte: new Date(to.getTime() + 1000 * 60 * 60 * 24 * 30) },
-          stockDisponible: { gt: new Prisma.Decimal(0) },
+          stockDisponible: { gt: 0 },
         },
         select: {
           id: true,
@@ -427,7 +427,7 @@ export async function getInventoryReport(filters: ReportsFilters, request: Fasti
         where: {
           ...lotWhere,
           fechaVencimiento: { lte: expiringUntil },
-          stockDisponible: { gt: new Prisma.Decimal(0) },
+          stockDisponible: { gt: 0 },
         },
         select: {
           id: true,

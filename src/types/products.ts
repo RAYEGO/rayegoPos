@@ -183,6 +183,10 @@ export type CreateProductPayload = {
   laboratorioId?: string
   presentacionId?: string
   unidadMedidaId: string
+  modoEmpaque?: 'SIMPLE' | 'BLISTER'
+  unidadesPorBlister?: number
+  blistersPorCaja?: number
+  precioVentaBlister?: number
   principioActivoId?: string
   sku: string
   codigoInterno?: string

@@ -19,7 +19,12 @@ export type SalesDashboardResponse = {
     presentationName: string
     unitSymbol: string
     salePrice: number
+    packagingMode: 'SIMPLE' | 'BLISTER'
+    unitsPerBlister: number | null
+    blistersPerBox: number | null
+    blisterPrice: number | null
     availableUnits: number
+    availableBlisters: number | null
     requiresPrescription: boolean
     isControlled: boolean
     coldChain: boolean
@@ -88,6 +93,7 @@ export type CreateSalePayload = {
   items: Array<{
     productoId: string
     cantidad: number
+    empaque?: 'UNIDAD' | 'BLISTER' | 'CAJA'
     descuentoTotal?: number
   }>
   payments: Array<{

@@ -1,4 +1,4 @@
-import { EstadoCompra, TipoComprobante } from '@prisma/client'
+import { EmpaqueProducto, EstadoCompra, TipoComprobante } from '@prisma/client'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
@@ -30,7 +30,8 @@ const createPurchaseOrderSchema = z.object({
     .array(
       z.object({
         productoId: z.string().uuid(),
-        cantidad: z.number().positive(),
+        cantidad: z.number().int().positive(),
+        empaque: z.nativeEnum(EmpaqueProducto).optional(),
         costoUnitario: z.number().nonnegative(),
         porcentajeImpuesto: z.number().min(0).max(100).optional(),
       }),
@@ -43,9 +44,9 @@ const receivePurchaseItemSchema = z.object({
   numeroLote: z.string().min(1).max(80),
   fechaFabricacion: z.string().optional(),
   fechaVencimiento: z.string(),
-  cantidadRecibida: z.number().positive(),
-  stockReservado: z.number().min(0).optional(),
-  stockBloqueado: z.number().min(0).optional(),
+  cantidadRecibida: z.number().int().positive(),
+  stockReservado: z.number().int().min(0).optional(),
+  stockBloqueado: z.number().int().min(0).optional(),
   almacen: z.string().max(120).optional(),
   observaciones: z.string().max(255).optional(),
 })
@@ -53,7 +54,7 @@ const receivePurchaseItemSchema = z.object({
 const returnPurchaseItemSchema = z.object({
   lotId: z.string().uuid(),
   target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
-  quantity: z.number().positive(),
+  quantity: z.number().int().positive(),
   observaciones: z.string().max(255).optional(),
 })
 

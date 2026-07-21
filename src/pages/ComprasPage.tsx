@@ -77,7 +77,8 @@ const createPurchaseSchema = z.object({
     .array(
       z.object({
         productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
-        cantidad: z.number().positive('La cantidad debe ser mayor a 0.'),
+        cantidad: z.number().int().positive('La cantidad debe ser mayor a 0.'),
+        empaque: z.enum(['UNIDAD', 'BLISTER', 'CAJA']).optional(),
         costoUnitario: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
         porcentajeImpuesto: z
           .number()
@@ -94,9 +95,9 @@ const receivePurchaseSchema = z.object({
   numeroLote: z.string().min(1, 'Ingresa el número de lote.').max(80),
   fechaFabricacion: z.string().optional(),
   fechaVencimiento: z.string().min(1, 'Ingresa la fecha de vencimiento.'),
-  cantidadRecibida: z.number().positive('La cantidad recibida debe ser mayor a 0.'),
-  stockReservado: z.number().min(0, 'El stock reservado no puede ser negativo.'),
-  stockBloqueado: z.number().min(0, 'El stock bloqueado no puede ser negativo.'),
+  cantidadRecibida: z.number().int().positive('La cantidad recibida debe ser mayor a 0.'),
+  stockReservado: z.number().int().min(0, 'El stock reservado no puede ser negativo.'),
+  stockBloqueado: z.number().int().min(0, 'El stock bloqueado no puede ser negativo.'),
   almacen: z.string().max(120).optional(),
   observaciones: z.string().max(255).optional(),
 })
@@ -105,7 +106,7 @@ type ReceivePurchaseFormValues = z.infer<typeof receivePurchaseSchema>
 
 const returnPurchaseSchema = z.object({
   target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
-  quantity: z.number().positive('La cantidad a devolver debe ser mayor a 0.'),
+  quantity: z.number().int().positive('La cantidad a devolver debe ser mayor a 0.'),
   observaciones: z.string().max(255).optional(),
 })
 
@@ -125,6 +126,9 @@ type OrderReceiptDraft = {
   detailId: string
   productName: string
   pendingUnits: number
+  packFactor: number | null
+  pendingQuantity: number
+  unitLabel: string
   include: boolean
   numeroLote: string
   fechaFabricacion: string
@@ -149,6 +153,7 @@ const defaultFormValues: CreatePurchaseFormValues = {
     {
       productoId: '',
       cantidad: 1,
+      empaque: 'UNIDAD',
       costoUnitario: 0,
       porcentajeImpuesto: 18,
     },
@@ -438,7 +443,9 @@ export function ComprasPage() {
       return sum
     }
 
-    return sum + Math.max(0, item.cantidadRecibida - item.stockReservado - item.stockBloqueado)
+    const received = Math.max(0, item.cantidadRecibida - item.stockReservado - item.stockBloqueado)
+    const factor = item.packFactor ?? 1
+    return sum + received * factor
   }, 0)
 
   const selectedSummaryTotals = selectedSummaryReceiptGroup
@@ -488,6 +495,7 @@ export function ComprasPage() {
       items: values.items.map((item) => ({
         productoId: item.productoId,
         cantidad: Number(item.cantidad),
+        empaque: item.empaque === 'UNIDAD' ? undefined : item.empaque,
         costoUnitario: Number(item.costoUnitario),
         porcentajeImpuesto: Number(item.porcentajeImpuesto),
       })),
@@ -519,9 +527,13 @@ export function ComprasPage() {
 
   function openReceiveDialog(receipt: PurchasesDashboardResponse['receipts'][number]) {
     setSelectedReceiptId(receipt.id)
+    const pendingQuantity =
+      typeof receipt.pendingPacks === 'number' && receipt.pendingPacks > 0
+        ? receipt.pendingPacks
+        : receipt.pendingUnits
     receiveForm.reset({
       ...defaultReceiveFormValues,
-      cantidadRecibida: Number(receipt.pendingUnits.toFixed(2)) || 1,
+      cantidadRecibida: Math.max(1, Math.floor(pendingQuantity)),
     })
     setIsReceiveDialogOpen(true)
   }
@@ -591,7 +603,7 @@ export function ComprasPage() {
     setSelectedReturnReceiptId(receipt.id)
     returnForm.reset({
       target: defaultTarget,
-      quantity: Number(defaultQuantity.toFixed(2)) || 1,
+      quantity: Math.max(1, Math.floor(defaultQuantity)),
       observaciones: '',
     })
     setIsReturnDialogOpen(true)
@@ -704,20 +716,36 @@ export function ComprasPage() {
       return
     }
 
-    const nextDrafts: OrderReceiptDraft[] = pendingReceipts.map((receipt, index) => ({
-      detailId: receipt.id,
-      productName: receipt.productName,
-      pendingUnits: receipt.pendingUnits,
-      include: true,
-      numeroLote: `${receipt.purchaseCode.replace('CMP-', 'RCP-')}-${index + 1}`,
-      fechaFabricacion: '',
-      fechaVencimiento: '',
-      cantidadRecibida: Number(receipt.pendingUnits.toFixed(2)),
-      stockReservado: 0,
-      stockBloqueado: 0,
-      almacen: receipt.branchName === 'Sucursal Principal' ? 'Mostrador principal' : '',
-      observaciones: '',
-    }))
+    const nextDrafts: OrderReceiptDraft[] = pendingReceipts.map((receipt, index) => {
+      const pendingQuantity =
+        typeof receipt.pendingPacks === 'number' && receipt.pendingPacks > 0
+          ? receipt.pendingPacks
+          : receipt.pendingUnits
+      const unitLabel =
+        receipt.packaging === 'CAJA'
+          ? 'Caja'
+          : receipt.packaging === 'BLISTER'
+            ? 'Blíster'
+            : 'Unidades'
+
+      return {
+        detailId: receipt.id,
+        productName: receipt.productName,
+        pendingUnits: receipt.pendingUnits,
+        packFactor: receipt.packFactor,
+        pendingQuantity,
+        unitLabel,
+        include: true,
+        numeroLote: `${receipt.purchaseCode.replace('CMP-', 'RCP-')}-${index + 1}`,
+        fechaFabricacion: '',
+        fechaVencimiento: '',
+        cantidadRecibida: Math.max(1, Math.floor(pendingQuantity)),
+        stockReservado: 0,
+        stockBloqueado: 0,
+        almacen: receipt.branchName === 'Sucursal Principal' ? 'Mostrador principal' : '',
+        observaciones: '',
+      }
+    })
 
     setSelectedOrderId(orderId)
     setOrderReceiptDrafts(nextDrafts)
@@ -753,22 +781,31 @@ export function ComprasPage() {
         return
       }
 
-      if (!Number.isFinite(line.cantidadRecibida) || line.cantidadRecibida <= 0) {
+      if (
+        !Number.isFinite(line.cantidadRecibida) ||
+        !Number.isInteger(line.cantidadRecibida) ||
+        line.cantidadRecibida <= 0
+      ) {
         toast.error(`La cantidad recibida de ${line.productName} debe ser mayor a 0.`)
         return
       }
 
-      if (line.cantidadRecibida - line.pendingUnits > 0.0001) {
+      if (line.cantidadRecibida > line.pendingQuantity) {
         toast.error(`La cantidad de ${line.productName} supera el saldo pendiente.`)
         return
       }
 
-      if (line.stockReservado < 0 || line.stockBloqueado < 0) {
+      if (
+        !Number.isInteger(line.stockReservado) ||
+        !Number.isInteger(line.stockBloqueado) ||
+        line.stockReservado < 0 ||
+        line.stockBloqueado < 0
+      ) {
         toast.error(`Los stocks reservados o bloqueados de ${line.productName} no son válidos.`)
         return
       }
 
-      if (line.stockReservado + line.stockBloqueado - line.cantidadRecibida > 0.0001) {
+      if (line.stockReservado + line.stockBloqueado > line.cantidadRecibida) {
         toast.error(`La reserva y bloqueo de ${line.productName} superan lo recibido.`)
         return
       }
@@ -1159,7 +1196,7 @@ export function ComprasPage() {
                           <TableCell>
                             <div className="space-y-1">
                               <p className="font-medium text-foreground">
-                                {receipt.receivedUnits.toFixed(2)} / {receipt.orderedUnits.toFixed(2)}
+                                {receipt.receivedUnits.toFixed(0)} / {receipt.orderedUnits.toFixed(0)}
                               </p>
                               <p className="text-small text-muted-foreground">
                                 {formatDateTime(receipt.receivedAt)}
@@ -1179,22 +1216,22 @@ export function ComprasPage() {
                               ) : null}
                               {receipt.returnedUnits > 0 ? (
                                 <Badge variant="warning">
-                                  Dev. {receipt.returnedUnits.toFixed(2)}
+                                  Dev. {receipt.returnedUnits.toFixed(0)}
                                 </Badge>
                               ) : null}
                               {receipt.availableUnits > 0 ? (
                                 <Badge variant="outline">
-                                  Disp. {receipt.availableUnits.toFixed(2)}
+                                  Disp. {receipt.availableUnits.toFixed(0)}
                                 </Badge>
                               ) : null}
                               {receipt.reservedUnits > 0 ? (
                                 <Badge variant="outline">
-                                  Res. {receipt.reservedUnits.toFixed(2)}
+                                  Res. {receipt.reservedUnits.toFixed(0)}
                                 </Badge>
                               ) : null}
                               {receipt.blockedUnits > 0 ? (
                                 <Badge variant="outline">
-                                  Bloq. {receipt.blockedUnits.toFixed(2)}
+                                  Bloq. {receipt.blockedUnits.toFixed(0)}
                                 </Badge>
                               ) : null}
                             </div>
@@ -1601,6 +1638,7 @@ export function ComprasPage() {
                     append({
                       productoId: '',
                       cantidad: 1,
+                      empaque: 'UNIDAD',
                       costoUnitario: 0,
                       porcentajeImpuesto: 18,
                     })
@@ -1645,6 +1683,14 @@ export function ComprasPage() {
                                     { shouldDirty: true },
                                   )
                                 }
+
+                                if (product) {
+                                  form.setValue(
+                                    `items.${index}.empaque`,
+                                    product.packagingMode === 'BLISTER' ? 'CAJA' : 'UNIDAD',
+                                    { shouldDirty: true },
+                                  )
+                                }
                               }}
                             >
                               <SelectTrigger>
@@ -1672,9 +1718,29 @@ export function ComprasPage() {
 
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Cantidad</label>
+                        {selectedProduct?.packagingMode === 'BLISTER' ? (
+                          <Controller
+                            control={form.control}
+                            name={`items.${index}.empaque`}
+                            render={({ field: packageField }) => (
+                              <Select
+                                value={packageField.value || 'CAJA'}
+                                onValueChange={packageField.onChange}
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue placeholder="Empaque" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="CAJA">Caja</SelectItem>
+                                  <SelectItem value="BLISTER">Blíster</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          />
+                        ) : null}
                         <Input
                           type="number"
-                          step="0.01"
+                          step="1"
                           {...form.register(`items.${index}.cantidad`, {
                             valueAsNumber: true,
                           })}
@@ -1682,6 +1748,14 @@ export function ComprasPage() {
                         <FieldError
                           message={form.formState.errors.items?.[index]?.cantidad?.message}
                         />
+                        {selectedProduct?.packagingMode === 'BLISTER' &&
+                        selectedProduct.unitsPerBlister &&
+                        selectedProduct.blistersPerBox ? (
+                          <p className="text-small text-muted-foreground">
+                            1 caja = {selectedProduct.blistersPerBox} blíster · 1 blíster ={' '}
+                            {selectedProduct.unitsPerBlister} unidades
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="space-y-2">
@@ -1728,7 +1802,13 @@ export function ComprasPage() {
                             )}
                           </p>
                           {selectedProduct ? (
-                            <p>{selectedProduct.unitSymbol}</p>
+                            <p>
+                              {selectedProduct.packagingMode === 'BLISTER'
+                                ? watchedItems[index]?.empaque === 'BLISTER'
+                                  ? 'Blíster'
+                                  : 'Caja'
+                                : selectedProduct.unitSymbol}
+                            </p>
                           ) : null}
                         </div>
                         <Button
@@ -1823,7 +1903,13 @@ export function ComprasPage() {
             <DialogTitle>Recepcionar compra</DialogTitle>
             <DialogDescription>
               {selectedReceipt
-                ? `${selectedReceipt.productName} · ${selectedReceipt.purchaseCode} · pendiente ${selectedReceipt.pendingUnits.toFixed(2)}`
+                ? `${selectedReceipt.productName} · ${selectedReceipt.purchaseCode} · pendiente ${
+                    typeof selectedReceipt.pendingPacks === 'number'
+                      ? `${selectedReceipt.pendingPacks.toFixed(0)} ${
+                          selectedReceipt.packaging === 'CAJA' ? 'cajas' : 'blísteres'
+                        }`
+                      : `${selectedReceipt.pendingUnits.toFixed(0)} unidades`
+                  }`
                 : 'Registra el lote y define cómo ingresa el stock al inventario.'}
             </DialogDescription>
           </DialogHeader>
@@ -1840,7 +1926,7 @@ export function ComprasPage() {
                 <label className="text-sm font-medium">Cantidad recibida</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...receiveForm.register('cantidadRecibida', {
                     valueAsNumber: true,
                   })}
@@ -1870,7 +1956,7 @@ export function ComprasPage() {
                 <label className="text-sm font-medium">Stock reservado</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...receiveForm.register('stockReservado', {
                     valueAsNumber: true,
                   })}
@@ -1884,7 +1970,7 @@ export function ComprasPage() {
                 <label className="text-sm font-medium">Stock bloqueado</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...receiveForm.register('stockBloqueado', {
                     valueAsNumber: true,
                   })}
@@ -1922,7 +2008,7 @@ export function ComprasPage() {
                   Recibido
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">
-                  {watchedReceivedUnits.toFixed(2)}
+                  {watchedReceivedUnits.toFixed(0)}
                 </p>
               </div>
               <div>
@@ -1930,7 +2016,7 @@ export function ComprasPage() {
                   Reservado + bloqueado
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">
-                  {(watchedReservedUnits + watchedBlockedUnits).toFixed(2)}
+                  {(watchedReservedUnits + watchedBlockedUnits).toFixed(0)}
                 </p>
               </div>
               <div>
@@ -1938,7 +2024,7 @@ export function ComprasPage() {
                   Disponible inicial
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">
-                  {receiveAvailableUnits.toFixed(2)}
+                  {receiveAvailableUnits.toFixed(0)}
                 </p>
               </div>
             </div>
@@ -2011,7 +2097,7 @@ export function ComprasPage() {
                     Unidades pendientes
                   </p>
                   <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedOrderReceiptGroup.pendingUnits.toFixed(2)}
+                    {selectedOrderReceiptGroup.pendingUnits.toFixed(0)}
                   </p>
                 </div>
                 <div>
@@ -2019,7 +2105,7 @@ export function ComprasPage() {
                     Unidades disponibles
                   </p>
                   <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedOrderAvailableUnits.toFixed(2)}
+                    {selectedOrderAvailableUnits.toFixed(0)}
                   </p>
                 </div>
                 <div>
@@ -2048,7 +2134,7 @@ export function ComprasPage() {
                       <div>
                         <p className="font-medium text-foreground">{line.productName}</p>
                         <p className="text-small text-muted-foreground">
-                          Pendiente: {line.pendingUnits.toFixed(2)} und
+                          Pendiente: {line.pendingQuantity.toFixed(0)} {line.unitLabel}
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
@@ -2085,7 +2171,7 @@ export function ComprasPage() {
                         <label className="text-sm font-medium">Cantidad recibida</label>
                         <Input
                           type="number"
-                          step="0.01"
+                          step="1"
                           value={line.cantidadRecibida}
                           onChange={(event) =>
                             updateOrderReceiptDraft(line.detailId, {
@@ -2128,7 +2214,7 @@ export function ComprasPage() {
                         <label className="text-sm font-medium">Reservado</label>
                         <Input
                           type="number"
-                          step="0.01"
+                          step="1"
                           value={line.stockReservado}
                           onChange={(event) =>
                             updateOrderReceiptDraft(line.detailId, {
@@ -2143,7 +2229,7 @@ export function ComprasPage() {
                         <label className="text-sm font-medium">Bloqueado</label>
                         <Input
                           type="number"
-                          step="0.01"
+                          step="1"
                           value={line.stockBloqueado}
                           onChange={(event) =>
                             updateOrderReceiptDraft(line.detailId, {
@@ -2188,7 +2274,7 @@ export function ComprasPage() {
                           Pendiente
                         </p>
                         <p className="mt-2 text-base font-semibold text-foreground">
-                          {line.pendingUnits.toFixed(2)}
+                          {line.pendingQuantity.toFixed(0)} {line.unitLabel}
                         </p>
                       </div>
                       <div>
@@ -2196,7 +2282,7 @@ export function ComprasPage() {
                           Recibido
                         </p>
                         <p className="mt-2 text-base font-semibold text-foreground">
-                          {Number(line.cantidadRecibida || 0).toFixed(2)}
+                          {Number(line.cantidadRecibida || 0).toFixed(0)} {line.unitLabel}
                         </p>
                       </div>
                       <div>
@@ -2204,7 +2290,7 @@ export function ComprasPage() {
                           Disponible
                         </p>
                         <p className="mt-2 text-base font-semibold text-foreground">
-                          {draftAvailableUnits.toFixed(2)}
+                          {draftAvailableUnits.toFixed(0)} {line.unitLabel}
                         </p>
                       </div>
                     </div>
@@ -2296,7 +2382,7 @@ export function ComprasPage() {
                 <label className="text-sm font-medium">Cantidad a devolver</label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
                   {...returnForm.register('quantity', {
                     valueAsNumber: true,
                   })}
@@ -2321,7 +2407,7 @@ export function ComprasPage() {
                   Stock origen
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">
-                  {selectedReturnStock.toFixed(2)}
+                  {selectedReturnStock.toFixed(0)}
                 </p>
               </div>
               <div>
@@ -2329,7 +2415,7 @@ export function ComprasPage() {
                   A devolver
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">
-                  {watchedReturnQuantity.toFixed(2)}
+                  {watchedReturnQuantity.toFixed(0)}
                 </p>
               </div>
               <div>
@@ -2337,7 +2423,7 @@ export function ComprasPage() {
                   Saldo estimado
                 </p>
                 <p className="mt-2 text-base font-semibold text-foreground">
-                  {Math.max(0, selectedReturnStock - watchedReturnQuantity).toFixed(2)}
+                  {Math.max(0, selectedReturnStock - watchedReturnQuantity).toFixed(0)}
                 </p>
               </div>
             </div>
@@ -2561,7 +2647,7 @@ export function ComprasPage() {
                     Recibido acumulado
                   </p>
                   <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedSummaryTotals.receivedUnits.toFixed(2)}
+                    {selectedSummaryTotals.receivedUnits.toFixed(0)}
                   </p>
                 </div>
                 <div>
@@ -2569,7 +2655,7 @@ export function ComprasPage() {
                     Pendiente
                   </p>
                   <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedSummaryTotals.pendingUnits.toFixed(2)}
+                    {selectedSummaryTotals.pendingUnits.toFixed(0)}
                   </p>
                 </div>
                 <div>
@@ -2665,7 +2751,7 @@ export function ComprasPage() {
                         <TableCell>
                           <div className="space-y-1">
                             <p className="font-medium text-foreground">
-                              {receipt.receivedUnits.toFixed(2)} / {receipt.orderedUnits.toFixed(2)}
+                              {receipt.receivedUnits.toFixed(0)} / {receipt.orderedUnits.toFixed(0)}
                             </p>
                             <p className="text-small text-muted-foreground">
                               {formatDateTime(receipt.receivedAt)}
@@ -2682,12 +2768,12 @@ export function ComprasPage() {
                             </Badge>
                             {receipt.pendingUnits > 0 ? (
                               <Badge variant="warning">
-                                Pendiente {receipt.pendingUnits.toFixed(2)}
+                                Pendiente {receipt.pendingUnits.toFixed(0)}
                               </Badge>
                             ) : null}
                             {receipt.returnedUnits > 0 ? (
                               <Badge variant="warning">
-                                Dev. {receipt.returnedUnits.toFixed(2)}
+                                Dev. {receipt.returnedUnits.toFixed(0)}
                               </Badge>
                             ) : null}
                             {receipt.coldChain ? (
@@ -2695,17 +2781,17 @@ export function ComprasPage() {
                             ) : null}
                             {receipt.availableUnits > 0 ? (
                               <Badge variant="outline">
-                                Disp. {receipt.availableUnits.toFixed(2)}
+                                Disp. {receipt.availableUnits.toFixed(0)}
                               </Badge>
                             ) : null}
                             {receipt.reservedUnits > 0 ? (
                               <Badge variant="outline">
-                                Res. {receipt.reservedUnits.toFixed(2)}
+                                Res. {receipt.reservedUnits.toFixed(0)}
                               </Badge>
                             ) : null}
                             {receipt.blockedUnits > 0 ? (
                               <Badge variant="outline">
-                                Bloq. {receipt.blockedUnits.toFixed(2)}
+                                Bloq. {receipt.blockedUnits.toFixed(0)}
                               </Badge>
                             ) : null}
                             {receipt.lotId &&

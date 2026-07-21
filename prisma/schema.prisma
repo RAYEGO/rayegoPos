@@ -45,6 +45,17 @@ enum EstadoProducto {
   DESCONTINUADO
 }
 
+enum ModoEmpaqueProducto {
+  SIMPLE
+  BLISTER
+}
+
+enum EmpaqueProducto {
+  UNIDAD
+  BLISTER
+  CAJA
+}
+
 /// Estados operativos de un lote.
 enum EstadoLote {
   ACTIVO
@@ -546,6 +557,9 @@ model Producto {
   laboratorioId     String?        @map("laboratorio_id") @db.Uuid
   presentacionId    String?        @map("presentacion_id") @db.Uuid
   unidadMedidaId    String         @map("unidad_medida_id") @db.Uuid
+  modoEmpaque       ModoEmpaqueProducto @default(SIMPLE) @map("modo_empaque")
+  unidadesPorBlister Int?          @map("unidades_por_blister")
+  blistersPorCaja   Int?           @map("blisters_por_caja")
   sku               String         @unique @db.VarChar(50)
   codigoInterno     String?        @unique @map("codigo_interno") @db.VarChar(50)
   codigoBarras      String?        @unique @map("codigo_barras") @db.VarChar(50)
@@ -556,6 +570,7 @@ model Producto {
   requiereReceta    Boolean        @default(false) @map("requiere_receta")
   esControlado      Boolean        @default(false) @map("es_controlado")
   precioVenta       Decimal        @default(0) @map("precio_venta") @db.Decimal(14, 2)
+  precioVentaBlister Decimal?      @map("precio_venta_blister") @db.Decimal(14, 2)
   costoReferencia   Decimal        @default(0) @map("costo_referencia") @db.Decimal(14, 2)
   margenReferencia  Decimal?       @map("margen_referencia") @db.Decimal(7, 4)
   estado            EstadoProducto @default(ACTIVO)
@@ -638,9 +653,9 @@ model Inventario {
   sucursalId           String    @map("sucursal_id") @db.Uuid
   productoId           String    @map("producto_id") @db.Uuid
   ubicacion            String?   @db.VarChar(120)
-  stockMinimo          Decimal?  @map("stock_minimo") @db.Decimal(18, 4)
-  stockMaximo          Decimal?  @map("stock_maximo") @db.Decimal(18, 4)
-  puntoReorden         Decimal?  @map("punto_reorden") @db.Decimal(18, 4)
+  stockMinimo          Int?      @map("stock_minimo")
+  stockMaximo          Int?      @map("stock_maximo")
+  puntoReorden         Int?      @map("punto_reorden")
   permiteVentaSinStock Boolean   @default(false) @map("permite_venta_sin_stock")
   observaciones        String?   @db.VarChar(255)
   createdAt            DateTime  @default(now()) @map("created_at")
@@ -671,10 +686,10 @@ model Lote {
   fechaFabricacion DateTime?  @map("fecha_fabricacion") @db.Date
   fechaVencimiento DateTime   @map("fecha_vencimiento") @db.Date
   costoUnitario    Decimal    @map("costo_unitario") @db.Decimal(14, 6)
-  stockInicial     Decimal    @default(0) @map("stock_inicial") @db.Decimal(18, 4)
-  stockDisponible  Decimal    @default(0) @map("stock_disponible") @db.Decimal(18, 4)
-  stockReservado   Decimal    @default(0) @map("stock_reservado") @db.Decimal(18, 4)
-  stockBloqueado   Decimal    @default(0) @map("stock_bloqueado") @db.Decimal(18, 4)
+  stockInicial     Int        @default(0) @map("stock_inicial")
+  stockDisponible  Int        @default(0) @map("stock_disponible")
+  stockReservado   Int        @default(0) @map("stock_reservado")
+  stockBloqueado   Int        @default(0) @map("stock_bloqueado")
   estado           EstadoLote @default(ACTIVO)
   observaciones    String?    @db.VarChar(255)
   createdAt        DateTime   @default(now()) @map("created_at")
@@ -735,9 +750,9 @@ model MovimientoInventario {
   tipo               TipoMovimientoInventario
   origen             OrigenMovimientoInventario
   fechaMovimiento    DateTime                   @default(now()) @map("fecha_movimiento")
-  cantidad           Decimal                    @db.Decimal(18, 4)
+  cantidad           Int
   costoUnitario      Decimal?                   @map("costo_unitario") @db.Decimal(14, 6)
-  stockResultante    Decimal?                   @map("stock_resultante") @db.Decimal(18, 4)
+  stockResultante    Int?                       @map("stock_resultante")
   referencia         String?                    @db.VarChar(120)
   observaciones      String?                    @db.VarChar(255)
   createdAt          DateTime                   @default(now()) @map("created_at")
@@ -837,7 +852,10 @@ model DetalleCompra {
   id                 String    @id @default(uuid()) @db.Uuid
   compraId           String    @map("compra_id") @db.Uuid
   productoId         String    @map("producto_id") @db.Uuid
-  cantidad           Decimal   @db.Decimal(18, 4)
+  cantidad           Int
+  empaque            EmpaqueProducto? @map("empaque")
+  cantidadEmpaque    Int?      @map("cantidad_empaque")
+  factorEmpaque      Int?      @map("factor_empaque")
   costoUnitario      Decimal   @map("costo_unitario") @db.Decimal(14, 6)
   descuentoTotal     Decimal   @default(0) @map("descuento_total") @db.Decimal(14, 2)
   porcentajeImpuesto Decimal?  @map("porcentaje_impuesto") @db.Decimal(7, 4)
@@ -967,7 +985,10 @@ model DetalleVenta {
   id                 String    @id @default(uuid()) @db.Uuid
   ventaId            String    @map("venta_id") @db.Uuid
   productoId         String    @map("producto_id") @db.Uuid
-  cantidad           Decimal   @db.Decimal(18, 4)
+  cantidad           Int
+  empaque            EmpaqueProducto? @map("empaque")
+  cantidadEmpaque    Int?      @map("cantidad_empaque")
+  factorEmpaque      Int?      @map("factor_empaque")
   precioUnitario     Decimal   @map("precio_unitario") @db.Decimal(14, 6)
   descuentoTotal     Decimal   @default(0) @map("descuento_total") @db.Decimal(14, 2)
   porcentajeImpuesto Decimal?  @map("porcentaje_impuesto") @db.Decimal(7, 4)
@@ -999,7 +1020,7 @@ model DetalleVentaLote {
   id             String    @id @default(uuid()) @db.Uuid
   detalleVentaId String    @map("detalle_venta_id") @db.Uuid
   loteId         String    @map("lote_id") @db.Uuid
-  cantidad       Decimal   @db.Decimal(18, 4)
+  cantidad       Int
   costoUnitario  Decimal   @map("costo_unitario") @db.Decimal(14, 6)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
