@@ -101,12 +101,11 @@ type SalesDashboardFilters = {
 }
 
 type CreateSalePayload = {
-  sucursalId: string
   sucursalId?: string
+  clienteId?: string
   tipoComprobante?: TipoComprobante
   observaciones?: string
   items: Array<{
-    productoId: string
     productoId: string
     cantidad: number
     empaque?: EmpaqueProducto
