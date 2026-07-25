@@ -12,7 +12,7 @@
     "build:server": "tsc -p tsconfig.server.json",
     "dev:server": "tsx watch server/src/index.ts",
     "start:server": "node server/dist/index.js",
-    "start:railway": "npm run prisma:migrate:deploy && npm run start:server",
+    "start:railway": "npm run start:server",
     "railway:build": "npm run prisma:generate && npm run build:server",
     "lint": "oxlint",
     "preview": "vite preview",
@@ -24,6 +24,9 @@
     "prisma:migrate:status": "prisma migrate status",
     "prisma:seed": "tsx prisma/seed.ts"
   },
+
+
+
   "dependencies": {
     "@fastify/cors": "^11.3.0",
     "@fastify/jwt": "^10.2.0",
