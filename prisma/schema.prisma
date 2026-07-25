@@ -375,6 +375,7 @@ model Rol {
   createdBy     Usuario?     @relation("RolCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy     Usuario?     @relation("RolUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   usuariosRoles UsuarioRol[]
+  usuarioSucursales UsuarioSucursal[]
   rolesPermisos RolPermiso[]
 
   @@index([deletedAt])
