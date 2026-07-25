@@ -7,11 +7,12 @@ import {
   getRoleLabel,
   isAuthRole,
 } from './auth.permissions.js'
-import type { AuthSession } from './auth.types.js'
+import type { AuthBranch, AuthLoginResponse, AuthSession } from './auth.types.js'
 
 type LoginPayload = {
   email: string
   password: string
+  branchId?: string
 }
 
 type ForgotPasswordPayload = {
@@ -27,6 +28,7 @@ type AuthTokenPayload = {
   sub: string
   email: string
   typ: 'access' | 'refresh' | 'reset-password'
+  branchId?: string | null
 }
 
 type AuthenticatedUser = Awaited<ReturnType<typeof findUserByIdentifier>>
@@ -51,7 +53,42 @@ async function findUserByIdentifier(identifier: string) {
     include: {
       sucursal: {
         select: {
+          id: true,
+          codigo: true,
           nombre: true,
+        },
+      },
+      usuarioSucursales: {
+        where: {
+          deletedAt: null,
+          activo: true,
+        },
+        include: {
+          sucursal: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              activo: true,
+              deletedAt: true,
+            },
+          },
+          rol: {
+            include: {
+              rolesPermisos: {
+                where: {
+                  deletedAt: null,
+                },
+                include: {
+                  permiso: {
+                    select: {
+                      codigo: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       usuariosRoles: {
@@ -83,15 +120,50 @@ async function findUserByIdentifier(identifier: string) {
   })
 }
 
-function buildSessionFromUser(user: NonNullable<AuthenticatedUser>, accessToken: string, refreshToken: string): AuthSession {
-  const roles = user.usuariosRoles
-    .map((entry) => entry.rol.codigo)
-    .filter(isAuthRole)
+function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBranch[] {
+  const memberships = user.usuarioSucursales
+    .filter((entry) => entry.sucursal.activo && entry.sucursal.deletedAt === null)
+    .map((entry) => ({
+      id: entry.sucursal.id,
+      code: entry.sucursal.codigo,
+      name: entry.sucursal.nombre,
+    }))
+
+  if (memberships.length > 0) {
+    return memberships
+  }
+
+  if (user.sucursal) {
+    return [
+      {
+        id: user.sucursal.id,
+        code: user.sucursal.codigo,
+        name: user.sucursal.nombre,
+      },
+    ]
+  }
+
+  return []
+}
+
+function resolveRoleContext(
+  user: NonNullable<AuthenticatedUser>,
+  branchId: string,
+) {
+  const membership = user.usuarioSucursales.find(
+    (entry) => entry.sucursal.id === branchId,
+  )
+
+  const roles = membership
+    ? [membership.rol.codigo].filter(isAuthRole)
+    : user.usuariosRoles.map((entry) => entry.rol.codigo).filter(isAuthRole)
 
   const primaryRole = roles[0] ?? 'CAJERO'
-  const dbPermissions = user.usuariosRoles.flatMap((entry) =>
-    entry.rol.rolesPermisos.map((permission) => permission.permiso.codigo),
-  )
+  const dbPermissions = membership
+    ? membership.rol.rolesPermisos.map((permission) => permission.permiso.codigo)
+    : user.usuariosRoles.flatMap((entry) =>
+        entry.rol.rolesPermisos.map((permission) => permission.permiso.codigo),
+      )
   const rolePermissions = getPermissionsForRoles(roles)
   const permissions =
     rolePermissions.includes('*')
@@ -99,6 +171,17 @@ function buildSessionFromUser(user: NonNullable<AuthenticatedUser>, accessToken:
       : (Array.from(
           new Set([...dbPermissions, ...rolePermissions]),
         ) as AuthSession['user']['permissions'])
+
+  return { roles, primaryRole, permissions }
+}
+
+function buildSessionFromUser(
+  user: NonNullable<AuthenticatedUser>,
+  branch: AuthBranch,
+  accessToken: string,
+  refreshToken: string,
+): AuthSession {
+  const { roles, primaryRole, permissions } = resolveRoleContext(user, branch.id)
 
   return {
     accessToken,
@@ -108,7 +191,9 @@ function buildSessionFromUser(user: NonNullable<AuthenticatedUser>, accessToken:
       email: user.email ?? user.username,
       fullName: `${user.nombres} ${user.apellidos}`.trim(),
       roleName: getRoleLabel(primaryRole),
-      branchName: user.sucursal?.nombre ?? 'Sin sucursal',
+      branchId: branch.id,
+      branchCode: branch.code,
+      branchName: branch.name,
       roles,
       permissions,
     },
@@ -137,10 +222,14 @@ async function writeAuditEntry(
 async function signSessionTokens(
   request: FastifyRequest,
   user: NonNullable<AuthenticatedUser>,
+  branchId: string | null,
+  roles: string[],
 ) {
   const payload = {
     sub: user.id,
     email: user.email ?? user.username,
+    branchId,
+    roles,
   }
 
   const accessToken = await request.server.jwt.sign(
@@ -186,7 +275,39 @@ export async function login(
     })
   }
 
-  const { accessToken, refreshToken } = await signSessionTokens(request, user)
+  const branches = resolveAvailableBranches(user)
+  if (branches.length === 0) {
+    return reply.code(409).send({
+      message: 'El usuario no tiene una sucursal asignada.',
+    })
+  }
+
+  if (branches.length > 1 && !payload.branchId) {
+    return reply.send({
+      requiresBranchSelection: true,
+      branches,
+    } satisfies AuthLoginResponse)
+  }
+
+  const activeBranch =
+    payload.branchId
+      ? branches.find((branch) => branch.id === payload.branchId)
+      : branches[0]
+
+  if (!activeBranch) {
+    return reply.code(400).send({
+      message: 'La sucursal seleccionada no es válida para este usuario.',
+    })
+  }
+
+  const { roles } = resolveRoleContext(user, activeBranch.id)
+
+  const { accessToken, refreshToken } = await signSessionTokens(
+    request,
+    user,
+    activeBranch.id,
+    roles,
+  )
 
   await prisma.usuario.update({
     where: {
@@ -201,7 +322,7 @@ export async function login(
     source: 'auth.login',
   })
 
-  return reply.send(buildSessionFromUser(user, accessToken, refreshToken))
+  return reply.send(buildSessionFromUser(user, activeBranch, accessToken, refreshToken))
 }
 
 export async function getCurrentSession(request: FastifyRequest, reply: FastifyReply) {
@@ -233,6 +354,8 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
     })
   }
 
+  const activeBranchId = decoded.branchId ?? null
+
   const user = await prisma.usuario.findFirst({
     where: {
       id: decoded.sub,
@@ -242,7 +365,42 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
     include: {
       sucursal: {
         select: {
+          id: true,
+          codigo: true,
           nombre: true,
+        },
+      },
+      usuarioSucursales: {
+        where: {
+          deletedAt: null,
+          activo: true,
+        },
+        include: {
+          sucursal: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              activo: true,
+              deletedAt: true,
+            },
+          },
+          rol: {
+            include: {
+              rolesPermisos: {
+                where: {
+                  deletedAt: null,
+                },
+                include: {
+                  permiso: {
+                    select: {
+                      codigo: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       usuariosRoles: {
@@ -279,7 +437,17 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
     })
   }
 
-  return reply.send(buildSessionFromUser(user, token, token))
+  const branches = resolveAvailableBranches(user)
+  const selectedBranch =
+    activeBranchId ? branches.find((branch) => branch.id === activeBranchId) : branches[0]
+
+  if (!selectedBranch) {
+    return reply.code(401).send({
+      message: 'La sucursal activa ya no es válida para este usuario.',
+    })
+  }
+
+  return reply.send(buildSessionFromUser(user, selectedBranch, token, token))
 }
 
 export async function logout(request: FastifyRequest, reply: FastifyReply) {

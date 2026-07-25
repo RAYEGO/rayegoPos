@@ -1,6 +1,7 @@
 import { EstadoProducto, ModoEmpaqueProducto, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
+import { getAuthContext } from '../../lib/auth.js'
 
 const productInclude = {
   categoria: {
@@ -230,7 +231,11 @@ async function getAuthenticatedUserId(request: FastifyRequest) {
   return decoded.sub
 }
 
-export async function listProductCatalog(filters: ListProductsFilters) {
+export async function listProductCatalog(
+  filters: ListProductsFilters,
+  request: FastifyRequest,
+) {
+  const { branchId } = await getAuthContext(request)
   const search = filters.search?.trim()
   const page = Math.max(1, filters.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 20))
@@ -296,6 +301,17 @@ export async function listProductCatalog(filters: ListProductsFilters) {
       : {}),
   }
 
+  const productIncludeByBranch = {
+    ...productInclude,
+    lotes: {
+      ...productInclude.lotes,
+      where: {
+        ...(productInclude.lotes.where as Prisma.LoteWhereInput),
+        sucursalId: branchId,
+      },
+    },
+  } satisfies Prisma.ProductoInclude
+
   const [totalItems, activeCatalog, withPrescription, lotEnabled] =
     await Promise.all([
       prisma.producto.count({ where }),
@@ -317,6 +333,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
           lotes: {
             some: {
               deletedAt: null,
+              sucursalId: branchId,
             },
           },
         },
@@ -327,6 +344,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
   const categoryIdFilter = filters.categoryId ?? null
   const laboratoryIdFilter = filters.laboratoryId ?? null
   const searchFilter = search ?? null
+  const branchIdFilter = branchId
 
   const [{ count: lowStockCount }] = await prisma.$queryRaw<
     Array<{ count: number }>
@@ -339,6 +357,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
       LEFT JOIN lotes l
         ON l.producto_id = p.id
        AND l.deleted_at IS NULL
+       AND l.sucursal_id = ${branchIdFilter}::uuid
       WHERE p.deleted_at IS NULL
         AND (${statusFilter}::text IS NULL OR p.estado::text = ${statusFilter}::text)
         AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
@@ -382,6 +401,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
       LEFT JOIN lotes l
         ON l.producto_id = p.id
        AND l.deleted_at IS NULL
+       AND l.sucursal_id = ${branchIdFilter}::uuid
       WHERE p.deleted_at IS NULL
         AND (${statusFilter}::text IS NULL OR p.estado::text = ${statusFilter}::text)
         AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
@@ -423,7 +443,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
         where: {
           id: { in: idList },
         },
-        include: productInclude,
+        include: productIncludeByBranch,
       })
 
       const byId = new Map(entries.map((entry) => [entry.id, entry]))
@@ -439,7 +459,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
 
     products = await prisma.producto.findMany({
       where,
-      include: productInclude,
+      include: productIncludeByBranch,
       orderBy,
       skip,
       take: pageSize,

@@ -37,6 +37,49 @@ export function createApp() {
     secret: serverConfig.jwtSecret,
   })
 
+  app.addHook('preHandler', async (request, reply) => {
+    if (!request.url.startsWith('/api')) {
+      return
+    }
+
+    if (request.url.startsWith('/api/auth/')) {
+      return
+    }
+
+    const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
+    if (!token) {
+      reply.code(401).send({ message: 'Sesión no disponible.' })
+      return
+    }
+
+    try {
+      const decoded = await request.server.jwt.verify<{
+        sub: string
+        typ: 'access' | 'refresh' | 'reset-password'
+        branchId?: string | null
+        roles?: string[]
+      }>(token)
+
+      if (decoded.typ !== 'access') {
+        reply.code(401).send({ message: 'El token de acceso no es válido.' })
+        return
+      }
+
+      if (!decoded.branchId) {
+        reply.code(409).send({ message: 'No hay una sucursal activa en la sesión.' })
+        return
+      }
+
+      request.auth = {
+        userId: decoded.sub,
+        branchId: decoded.branchId,
+        roles: decoded.roles ?? [],
+      }
+    } catch {
+      reply.code(401).send({ message: 'La sesión ya no es válida.' })
+    }
+  })
+
   app.get('/', async () => ({
   application: 'Rayego POS API',
   version: '1.0.0',

@@ -1,11 +1,7 @@
 import { EstadoCompra, EstadoVenta, OperacionCaja, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
+import { getAuthContext } from '../../lib/auth.js'
 
 type ReportsFilters = {
   branchId?: string
@@ -47,8 +43,12 @@ function formatDate(value: Date) {
   return value.toISOString().slice(0, 10)
 }
 
-async function getReportContext(filters: ReportsFilters) {
-  const branchId = filters.branchId
+async function getReportContext(filters: ReportsFilters, request: FastifyRequest) {
+  const { branchId } = await getAuthContext(request)
+
+  if (filters.branchId && filters.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
+  }
   const today = startOfDay(new Date())
   const defaultFrom = new Date(today)
   defaultFrom.setDate(defaultFrom.getDate() - 30)
@@ -74,31 +74,14 @@ function roundMoney(value: number) {
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
+  const { userId } = await getAuthContext(request)
+  return userId
 }
 
 export async function getReportsOverview(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
 
-  const { branchId, from, to, branches } = await getReportContext(filters)
+  const { branchId, from, to, branches } = await getReportContext(filters, request)
 
   const salesWhere: Prisma.VentaWhereInput = {
     deletedAt: null,
@@ -272,7 +255,7 @@ export async function getReportsOverview(filters: ReportsFilters, request: Fasti
 
 export async function getSalesReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branchId, from, to, branches } = await getReportContext(filters)
+  const { branchId, from, to, branches } = await getReportContext(filters, request)
 
   const salesWhere: Prisma.VentaWhereInput = {
     deletedAt: null,
@@ -360,7 +343,7 @@ export async function getSalesReport(filters: ReportsFilters, request: FastifyRe
 
 export async function getPurchasesReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branchId, from, to, branches } = await getReportContext(filters)
+  const { branchId, from, to, branches } = await getReportContext(filters, request)
 
   const purchaseWhere: Prisma.CompraWhereInput = {
     deletedAt: null,
@@ -412,7 +395,7 @@ export async function getPurchasesReport(filters: ReportsFilters, request: Fasti
 
 export async function getInventoryReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branchId, to, branches } = await getReportContext(filters)
+  const { branchId, to, branches } = await getReportContext(filters, request)
   const expiringUntil = new Date(to.getTime() + 1000 * 60 * 60 * 24 * 30)
 
   const lotWhere: Prisma.LoteWhereInput = {
@@ -527,7 +510,7 @@ export async function getInventoryReport(filters: ReportsFilters, request: Fasti
 
 export async function getCashierReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branchId, from, to, branches } = await getReportContext(filters)
+  const { branchId, from, to, branches } = await getReportContext(filters, request)
 
   const movements = await prisma.movimientoCaja.findMany({
     where: {
@@ -661,7 +644,7 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
 
 export async function getCustomersReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branches } = await getReportContext(filters)
+  const { branches } = await getReportContext(filters, request)
 
   return {
     summary: {
@@ -674,7 +657,7 @@ export async function getCustomersReport(filters: ReportsFilters, request: Fasti
 
 export async function getProductsReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branches } = await getReportContext(filters)
+  const { branches } = await getReportContext(filters, request)
 
   return {
     summary: {
@@ -687,7 +670,7 @@ export async function getProductsReport(filters: ReportsFilters, request: Fastif
 
 export async function getUtilitiesReport(filters: ReportsFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { branches } = await getReportContext(filters)
+  const { branches } = await getReportContext(filters, request)
 
   return {
     summary: {

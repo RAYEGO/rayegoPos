@@ -16,7 +16,7 @@ const inventoryDashboardQuerySchema = z.object({
 })
 
 const createInventoryLotSchema = z.object({
-  sucursalId: z.string().uuid(),
+  sucursalId: z.string().uuid().optional(),
   productoId: z.string().uuid(),
   proveedorId: z.string().uuid().optional(),
   numeroLote: z.string().min(2).max(80),
@@ -49,7 +49,7 @@ const transferInventoryLotSchema = z.object({
 export async function inventoryRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = inventoryDashboardQuerySchema.parse(request.query)
-    return getInventoryDashboard(query)
+    return getInventoryDashboard(query, request)
   })
 
   app.post('/lots', async (request) => {

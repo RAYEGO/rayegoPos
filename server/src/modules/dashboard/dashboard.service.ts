@@ -7,11 +7,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
+import { getAuthContext } from '../../lib/auth.js'
 
 type DashboardFilters = {
   branchId?: string
@@ -48,31 +44,17 @@ function formatFullName(user: { nombres: string; apellidos: string | null }) {
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
+  const { userId } = await getAuthContext(request)
+  return userId
 }
 
 export async function getDashboardOverview(filters: DashboardFilters, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
+  const { branchId } = await getAuthContext(request)
 
-  const branchId = filters.branchId
+  if (filters.branchId && filters.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
+  }
   const today = startOfDay(new Date())
   const expiringUntil = addDays(today, 30)
 

@@ -100,7 +100,7 @@ export async function productRoutes(app: FastifyInstance) {
   app.get('/', async (request) => {
     const query = listProductsQuerySchema.parse(request.query)
     try {
-      return await listProductCatalog(query)
+      return await listProductCatalog(query, request)
     } catch (error) {
       request.log.error({ error, query }, 'products:list failed')
       throw error

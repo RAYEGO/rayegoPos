@@ -17,7 +17,7 @@ const purchaseDashboardQuerySchema = z.object({
 })
 
 const createPurchaseOrderSchema = z.object({
-  sucursalId: z.string().uuid(),
+  sucursalId: z.string().uuid().optional(),
   proveedorId: z.string().uuid(),
   fechaEmision: z.string().optional(),
   fechaRecepcion: z.string().optional(),
@@ -70,7 +70,7 @@ const registerPurchasePaymentSchema = z.object({
 export async function purchaseRoutes(app: FastifyInstance) {
   app.get('/dashboard', async (request) => {
     const query = purchaseDashboardQuerySchema.parse(request.query)
-    return getPurchaseDashboard(query)
+    return getPurchaseDashboard(query, request)
   })
 
   app.post('/orders', async (request) => {

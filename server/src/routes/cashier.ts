@@ -16,7 +16,7 @@ const cashierDashboardQuerySchema = z.object({
 })
 
 const openCashDrawerSchema = z.object({
-  branchId: z.string().uuid(),
+  branchId: z.string().uuid().optional(),
   openingAmount: z.number().nonnegative(),
   observations: z.string().max(255).optional(),
 })

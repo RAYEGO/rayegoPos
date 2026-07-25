@@ -8,6 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useAuth } from '@/hooks/useAuth'
 import { AuthScreenHeader } from '@/modules/auth/AuthScreenHeader'
 import {
@@ -15,7 +22,8 @@ import {
   type LoginSchemaValues,
 } from '@/modules/auth/schemas'
 import { paths } from '@/routes/paths'
-import { authService } from '@/services/authService'
+import { BranchSelectionRequiredError, authService } from '@/services/authService'
+import type { AuthBranch } from '@/types/auth'
 
 type RedirectState = {
   from?: {
@@ -28,6 +36,8 @@ export function LoginPage() {
   const location = useLocation()
   const { login } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [availableBranches, setAvailableBranches] = useState<AuthBranch[]>([])
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('')
   const demoCredentials = authService.getDemoCredentials()
   const demoAccounts = authService.getDemoAccounts()
 
@@ -46,10 +56,18 @@ export function LoginPage() {
   async function onSubmit(values: LoginSchemaValues) {
     try {
       setIsSubmitting(true)
-      await login(values)
+      await login({
+        ...values,
+        branchId: availableBranches.length > 0 ? selectedBranchId : undefined,
+      })
       toast.success('Bienvenido a Rayego POS.')
       navigate(redirectTo, { replace: true })
     } catch (error) {
+      if (error instanceof BranchSelectionRequiredError) {
+        setAvailableBranches(error.branches)
+        setSelectedBranchId(error.branches[0]?.id ?? '')
+        return
+      }
       toast.error(
         error instanceof Error ? error.message : 'No se pudo iniciar sesión.',
       )
@@ -81,6 +99,29 @@ export function LoginPage() {
       ) : null}
 
       <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
+        {availableBranches.length > 0 ? (
+          <div className="space-y-2">
+            <label className="text-small font-medium text-foreground" htmlFor="branchId">
+              Sucursal
+            </label>
+            <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+              <SelectTrigger id="branchId">
+                <SelectValue placeholder="Selecciona una sucursal" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableBranches.map((branch) => (
+                  <SelectItem key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-caption text-muted-foreground">
+              Tu cuenta tiene acceso a más de una sucursal. Selecciona una para iniciar sesión.
+            </p>
+          </div>
+        ) : null}
+
         <div className="space-y-2">
           <label className="text-small font-medium text-foreground" htmlFor="email">
             Correo corporativo

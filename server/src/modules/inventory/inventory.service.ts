@@ -6,11 +6,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
+import { getAuthContext } from '../../lib/auth.js'
 
 type InventoryDashboardFilters = {
   search?: string
@@ -20,7 +16,7 @@ type InventoryDashboardFilters = {
 }
 
 type CreateInventoryLotPayload = {
-  sucursalId: string
+  sucursalId?: string
   productoId: string
   proveedorId?: string
   numeroLote: string
@@ -123,25 +119,8 @@ function resolveLotStatus({
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
+  const { userId } = await getAuthContext(request)
+  return userId
 }
 
 function buildInventoryWarehouseMap(
@@ -346,13 +325,21 @@ async function buildLotResponse(tx: InventoryTransaction, lotId: string) {
   }
 }
 
-export async function getInventoryDashboard(filters: InventoryDashboardFilters) {
+export async function getInventoryDashboard(
+  filters: InventoryDashboardFilters,
+  request: FastifyRequest,
+) {
   const search = filters.search?.trim()
+  const { branchId } = await getAuthContext(request)
+
+  if (filters.branchId && filters.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
+  }
 
   const lotWhere: Prisma.LoteWhereInput = {
     deletedAt: null,
     ...(filters.status ? { estado: filters.status } : {}),
-    ...(filters.branchId ? { sucursalId: filters.branchId } : {}),
+    sucursalId: branchId,
     ...(filters.productId ? { productoId: filters.productId } : {}),
     ...(search
       ? {
@@ -394,7 +381,7 @@ export async function getInventoryDashboard(filters: InventoryDashboardFilters) 
 
   const movementWhere: Prisma.MovimientoInventarioWhereInput = {
     deletedAt: null,
-    ...(filters.branchId ? { sucursalId: filters.branchId } : {}),
+    sucursalId: branchId,
     ...(filters.productId ? { productoId: filters.productId } : {}),
     ...(search
       ? {
@@ -740,7 +727,12 @@ export async function createInventoryLot(
   payload: CreateInventoryLotPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
+  const targetBranchId = payload.sucursalId ?? branchId
+
+  if (payload.sucursalId && payload.sucursalId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para registrar lotes en otra sucursal.')
+  }
   const stockInitial = Number(payload.stockInicial)
   const reservedUnits = Number(payload.stockReservado ?? 0)
   const blockedUnits = Number(payload.stockBloqueado ?? 0)
@@ -789,7 +781,7 @@ export async function createInventoryLot(
       const [branch, product] = await Promise.all([
         tx.sucursal.findFirst({
           where: {
-            id: payload.sucursalId,
+            id: targetBranchId,
             deletedAt: null,
             activo: true,
           },
@@ -896,7 +888,7 @@ export async function createInventoryLot(
       await tx.inventario.upsert({
         where: {
           sucursalId_productoId: {
-            sucursalId: payload.sucursalId,
+            sucursalId: targetBranchId,
             productoId: payload.productoId,
           },
         },
@@ -905,7 +897,7 @@ export async function createInventoryLot(
           updatedById: userId,
         },
         create: {
-          sucursalId: payload.sucursalId,
+          sucursalId: targetBranchId,
           productoId: payload.productoId,
           ubicacion: toOptionalString(payload.almacen),
           createdById: userId,
@@ -915,7 +907,7 @@ export async function createInventoryLot(
 
       const lot = await tx.lote.create({
         data: {
-          sucursalId: payload.sucursalId,
+          sucursalId: targetBranchId,
           productoId: payload.productoId,
           proveedorId: toOptionalString(payload.proveedorId),
           numeroLote: payload.numeroLote.trim().toUpperCase(),
@@ -958,7 +950,7 @@ export async function createInventoryLot(
 
       await tx.movimientoInventario.create({
         data: {
-          sucursalId: payload.sucursalId,
+          sucursalId: targetBranchId,
           productoId: payload.productoId,
           loteId: lot.id,
           motivoId: openingReason.id,
@@ -977,7 +969,7 @@ export async function createInventoryLot(
       if (reservedUnits > 0) {
         await tx.movimientoInventario.create({
           data: {
-            sucursalId: payload.sucursalId,
+            sucursalId: targetBranchId,
             productoId: payload.productoId,
             loteId: lot.id,
             motivoId: reserveReason.id,
@@ -996,7 +988,7 @@ export async function createInventoryLot(
       if (blockedUnits > 0) {
         await tx.movimientoInventario.create({
           data: {
-            sucursalId: payload.sucursalId,
+            sucursalId: targetBranchId,
             productoId: payload.productoId,
             loteId: lot.id,
             motivoId: blockReason.id,

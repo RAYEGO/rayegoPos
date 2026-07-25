@@ -15,13 +15,6 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Loader } from '@/components/ui/loader'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { dashboardService } from '@/services/dashboardService'
@@ -76,7 +69,6 @@ export function DashboardPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
-  const [branchId, setBranchId] = useState<string>('all')
   const [dashboard, setDashboard] = useState<DashboardOverviewResponse>(defaultDashboard)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -96,9 +88,7 @@ export function DashboardPage() {
     setError(null)
 
     try {
-      const response = await dashboardService.getOverview(accessToken, {
-        branchId: branchId === 'all' ? undefined : branchId,
-      })
+      const response = await dashboardService.getOverview(accessToken)
       setDashboard(response)
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
@@ -111,19 +101,13 @@ export function DashboardPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, branchId, handleUnauthorized])
+  }, [accessToken, handleUnauthorized])
 
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
 
   const activeDrawer = dashboard.cash.activeDrawer
-
-  const branchOptions = dashboard.options.branches
-  const selectedBranchLabel =
-    branchId === 'all'
-      ? 'Todas las sucursales'
-      : branchOptions.find((branch) => branch.id === branchId)?.nombre ?? 'Sucursal'
 
   const activityRows = useMemo(() => {
     const sales = dashboard.activity.recentSales.map((sale) => ({
@@ -155,21 +139,6 @@ export function DashboardPage() {
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="h-9 w-[220px]">
-              <SelectValue placeholder={selectedBranchLabel} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas las sucursales</SelectItem>
-              {branchOptions.map((branch) => (
-                <SelectItem key={branch.id} value={branch.id}>
-                  {branch.nombre}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
       </div>
 
       {isLoading ? (

@@ -14,6 +14,8 @@ function createSession({
   id,
   email,
   fullName,
+  branchId,
+  branchCode,
   branchName,
   roles,
 }: {
@@ -22,6 +24,8 @@ function createSession({
   id: string
   email: string
   fullName: string
+  branchId: string
+  branchCode: string
   branchName: string
   roles: AuthRole[]
 }): AuthSession {
@@ -35,6 +39,8 @@ function createSession({
       email,
       fullName,
       roleName: roleDefinitionMap[primaryRole].label,
+      branchId,
+      branchCode,
       branchName,
       roles,
       permissions: getDefaultPermissionsForRoles(roles),
@@ -52,6 +58,8 @@ const DEMO_ACCOUNTS = [
       id: '3a88f790-2aa0-4390-b2c8-7b0e5a1ad100',
       email: 'admin@rayego.pe',
       fullName: 'Administrador General',
+      branchId: '4c2b9bc1-2d4b-4cf1-9b53-7e0bded73c8c',
+      branchCode: 'PICH',
       branchName: 'Sucursal Principal',
       roles: ['ADMIN'],
     }),
@@ -65,6 +73,8 @@ const DEMO_ACCOUNTS = [
       id: 'b74c2f16-74c0-49f9-856d-7eabf65ce350',
       email: 'supervisor@rayego.pe',
       fullName: 'Supervisor de Operaciones',
+      branchId: '4c2b9bc1-2d4b-4cf1-9b53-7e0bded73c8c',
+      branchCode: 'PICH',
       branchName: 'Sucursal Principal',
       roles: ['SUPERVISOR'],
     }),
@@ -78,6 +88,8 @@ const DEMO_ACCOUNTS = [
       id: '798d1e2a-4e11-45dd-9271-080fe14bc401',
       email: 'caja@rayego.pe',
       fullName: 'Operador de Caja',
+      branchId: '4c2b9bc1-2d4b-4cf1-9b53-7e0bded73c8c',
+      branchCode: 'PICH',
       branchName: 'Sucursal Principal',
       roles: ['CAJERO'],
     }),

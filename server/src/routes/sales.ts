@@ -10,7 +10,7 @@ const salesDashboardQuerySchema = z.object({
 })
 
 const createSaleSchema = z.object({
-  sucursalId: z.string().uuid(),
+  sucursalId: z.string().uuid().optional(),
   clienteId: z.string().uuid().optional(),
   tipoComprobante: z.nativeEnum(TipoComprobante).optional(),
   observaciones: z.string().max(255).optional(),
@@ -47,7 +47,7 @@ export async function salesRoutes(app: FastifyInstance) {
     return getSalesDashboard({
       search: query.search,
       branchId: query.branchId,
-    })
+    }, request)
   })
 
   app.post('/', async (request) => {

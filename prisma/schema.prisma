@@ -218,6 +218,7 @@ model Sucursal {
   createdBy            Usuario?               @relation("SucursalCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy            Usuario?               @relation("SucursalUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   usuarios             Usuario[]
+  usuariosSucursales   UsuarioSucursal[]
   inventarios          Inventario[]
   lotes                Lote[]
   compras              Compra[]
@@ -254,6 +255,7 @@ model Usuario {
   updatedById     String?                 @map("updated_by") @db.Uuid
 
   sucursal             Sucursal?      @relation(fields: [sucursalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  usuarioSucursales    UsuarioSucursal[]
   createdBy            Usuario?       @relation("UsuarioCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy            Usuario?       @relation("UsuarioUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   usuariosCreados      Usuario[]      @relation("UsuarioCreatedBy")
@@ -277,6 +279,8 @@ model Usuario {
   permisosActualizados              Permiso[]                    @relation("PermisoUpdatedBy")
   usuarioRolesCreados               UsuarioRol[]                 @relation("UsuarioRolCreatedBy")
   usuarioRolesActualizados          UsuarioRol[]                 @relation("UsuarioRolUpdatedBy")
+  usuarioSucursalesCreadas          UsuarioSucursal[]            @relation("UsuarioSucursalCreatedBy")
+  usuarioSucursalesActualizadas     UsuarioSucursal[]            @relation("UsuarioSucursalUpdatedBy")
   rolPermisosCreados                RolPermiso[]                 @relation("RolPermisoCreatedBy")
   rolPermisosActualizados           RolPermiso[]                 @relation("RolPermisoUpdatedBy")
   categoriasCreadas                 Categoria[]                  @relation("CategoriaCreatedBy")
@@ -421,6 +425,31 @@ model UsuarioRol {
   @@index([rolId, activo])
   @@index([deletedAt])
   @@map("usuario_rol")
+}
+
+model UsuarioSucursal {
+  id        String    @id @default(uuid()) @db.Uuid
+  usuarioId String    @map("usuario_id") @db.Uuid
+  sucursalId String   @map("sucursal_id") @db.Uuid
+  rolId     String    @map("rol_id") @db.Uuid
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  createdById String? @map("created_by") @db.Uuid
+  updatedById String? @map("updated_by") @db.Uuid
+
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sucursal  Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  rol       Rol      @relation(fields: [rolId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy Usuario? @relation("UsuarioSucursalCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario? @relation("UsuarioSucursalUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([usuarioId, sucursalId])
+  @@index([sucursalId, activo])
+  @@index([rolId])
+  @@index([deletedAt])
+  @@map("usuario_sucursal")
 }
 
 model RolPermiso {

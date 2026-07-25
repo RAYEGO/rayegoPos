@@ -51,6 +51,12 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {session?.user.branchName ? (
+            <div className="hidden items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
+              <span>📍</span>
+              <span className="truncate">Sucursal: {session.user.branchName}</span>
+            </div>
+          ) : null}
           <Button type="button" variant="ghost" size="icon" aria-label="Notificaciones">
             <Bell />
           </Button>

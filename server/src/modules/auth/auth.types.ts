@@ -18,6 +18,12 @@ export type AuthPermission =
   | 'reportes.read'
   | 'configuracion.read'
 
+export type AuthBranch = {
+  id: string
+  code: string
+  name: string
+}
+
 export type AuthSession = {
   accessToken: string
   refreshToken: string
@@ -26,8 +32,17 @@ export type AuthSession = {
     email: string
     fullName: string
     roleName: string
+    branchId: string
+    branchCode: string
     branchName: string
     roles: AuthRole[]
     permissions: AuthPermission[]
   }
 }
+
+export type AuthBranchSelectionResponse = {
+  requiresBranchSelection: true
+  branches: AuthBranch[]
+}
+
+export type AuthLoginResponse = AuthSession | AuthBranchSelectionResponse

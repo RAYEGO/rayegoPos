@@ -1,5 +1,6 @@
 import { AUTH_ALLOW_MOCKS } from '@/config/auth'
 import type {
+  AuthBranchSelectionResponse,
   AuthSession,
   ForgotPasswordPayload,
   ForgotPasswordResult,
@@ -25,16 +26,45 @@ function shouldFallbackToMock(error: unknown) {
   return false
 }
 
+export class BranchSelectionRequiredError extends Error {
+  branches: AuthBranchSelectionResponse['branches']
+
+  constructor(branches: AuthBranchSelectionResponse['branches']) {
+    super('Selecciona una sucursal para continuar.')
+    this.name = 'BranchSelectionRequiredError'
+    this.branches = branches
+  }
+}
+
+function isBranchSelectionResponse(
+  response: AuthSession | AuthBranchSelectionResponse,
+): response is AuthBranchSelectionResponse {
+  return (
+    'requiresBranchSelection' in response &&
+    response.requiresBranchSelection === true
+  )
+}
+
 export const authService = {
   async login(payload: LoginPayload): Promise<AuthSession> {
     try {
-      return await apiRequest<AuthSession>('/api/auth/login', {
+      const response = await apiRequest<AuthSession | AuthBranchSelectionResponse>(
+        '/api/auth/login',
+        {
         method: 'POST',
         body: {
           email: payload.email,
           password: payload.password,
+          branchId: payload.branchId,
         },
-      })
+        },
+      )
+
+      if (isBranchSelectionResponse(response)) {
+        throw new BranchSelectionRequiredError(response.branches)
+      }
+
+      return response
     } catch (error) {
       if (shouldFallbackToMock(error)) {
         return authMockService.login(payload)

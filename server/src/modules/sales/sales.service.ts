@@ -14,6 +14,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
+import { getAuthContext } from '../../lib/auth.js'
 
 const saleInclude = {
   sucursal: {
@@ -94,11 +95,6 @@ type SaleWithRelations = Prisma.VentaGetPayload<{
   include: typeof saleInclude
 }>
 
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
-
 type SalesDashboardFilters = {
   search?: string
   branchId?: string
@@ -106,10 +102,11 @@ type SalesDashboardFilters = {
 
 type CreateSalePayload = {
   sucursalId: string
-  clienteId?: string
+  sucursalId?: string
   tipoComprobante?: TipoComprobante
   observaciones?: string
   items: Array<{
+    productoId: string
     productoId: string
     cantidad: number
     empaque?: EmpaqueProducto
@@ -248,25 +245,8 @@ function resolveLotStatus({
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
+  const { userId } = await getAuthContext(request)
+  return userId
 }
 
 async function buildSaleCodeMap() {
@@ -443,8 +423,16 @@ function mapDispensations(sales: SaleWithRelations[], codeMap: Map<string, strin
   )
 }
 
-export async function getSalesDashboard(filters: SalesDashboardFilters) {
+export async function getSalesDashboard(
+  filters: SalesDashboardFilters,
+  request: FastifyRequest,
+) {
   await ensureDefaultPaymentMethods(prisma)
+  const { branchId } = await getAuthContext(request)
+
+  if (filters.branchId && filters.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
+  }
 
   const search = filters.search?.trim().toLowerCase()
   const today = new Date()
@@ -475,7 +463,7 @@ export async function getSalesDashboard(filters: SalesDashboardFilters) {
 
   const saleWhere: Prisma.VentaWhereInput = {
     deletedAt: null,
-    ...(filters.branchId ? { sucursalId: filters.branchId } : {}),
+    sucursalId: branchId,
     ...(search
       ? {
           OR: [
@@ -576,6 +564,7 @@ export async function getSalesDashboard(filters: SalesDashboardFilters) {
         lotes: {
           where: {
             deletedAt: null,
+            sucursalId: branchId,
             stockDisponible: {
               gt: 0,
             },
@@ -711,7 +700,12 @@ export async function getSalesDashboard(filters: SalesDashboardFilters) {
 }
 
 export async function createSale(payload: CreateSalePayload, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
+  const targetBranchId = payload.sucursalId ?? branchId
+
+  if (payload.sucursalId && payload.sucursalId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para crear ventas en otra sucursal.')
+  }
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -734,7 +728,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     const [branch, responsibleUser, customer, products, paymentMethods, openCashDrawer] = await Promise.all([
       tx.sucursal.findFirst({
         where: {
-          id: payload.sucursalId,
+          id: targetBranchId,
           deletedAt: null,
           activo: true,
         },
@@ -794,7 +788,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       tx.aperturaCaja.findFirst({
         where: {
           caja: {
-            sucursalId: payload.sucursalId,
+            sucursalId: targetBranchId,
           },
           estado: EstadoAperturaCaja.ABIERTA,
           deletedAt: null,
@@ -1040,7 +1034,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     const lots = await tx.lote.findMany({
       where: {
         deletedAt: null,
-        sucursalId: payload.sucursalId,
+        sucursalId: targetBranchId,
         productoId: {
           in: lineItems.map((item) => item.productoId),
         },
@@ -1078,7 +1072,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
     const sale = await tx.venta.create({
       data: {
-        sucursalId: payload.sucursalId,
+        sucursalId: targetBranchId,
         clienteId: payload.clienteId,
         usuarioResponsableId: userId,
         serieDocumentoId: serieUpdate.id,
@@ -1226,7 +1220,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
         await tx.movimientoInventario.create({
           data: {
-            sucursalId: payload.sucursalId,
+            sucursalId: targetBranchId,
             productoId: item.productoId,
             loteId: candidate.id,
             motivoId: saleReason.id,

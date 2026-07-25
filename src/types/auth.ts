@@ -23,6 +23,8 @@ export type AuthUser = {
   email: string
   fullName: string
   roleName: string
+  branchId: string
+  branchCode: string
   branchName: string
   roles: AuthRole[]
   permissions: AuthPermission[]
@@ -34,10 +36,22 @@ export type AuthSession = {
   user: AuthUser
 }
 
+export type AuthBranch = {
+  id: string
+  code: string
+  name: string
+}
+
+export type AuthBranchSelectionResponse = {
+  requiresBranchSelection: true
+  branches: AuthBranch[]
+}
+
 export type LoginPayload = {
   email: string
   password: string
   remember: boolean
+  branchId?: string
 }
 
 export type ForgotPasswordPayload = {

@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
+import { getAuthContext } from '../../lib/auth.js'
 
 const purchaseInclude = {
   sucursal: {
@@ -91,7 +92,7 @@ type PurchaseDashboardFilters = {
 }
 
 type CreatePurchaseOrderPayload = {
-  sucursalId: string
+  sucursalId?: string
   proveedorId: string
   fechaEmision?: string
   fechaRecepcion?: string
@@ -135,11 +136,6 @@ type RegisterPurchasePaymentPayload = {
   fechaPago?: string
   referenciaExterna?: string
   observaciones?: string
-}
-
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
 }
 
 type PurchaseReturnMetrics = {
@@ -258,25 +254,8 @@ function resolveLotStatus({
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
+  const { userId } = await getAuthContext(request)
+  return userId
 }
 
 async function buildPurchaseCodeMap() {
@@ -735,14 +714,22 @@ function mapPurchaseReceipts(
   )
 }
 
-export async function getPurchaseDashboard(filters: PurchaseDashboardFilters) {
+export async function getPurchaseDashboard(
+  filters: PurchaseDashboardFilters,
+  request: FastifyRequest,
+) {
   const search = filters.search?.trim().toLowerCase()
+  const { branchId } = await getAuthContext(request)
   await ensureDefaultPaymentMethods(prisma)
+
+  if (filters.branchId && filters.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
+  }
 
   const purchaseWhere: Prisma.CompraWhereInput = {
     deletedAt: null,
     ...(filters.status ? { estado: filters.status } : {}),
-    ...(filters.branchId ? { sucursalId: filters.branchId } : {}),
+    sucursalId: branchId,
     ...(filters.supplierId ? { proveedorId: filters.supplierId } : {}),
   }
 
@@ -1016,7 +1003,12 @@ export async function createPurchaseOrder(
   payload: CreatePurchaseOrderPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
+  const targetBranchId = payload.sucursalId ?? branchId
+
+  if (payload.sucursalId && payload.sucursalId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para crear compras en otra sucursal.')
+  }
   const emissionDate = payload.fechaEmision
     ? new Date(`${payload.fechaEmision}T00:00:00`)
     : new Date()
@@ -1056,7 +1048,7 @@ export async function createPurchaseOrder(
     const [branch, supplier, responsibleUser, products] = await Promise.all([
       tx.sucursal.findFirst({
         where: {
-          id: payload.sucursalId,
+          id: targetBranchId,
           deletedAt: null,
           activo: true,
         },
@@ -1221,7 +1213,7 @@ export async function createPurchaseOrder(
 
     const purchase = await tx.compra.create({
       data: {
-        sucursalId: payload.sucursalId,
+        sucursalId: targetBranchId,
         proveedorId: payload.proveedorId,
         usuarioResponsableId: userId,
         fechaEmision: emissionDate,

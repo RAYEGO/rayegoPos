@@ -8,6 +8,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
+import { getAuthContext } from '../../lib/auth.js'
 
 const cashDrawerInclude = {
   caja: {
@@ -32,11 +33,6 @@ const cashDrawerInclude = {
   },
   cierre: true,
 } satisfies Prisma.AperturaCajaInclude
-
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
 
 type CashierDashboardFilters = {
   branchId?: string
@@ -70,25 +66,8 @@ function formatFullName(user: { nombres: string; apellidos: string | null }) {
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
+  const { userId } = await getAuthContext(request)
+  return userId
 }
 
 async function getDefaultCashDrawerForBranch(branchId: string) {
@@ -108,7 +87,11 @@ export async function getCashierDashboard(
   filters: CashierDashboardFilters,
   request: FastifyRequest,
 ) {
-  await getAuthenticatedUserId(request)
+  const { branchId } = await getAuthContext(request)
+
+  if (filters.branchId && filters.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
+  }
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -123,7 +106,7 @@ export async function getCashierDashboard(
   const cashDrawers = await prisma.aperturaCaja.findMany({
     where: {
       deletedAt: null,
-      ...(filters.branchId ? { caja: { sucursalId: filters.branchId } } : {}),
+      caja: { sucursalId: branchId },
     },
     include: cashDrawerInclude,
     orderBy: {
@@ -135,9 +118,7 @@ export async function getCashierDashboard(
   const cashMovements = await prisma.movimientoCaja.findMany({
     where: {
       deletedAt: null,
-      ...(filters.branchId
-        ? { aperturaCaja: { caja: { sucursalId: filters.branchId } } }
-        : {}),
+      aperturaCaja: { caja: { sucursalId: branchId } },
     },
     include: {
       aperturaCaja: {
@@ -170,7 +151,7 @@ export async function getCashierDashboard(
       fechaEmision: {
         gte: today,
       },
-      ...(filters.branchId ? { sucursalId: filters.branchId } : {}),
+      sucursalId: branchId,
     },
     include: {
       pagos: {
@@ -374,12 +355,17 @@ export async function getCashierDashboard(
 export async function openCashDrawer(
   request: FastifyRequest,
   data: {
-    branchId: string
+    branchId?: string
     openingAmount: number
     observations?: string
   },
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
+  const targetBranchId = data.branchId ?? branchId
+
+  if (data.branchId && data.branchId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para abrir caja en otra sucursal.')
+  }
 
   const existingOpenDrawerForUser = await prisma.aperturaCaja.findFirst({
     where: {
@@ -398,13 +384,13 @@ export async function openCashDrawer(
   }
 
   // Get or create a cash drawer for the branch
-  let cashDrawer = await getDefaultCashDrawerForBranch(data.branchId)
+  let cashDrawer = await getDefaultCashDrawerForBranch(targetBranchId)
 
   if (!cashDrawer) {
     // Create a default cash drawer if none exists
     cashDrawer = await prisma.caja.create({
       data: {
-        sucursalId: data.branchId,
+        sucursalId: targetBranchId,
         codigo: 'CAJA-001',
         nombre: 'Caja Principal',
         createdById: userId,
@@ -416,7 +402,7 @@ export async function openCashDrawer(
   const existingOpenDrawerForBranch = await prisma.aperturaCaja.findFirst({
     where: {
       caja: {
-        sucursalId: data.branchId,
+        sucursalId: targetBranchId,
       },
       estado: EstadoAperturaCaja.ABIERTA,
       deletedAt: null,
