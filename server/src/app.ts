@@ -36,6 +36,14 @@ export function createApp() {
     secret: serverConfig.jwtSecret,
   })
 
+  app.get('/', async () => ({
+  application: 'Rayego POS API',
+  version: '1.0.0',
+  environment: process.env.NODE_ENV ?? 'development',
+  status: 'online',
+  documentation: '/health',
+  }))
+
   app.get('/health', async () => ({
     status: 'ok',
     service: 'rayego-api',
