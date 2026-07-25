@@ -1,10 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { ModoEmpaqueProducto } from '@prisma/client'
+import { EstadoProducto, ModoEmpaqueProducto } from '@prisma/client'
 import {
   createProduct,
+  deleteProduct,
   getProductOptions,
   listProductCatalog,
+  updateProduct,
+  updateProductStatus,
   listMasterCategories,
   createMasterCategory,
   updateMasterCategory,
@@ -51,6 +54,10 @@ const createProductSchema = z.object({
   precioVenta: z.number().nonnegative(),
   costoReferencia: z.number().nonnegative(),
   observaciones: z.string().max(500).optional(),
+})
+
+const updateProductStatusSchema = z.object({
+  status: z.nativeEnum(EstadoProducto),
 })
 
 const masterCategorySchema = z.object({
@@ -167,5 +174,22 @@ export async function productRoutes(app: FastifyInstance) {
   app.post('/', async (request) => {
     const body = createProductSchema.parse(request.body)
     return createProduct(body, request)
+  })
+
+  app.patch('/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = createProductSchema.parse(request.body)
+    return updateProduct(params.id, body, request)
+  })
+
+  app.patch('/:id/status', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = updateProductStatusSchema.parse(request.body)
+    return updateProductStatus(params.id, body.status, request)
+  })
+
+  app.delete('/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    return deleteProduct(params.id, request)
   })
 }

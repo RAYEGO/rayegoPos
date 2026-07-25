@@ -13,6 +13,7 @@ export type ProductCatalogItem = {
   requiresPrescription: boolean
   isControlled: boolean
   salePrice: number
+  blisterPrice: number | null
   costPrice: number
   marginReference: number
   observations: string | null
@@ -26,6 +27,9 @@ export type ProductCatalogItem = {
   unit: string
   unitSymbol: string
   unitId: string
+  packagingMode: 'SIMPLE' | 'BLISTER'
+  unitsPerBlister: number | null
+  blistersPerBox: number | null
   activePrinciples: Array<{
     id: string
     name: string
@@ -36,6 +40,7 @@ export type ProductCatalogItem = {
   lotCount: number
   branchCoverage: number
   nextExpiry: string | null
+  canDelete: boolean
 }
 
 export type ProductCatalogResponse = {
@@ -201,3 +206,5 @@ export type CreateProductPayload = {
   costoReferencia: number
   observaciones?: string
 }
+
+export type UpdateProductPayload = CreateProductPayload

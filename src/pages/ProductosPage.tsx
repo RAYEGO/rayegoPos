@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Edit,
+  Eye,
   History,
   Layers,
   Loader2,
@@ -13,7 +14,9 @@ import {
   PackagePlus,
   Pill,
   Plus,
+  Power,
   Search,
+  SlidersHorizontal,
   Trash2,
   Copy,
   TestTubeDiagonal,
@@ -33,7 +36,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
@@ -59,6 +68,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
+import { paths } from '@/routes/paths'
+import { useNavigate } from 'react-router-dom'
 import type {
   CreateProductPayload,
   MasterCategoryRecord,
@@ -68,6 +79,7 @@ import type {
   ProductCatalogItem,
   ProductOptionsResponse,
   ProductStatus,
+  UpdateProductPayload,
   UpsertMasterCategoryPayload,
   UpsertMasterLaboratoryPayload,
   UpsertMasterPresentationPayload,
@@ -232,6 +244,7 @@ function FieldError({ message }: { message?: string }) {
 export function ProductosPage() {
   const { logout, session } = useAuth()
   const authorization = useAuthorization()
+  const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | ProductStatus>('TODOS')
@@ -261,6 +274,15 @@ export function ProductosPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isMasterSubmitting, setIsMasterSubmitting] = useState(false)
   const [isPackagingDialogOpen, setIsPackagingDialogOpen] = useState(false)
+  const [editingProduct, setEditingProduct] = useState<ProductCatalogItem | null>(null)
+  const [selectedProductDetail, setSelectedProductDetail] = useState<ProductCatalogItem | null>(null)
+  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<
+    | { type: 'activate' | 'deactivate' | 'delete'; product: ProductCatalogItem }
+    | null
+  >(null)
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false)
+  const [isConfirming, setIsConfirming] = useState(false)
   const createDialogContentRef = useRef<HTMLDivElement | null>(null)
   const createDialogScrollTopRef = useRef(0)
   const previousPackagingOpenRef = useRef(false)
@@ -734,15 +756,121 @@ export function ProductosPage() {
     ],
   )
 
+  function mapProductToFormValues(product: ProductCatalogItem): CreateProductFormValues {
+    return {
+      categoriaId: product.categoryId,
+      laboratorioId: product.laboratoryId ?? '',
+      presentacionId: product.presentationId ?? '',
+      unidadMedidaId: product.unitId,
+      modoEmpaque: product.packagingMode === 'BLISTER' ? 'BLISTER' : 'SIMPLE',
+      unidadesPorBlister: product.unitsPerBlister ?? undefined,
+      blistersPorCaja: product.blistersPerBox ?? undefined,
+      precioVentaBlister: product.blisterPrice ?? undefined,
+      principioActivoId: '',
+      sku: product.sku,
+      codigoInterno: product.internalCode ?? '',
+      codigoBarras: product.barcode ?? '',
+      nombre: product.name,
+      descripcion: product.description ?? '',
+      concentracion: product.concentration ?? '',
+      registroSanitario: product.sanitaryRegistration ?? '',
+      requiereReceta: product.requiresPrescription,
+      esControlado: product.isControlled,
+      precioVenta: product.salePrice,
+      costoReferencia: product.costPrice,
+    }
+  }
+
+  function openCreateDialog() {
+    setEditingProduct(null)
+    form.reset(defaultFormValues)
+    setIsCreateDialogOpen(true)
+  }
+
+  function openEditDialog(product: ProductCatalogItem) {
+    setEditingProduct(product)
+    form.reset(mapProductToFormValues(product))
+    setIsCreateDialogOpen(true)
+  }
+
+  function openDuplicateDialog(product: ProductCatalogItem) {
+    const nextSkuBase = `${product.sku}-COPIA`
+    const nextSku = nextSkuBase.length > 50 ? nextSkuBase.slice(0, 50) : nextSkuBase
+    const nextValues = mapProductToFormValues(product)
+    nextValues.sku = nextSku
+    nextValues.codigoInterno = ''
+    nextValues.codigoBarras = ''
+    setEditingProduct(null)
+    form.reset(nextValues)
+    setIsCreateDialogOpen(true)
+  }
+
+  function openDetailDialog(product: ProductCatalogItem) {
+    setSelectedProductDetail(product)
+    setIsDetailDialogOpen(true)
+  }
+
+  function goToInventory(product: ProductCatalogItem, tab: 'lotes' | 'movimientos', action?: 'adjust') {
+    const searchParams = new URLSearchParams()
+    searchParams.set('productId', product.id)
+    searchParams.set('tab', tab)
+    if (action) {
+      searchParams.set('action', action)
+    }
+    navigate(`${paths.inventario}?${searchParams.toString()}`)
+  }
+
+  function requestConfirm(type: 'activate' | 'deactivate' | 'delete', product: ProductCatalogItem) {
+    setConfirmAction({ type, product })
+    setIsConfirmDialogOpen(true)
+  }
+
+  async function handleConfirmAction() {
+    if (!accessToken) {
+      toast.error('La sesión no está disponible.')
+      return
+    }
+
+    if (!confirmAction) {
+      return
+    }
+
+    setIsConfirming(true)
+
+    try {
+      if (confirmAction.type === 'delete') {
+        await productsService.delete(accessToken, confirmAction.product.id)
+        toast.success('Producto eliminado.')
+      } else {
+        const nextStatus = confirmAction.type === 'activate' ? 'ACTIVO' : 'INACTIVO'
+        await productsService.updateStatus(accessToken, confirmAction.product.id, nextStatus)
+        toast.success(nextStatus === 'ACTIVO' ? 'Producto activado.' : 'Producto desactivado.')
+      }
+
+      setIsConfirmDialogOpen(false)
+      setConfirmAction(null)
+      await loadProducts()
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(error))
+    } finally {
+      setIsConfirming(false)
+    }
+  }
+
   async function handleCreateProduct(values: CreateProductFormValues) {
     if (!accessToken) {
       toast.error('La sesión no está disponible.')
       return
     }
 
+    const editingId = editingProduct?.id ?? null
     const packagingMode = values.modoEmpaque ?? 'SIMPLE'
 
-    const payload: CreateProductPayload = {
+    const payload: CreateProductPayload | UpdateProductPayload = {
       ...values,
       laboratorioId: values.laboratorioId || undefined,
       presentacionId: values.presentacionId || undefined,
@@ -761,9 +889,15 @@ export function ProductosPage() {
     setIsSubmitting(true)
 
     try {
-      await productsService.create(accessToken, payload)
-      toast.success('Producto registrado correctamente.')
+      if (editingId) {
+        await productsService.update(accessToken, editingId, payload)
+        toast.success('Producto actualizado correctamente.')
+      } else {
+        await productsService.create(accessToken, payload)
+        toast.success('Producto registrado correctamente.')
+      }
       setIsCreateDialogOpen(false)
+      setEditingProduct(null)
       form.reset(defaultFormValues)
       await Promise.all([loadProducts(), loadOptions()])
     } catch (error) {
@@ -839,7 +973,7 @@ export function ProductosPage() {
             <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
             <TabsTrigger value="maestros">Maestros</TabsTrigger>
           </TabsList>
-          <Button size="sm" onClick={() => setIsCreateDialogOpen(true)} disabled={!masterDataReady || isOptionsLoading}>
+          <Button size="sm" onClick={openCreateDialog} disabled={!masterDataReady || isOptionsLoading}>
             <Plus className="h-4 w-4 mr-1" />
             Nuevo Producto
           </Button>
@@ -936,26 +1070,63 @@ export function ProductosPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openDetailDialog(product)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              Ver detalle
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEditDialog(product)}>
                               <Edit className="h-4 w-4 mr-2" />
                               Editar
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <History className="h-4 w-4 mr-2" />
-                              Historial
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <Layers className="h-4 w-4 mr-2" />
-                              Ver lotes
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <Copy className="h-4 w-4 mr-2" />
-                              Duplicar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive">
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Eliminar
-                            </DropdownMenuItem>
+                            {product.status === 'ACTIVO' ? (
+                              <>
+                                <DropdownMenuItem onClick={() => goToInventory(product, 'lotes')}>
+                                  <Layers className="h-4 w-4 mr-2" />
+                                  Ver lotes
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => goToInventory(product, 'lotes', 'adjust')}>
+                                  <SlidersHorizontal className="h-4 w-4 mr-2" />
+                                  Ajustar stock
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => goToInventory(product, 'movimientos')}>
+                                  <History className="h-4 w-4 mr-2" />
+                                  Historial
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                  <Copy className="h-4 w-4 mr-2" />
+                                  Duplicar
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => requestConfirm('deactivate', product)}>
+                                  <Power className="h-4 w-4 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </>
+                            ) : (
+                              <>
+                                <DropdownMenuItem onClick={() => requestConfirm('activate', product)}>
+                                  <Power className="h-4 w-4 mr-2" />
+                                  Activar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                  <Copy className="h-4 w-4 mr-2" />
+                                  Duplicar
+                                </DropdownMenuItem>
+                                {product.status === 'INACTIVO' ? (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      className="text-destructive"
+                                      disabled={!product.canDelete}
+                                      onClick={() => requestConfirm('delete', product)}
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Eliminar
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : null}
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -1053,26 +1224,63 @@ export function ProductosPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openDetailDialog(product)}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  Ver detalle
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openEditDialog(product)}>
                                   <Edit className="h-4 w-4 mr-2" />
                                   Editar
                                 </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <History className="h-4 w-4 mr-2" />
-                                  Historial
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Layers className="h-4 w-4 mr-2" />
-                                  Ver lotes
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Copy className="h-4 w-4 mr-2" />
-                                  Duplicar
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="text-destructive">
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Eliminar
-                                </DropdownMenuItem>
+                                {product.status === 'ACTIVO' ? (
+                                  <>
+                                    <DropdownMenuItem onClick={() => goToInventory(product, 'lotes')}>
+                                      <Layers className="h-4 w-4 mr-2" />
+                                      Ver lotes
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => goToInventory(product, 'lotes', 'adjust')}>
+                                      <SlidersHorizontal className="h-4 w-4 mr-2" />
+                                      Ajustar stock
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => goToInventory(product, 'movimientos')}>
+                                      <History className="h-4 w-4 mr-2" />
+                                      Historial
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                      <Copy className="h-4 w-4 mr-2" />
+                                      Duplicar
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => requestConfirm('deactivate', product)}>
+                                      <Power className="h-4 w-4 mr-2" />
+                                      Desactivar
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : (
+                                  <>
+                                    <DropdownMenuItem onClick={() => requestConfirm('activate', product)}>
+                                      <Power className="h-4 w-4 mr-2" />
+                                      Activar
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                      <Copy className="h-4 w-4 mr-2" />
+                                      Duplicar
+                                    </DropdownMenuItem>
+                                    {product.status === 'INACTIVO' ? (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-destructive"
+                                          disabled={!product.canDelete}
+                                          onClick={() => requestConfirm('delete', product)}
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Eliminar
+                                        </DropdownMenuItem>
+                                      </>
+                                    ) : null}
+                                  </>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
@@ -1095,15 +1303,24 @@ export function ProductosPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+      <Dialog
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open)
+          if (!open) {
+            setEditingProduct(null)
+            form.reset(defaultFormValues)
+          }
+        }}
+      >
         <DialogContent
           ref={createDialogContentRef}
           className={`max-h-[88vh] sm:max-w-2xl ${isPackagingDialogOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
         >
           <DialogHeader>
-            <DialogTitle>Registrar producto</DialogTitle>
+            <DialogTitle>{editingProduct ? 'Editar producto' : 'Registrar producto'}</DialogTitle>
             <DialogDescription>
-              Alta inicial del maestro farmacéutico
+              {editingProduct ? 'Actualiza el maestro farmacéutico' : 'Alta inicial del maestro farmacéutico'}
             </DialogDescription>
           </DialogHeader>
 
@@ -1360,6 +1577,7 @@ export function ProductosPage() {
                 size="sm"
                 onClick={() => {
                   setIsCreateDialogOpen(false)
+                  setEditingProduct(null)
                   form.reset(defaultFormValues)
                 }}
                 disabled={isSubmitting}
@@ -1500,6 +1718,155 @@ export function ProductosPage() {
             </Button>
             <Button type="button" size="sm" onClick={() => setIsPackagingDialogOpen(false)}>
               Listo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isDetailDialogOpen}
+        onOpenChange={(open) => {
+          setIsDetailDialogOpen(open)
+          if (!open) {
+            setSelectedProductDetail(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Detalle del producto</DialogTitle>
+            <DialogDescription>
+              {selectedProductDetail?.sku ? `SKU ${selectedProductDetail.sku}` : 'Información general del SKU.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedProductDetail ? (
+            <div className="grid gap-3 text-sm">
+              <div className="rounded-xl border p-3">
+                <p className="font-medium text-foreground">{selectedProductDetail.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedProductDetail.category}
+                  {selectedProductDetail.presentation ? ` · ${selectedProductDetail.presentation}` : ''}
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Estado</p>
+                  <p className="mt-1 font-medium text-foreground">{selectedProductDetail.status}</p>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Stock</p>
+                  <p className="mt-1 font-medium text-foreground">
+                    {selectedProductDetail.stockUnits.toFixed(0)} {selectedProductDetail.unitSymbol}
+                  </p>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Precio unidad</p>
+                  <p className="mt-1 font-medium text-foreground">{formatCurrency(selectedProductDetail.salePrice)}</p>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Costo referencial</p>
+                  <p className="mt-1 font-medium text-foreground">{formatCurrency(selectedProductDetail.costPrice)}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border p-3">
+                <p className="text-xs text-muted-foreground">Empaque</p>
+                <p className="mt-1 font-medium text-foreground">
+                  {selectedProductDetail.packagingMode === 'BLISTER'
+                    ? `Blíster · 1 caja = ${(selectedProductDetail.unitsPerBlister ?? 0) * (selectedProductDetail.blistersPerBox ?? 0)} und`
+                    : 'Simple'}
+                </p>
+                {selectedProductDetail.packagingMode === 'BLISTER' ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    1 blíster = {selectedProductDetail.unitsPerBlister ?? 0} und
+                    {selectedProductDetail.blisterPrice !== null
+                      ? ` · precio blíster ${formatCurrency(selectedProductDetail.blisterPrice)}`
+                      : ''}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsDetailDialogOpen(false)}>
+              Cerrar
+            </Button>
+            {selectedProductDetail ? (
+              <Button type="button" size="sm" onClick={() => {
+                setIsDetailDialogOpen(false)
+                openEditDialog(selectedProductDetail)
+              }}>
+                Editar
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isConfirmDialogOpen}
+        onOpenChange={(open) => {
+          setIsConfirmDialogOpen(open)
+          if (!open) {
+            setConfirmAction(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmAction?.type === 'delete'
+                ? 'Eliminar producto'
+                : confirmAction?.type === 'activate'
+                  ? 'Activar producto'
+                  : 'Desactivar producto'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmAction
+                ? confirmAction.type === 'delete'
+                  ? 'Esta acción no se puede deshacer.'
+                  : 'Puedes revertirlo luego desde el catálogo.'
+                : 'Confirma la acción.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border bg-muted/20 p-3 text-sm">
+            <p className="font-medium text-foreground">{confirmAction?.product.name ?? '—'}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{confirmAction?.product.sku ?? ''}</p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsConfirmDialogOpen(false)}
+              disabled={isConfirming}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={confirmAction?.type === 'delete' ? 'danger' : 'primary'}
+              onClick={handleConfirmAction}
+              disabled={isConfirming || !confirmAction}
+            >
+              {isConfirming ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Procesando...
+                </>
+              ) : confirmAction?.type === 'delete' ? (
+                'Eliminar'
+              ) : confirmAction?.type === 'activate' ? (
+                'Activar'
+              ) : (
+                'Desactivar'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

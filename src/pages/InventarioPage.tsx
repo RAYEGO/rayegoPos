@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -321,10 +322,21 @@ function FieldError({ message }: { message?: string }) {
 export function InventarioPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const [searchParams] = useSearchParams()
+  const initialProductId = searchParams.get('productId')
+  const initialTab = searchParams.get('tab')
+  const initialAction = searchParams.get('action')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | InventoryLotStatus>('TODOS')
   const [branchFilter, setBranchFilter] = useState('TODAS')
-  const [productFilter, setProductFilter] = useState('TODOS')
+  const [productFilter, setProductFilter] = useState(() => initialProductId ?? 'TODOS')
+  const [activeTab, setActiveTab] = useState<'lotes' | 'movimientos' | 'alertas'>(() => {
+    if (initialTab === 'movimientos' || initialTab === 'alertas' || initialTab === 'lotes') {
+      return initialTab
+    }
+    return 'lotes'
+  })
+  const [pendingAction, setPendingAction] = useState(() => initialAction)
   const [dashboard, setDashboard] = useState<InventoryDashboardResponse>(emptyDashboard)
   const [isLoading, setIsLoading] = useState(true)
   const [dashboardError, setDashboardError] = useState<string | null>(null)
@@ -467,6 +479,23 @@ export function InventarioPage() {
     })
     setIsAdjustDialogOpen(true)
   }
+
+  useEffect(() => {
+    if (pendingAction !== 'adjust') {
+      return
+    }
+
+    if (isLoading) {
+      return
+    }
+
+    if (dashboard.lots.length === 0) {
+      return
+    }
+
+    openAdjustDialog(dashboard.lots[0])
+    setPendingAction(null)
+  }, [dashboard.lots, isLoading, pendingAction])
 
   function openTransferDialog(lot?: InventoryLotView) {
     transferForm.reset({
@@ -655,7 +684,7 @@ export function InventarioPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue="lotes">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList className="grid w-full grid-cols-3 lg:w-fit">
           <TabsTrigger value="lotes">Stock por lotes</TabsTrigger>
           <TabsTrigger value="movimientos">Movimientos</TabsTrigger>

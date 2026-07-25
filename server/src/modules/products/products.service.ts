@@ -1,4 +1,4 @@
-import { ModoEmpaqueProducto, Prisma } from '@prisma/client'
+import { EstadoProducto, ModoEmpaqueProducto, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 
@@ -51,6 +51,15 @@ const productInclude = {
       fechaVencimiento: true,
       stockDisponible: true,
       stockReservado: true,
+    },
+  },
+  _count: {
+    select: {
+      MovimientoInventario: {
+        where: {
+          deletedAt: null,
+        },
+      },
     },
   },
 } satisfies Prisma.ProductoInclude
@@ -149,6 +158,7 @@ function mapProduct(product: ProductWithRelations) {
     requiresPrescription: product.requiereReceta,
     isControlled: product.esControlado,
     salePrice: decimalToNumber(product.precioVenta),
+    blisterPrice: product.precioVentaBlister ? decimalToNumber(product.precioVentaBlister) : null,
     costPrice: decimalToNumber(product.costoReferencia),
     marginReference: decimalToNumber(product.margenReferencia),
     observations: product.observaciones,
@@ -162,6 +172,9 @@ function mapProduct(product: ProductWithRelations) {
     unit: product.unidadMedida.nombre,
     unitSymbol: product.unidadMedida.simbolo,
     unitId: product.unidadMedida.id,
+    packagingMode: product.modoEmpaque,
+    unitsPerBlister: product.unidadesPorBlister,
+    blistersPerBox: product.blistersPorCaja,
     activePrinciples: product.principiosActivos.map((entry) => ({
       id: entry.principioActivo.id,
       name: entry.principioActivo.nombre,
@@ -172,6 +185,8 @@ function mapProduct(product: ProductWithRelations) {
     lotCount: product.lotes.length,
     branchCoverage: new Set(product.lotes.map((lote) => lote.sucursalId)).size,
     nextExpiry: formatDate(nextExpiry),
+    canDelete:
+      product.lotes.length === 0 && (product._count?.MovimientoInventario ?? 0) === 0,
   }
 }
 
@@ -1134,4 +1149,204 @@ export async function createProduct(
 
     throw error
   }
+}
+
+export async function updateProduct(
+  productId: string,
+  payload: CreateProductPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const existing = await prisma.producto.findFirst({
+    where: {
+      id: productId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (!existing) {
+    throw createHttpError(404, 'El producto no existe.')
+  }
+
+  const normalizedName = payload.nombre.trim()
+  const packagingMode = payload.modoEmpaque ?? ModoEmpaqueProducto.SIMPLE
+  let unitsPerBlister: number | null = null
+  let blistersPerBox: number | null = null
+  const salePrice = Number(payload.precioVenta)
+  const blisterPrice =
+    packagingMode === ModoEmpaqueProducto.BLISTER &&
+    payload.precioVentaBlister !== undefined
+      ? Number(payload.precioVentaBlister)
+      : null
+  const costPrice = Number(payload.costoReferencia)
+  const marginReference =
+    costPrice > 0 ? (salePrice - costPrice) / costPrice : null
+
+  if (packagingMode === ModoEmpaqueProducto.BLISTER) {
+    const nextUnitsPerBlister = Number(payload.unidadesPorBlister)
+    const nextBlistersPerBox = Number(payload.blistersPorCaja)
+
+    if (
+      !Number.isFinite(nextUnitsPerBlister) ||
+      !Number.isInteger(nextUnitsPerBlister) ||
+      nextUnitsPerBlister <= 1
+    ) {
+      throw createHttpError(
+        400,
+        'Las unidades por blíster deben ser un entero mayor a 1.',
+      )
+    }
+
+    if (
+      !Number.isFinite(nextBlistersPerBox) ||
+      !Number.isInteger(nextBlistersPerBox) ||
+      nextBlistersPerBox <= 0
+    ) {
+      throw createHttpError(
+        400,
+        'Los blísteres por caja deben ser un entero mayor a 0.',
+      )
+    }
+
+    if (blisterPrice !== null && (!Number.isFinite(blisterPrice) || blisterPrice < 0)) {
+      throw createHttpError(400, 'El precio de venta por blíster no es válido.')
+    }
+
+    unitsPerBlister = nextUnitsPerBlister
+    blistersPerBox = nextBlistersPerBox
+  }
+
+  try {
+    const updated = await prisma.producto.update({
+      where: {
+        id: productId,
+        deletedAt: null,
+      },
+      data: {
+        categoriaId: payload.categoriaId,
+        laboratorioId: toOptionalString(payload.laboratorioId),
+        presentacionId: toOptionalString(payload.presentacionId),
+        unidadMedidaId: payload.unidadMedidaId,
+        modoEmpaque: packagingMode,
+        unidadesPorBlister: unitsPerBlister,
+        blistersPorCaja: blistersPerBox,
+        sku: payload.sku.trim().toUpperCase(),
+        codigoInterno: toOptionalString(payload.codigoInterno),
+        codigoBarras: toOptionalString(payload.codigoBarras),
+        nombre: normalizedName,
+        descripcion: toOptionalString(payload.descripcion),
+        concentracion: toOptionalString(payload.concentracion),
+        registroSanitario: toOptionalString(payload.registroSanitario),
+        requiereReceta: payload.requiereReceta,
+        esControlado: payload.esControlado,
+        precioVenta: new Prisma.Decimal(salePrice.toFixed(2)),
+        precioVentaBlister:
+          blisterPrice === null ? undefined : new Prisma.Decimal(blisterPrice.toFixed(2)),
+        costoReferencia: new Prisma.Decimal(costPrice.toFixed(2)),
+        margenReferencia:
+          marginReference === null
+            ? undefined
+            : new Prisma.Decimal(marginReference.toFixed(4)),
+        observaciones: toOptionalString(payload.observaciones),
+        updatedById: userId,
+      },
+      include: productInclude,
+    })
+
+    return { item: mapProduct(updated) }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(
+        409,
+        'Ya existe un producto con el mismo SKU, código interno o código de barras.',
+      )
+    }
+
+    throw error
+  }
+}
+
+export async function updateProductStatus(
+  productId: string,
+  status: EstadoProducto,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const updated = await prisma.producto.updateMany({
+    where: {
+      id: productId,
+      deletedAt: null,
+    },
+    data: {
+      estado: status,
+      updatedById: userId,
+    },
+  })
+
+  if (updated.count === 0) {
+    throw createHttpError(404, 'El producto no existe.')
+  }
+
+  return { success: true }
+}
+
+export async function deleteProduct(productId: string, request: FastifyRequest) {
+  const userId = await getAuthenticatedUserId(request)
+
+  const product = await prisma.producto.findFirst({
+    where: {
+      id: productId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      _count: {
+        select: {
+          MovimientoInventario: {
+            where: {
+              deletedAt: null,
+            },
+          },
+          lotes: {
+            where: {
+              deletedAt: null,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (!product) {
+    throw createHttpError(404, 'El producto no existe.')
+  }
+
+  if ((product._count.MovimientoInventario ?? 0) > 0 || (product._count.lotes ?? 0) > 0) {
+    throw createHttpError(
+      409,
+      'No se puede eliminar el producto porque ya tiene movimientos o lotes registrados.',
+    )
+  }
+
+  await prisma.producto.update({
+    where: {
+      id: productId,
+      deletedAt: null,
+    },
+    data: {
+      deletedAt: new Date(),
+      estado: EstadoProducto.INACTIVO,
+      updatedById: userId,
+    },
+  })
+
+  return { success: true }
 }

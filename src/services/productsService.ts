@@ -7,6 +7,8 @@ import type {
   MasterUnitsResponse,
   ProductCatalogResponse,
   ProductOptionsResponse,
+  ProductStatus,
+  UpdateProductPayload,
   UpsertMasterCategoryPayload,
   UpsertMasterLaboratoryPayload,
   UpsertMasterPresentationPayload,
@@ -63,6 +65,32 @@ export const productsService = {
         body: payload,
       },
     )
+  },
+
+  update(accessToken: string, id: string, payload: UpdateProductPayload) {
+    return apiRequest<{ item: ProductCatalogResponse['items'][number] }>(
+      `/api/products/${id}`,
+      {
+        method: 'PATCH',
+        accessToken,
+        body: payload,
+      },
+    )
+  },
+
+  updateStatus(accessToken: string, id: string, status: ProductStatus) {
+    return apiRequest<{ success: boolean }>(`/api/products/${id}/status`, {
+      method: 'PATCH',
+      accessToken,
+      body: { status },
+    })
+  },
+
+  delete(accessToken: string, id: string) {
+    return apiRequest<{ success: boolean }>(`/api/products/${id}`, {
+      method: 'DELETE',
+      accessToken,
+    })
   },
 
   listMasterCategories(accessToken: string) {
