@@ -340,7 +340,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
         ON l.producto_id = p.id
        AND l.deleted_at IS NULL
       WHERE p.deleted_at IS NULL
-        AND (${statusFilter}::text IS NULL OR p.estado = ${statusFilter}::text)
+        AND (${statusFilter}::text IS NULL OR p.estado::text = ${statusFilter}::text)
         AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
         AND (${laboratoryIdFilter}::uuid IS NULL OR p.laboratorio_id = ${laboratoryIdFilter}::uuid)
         AND (
@@ -383,7 +383,7 @@ export async function listProductCatalog(filters: ListProductsFilters) {
         ON l.producto_id = p.id
        AND l.deleted_at IS NULL
       WHERE p.deleted_at IS NULL
-        AND (${statusFilter}::text IS NULL OR p.estado = ${statusFilter}::text)
+        AND (${statusFilter}::text IS NULL OR p.estado::text = ${statusFilter}::text)
         AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
         AND (${laboratoryIdFilter}::uuid IS NULL OR p.laboratorio_id = ${laboratoryIdFilter}::uuid)
         AND (
