@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Edit,
   Eye,
-  History,
   Layers,
   Loader2,
   MoreVertical,
@@ -16,7 +15,6 @@ import {
   Plus,
   Power,
   Search,
-  SlidersHorizontal,
   Trash2,
   Copy,
   TestTubeDiagonal,
@@ -68,8 +66,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
-import { paths } from '@/routes/paths'
-import { useNavigate } from 'react-router-dom'
 import type {
   CreateProductPayload,
   MasterCategoryRecord,
@@ -244,7 +240,6 @@ function FieldError({ message }: { message?: string }) {
 export function ProductosPage() {
   const { logout, session } = useAuth()
   const authorization = useAuthorization()
-  const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | ProductStatus>('TODOS')
@@ -810,16 +805,6 @@ export function ProductosPage() {
     setIsDetailDialogOpen(true)
   }
 
-  function goToInventory(product: ProductCatalogItem, tab: 'lotes' | 'movimientos', action?: 'adjust') {
-    const searchParams = new URLSearchParams()
-    searchParams.set('productId', product.id)
-    searchParams.set('tab', tab)
-    if (action) {
-      searchParams.set('action', action)
-    }
-    navigate(`${paths.inventario}?${searchParams.toString()}`)
-  }
-
   function requestConfirm(type: 'activate' | 'deactivate' | 'delete', product: ProductCatalogItem) {
     setConfirmAction({ type, product })
     setIsConfirmDialogOpen(true)
@@ -1080,18 +1065,6 @@ export function ProductosPage() {
                             </DropdownMenuItem>
                             {product.status === 'ACTIVO' ? (
                               <>
-                                <DropdownMenuItem onClick={() => goToInventory(product, 'lotes')}>
-                                  <Layers className="h-4 w-4 mr-2" />
-                                  Ver lotes
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => goToInventory(product, 'lotes', 'adjust')}>
-                                  <SlidersHorizontal className="h-4 w-4 mr-2" />
-                                  Ajustar stock
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => goToInventory(product, 'movimientos')}>
-                                  <History className="h-4 w-4 mr-2" />
-                                  Historial
-                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
                                   <Copy className="h-4 w-4 mr-2" />
                                   Duplicar
@@ -1234,18 +1207,6 @@ export function ProductosPage() {
                                 </DropdownMenuItem>
                                 {product.status === 'ACTIVO' ? (
                                   <>
-                                    <DropdownMenuItem onClick={() => goToInventory(product, 'lotes')}>
-                                      <Layers className="h-4 w-4 mr-2" />
-                                      Ver lotes
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => goToInventory(product, 'lotes', 'adjust')}>
-                                      <SlidersHorizontal className="h-4 w-4 mr-2" />
-                                      Ajustar stock
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => goToInventory(product, 'movimientos')}>
-                                      <History className="h-4 w-4 mr-2" />
-                                      Historial
-                                    </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
                                       <Copy className="h-4 w-4 mr-2" />
                                       Duplicar
