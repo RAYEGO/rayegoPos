@@ -61,6 +61,14 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 import { ProductMastersCenter } from '@/components/products/masters-center/ProductMastersCenter'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
@@ -255,6 +263,12 @@ export function ProductosPage() {
     withPrescription: 0,
     lotEnabled: 0,
   })
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [totalItems, setTotalItems] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [sortBy, setSortBy] = useState<'name' | 'stockUnits' | 'createdAt'>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [options, setOptions] = useState<ProductOptionsResponse>({
     categories: [],
     laboratories: [],
@@ -412,10 +426,23 @@ export function ProductosPage() {
         search,
         status: statusFilter === 'TODOS' ? undefined : statusFilter,
         categoryId: categoryFilter === 'TODAS' ? undefined : categoryFilter,
+        laboratoryId: laboratoryFilter === 'TODOS' ? undefined : laboratoryFilter,
+        page,
+        pageSize,
+        sortBy,
+        sortDir,
       })
 
       setProducts(response.items)
       setSummary(response.summary)
+      setTotalItems(response.pagination.totalItems)
+      setTotalPages(response.pagination.totalPages)
+      setSortBy(response.sort.by)
+      setSortDir(response.sort.dir)
+
+      if (page > response.pagination.totalPages) {
+        setPage(response.pagination.totalPages)
+      }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         await handleUnauthorized()
@@ -425,11 +452,26 @@ export function ProductosPage() {
     } finally {
       setIsCatalogLoading(false)
     }
-  }, [accessToken, categoryFilter, handleUnauthorized, search, statusFilter])
+  }, [
+    accessToken,
+    categoryFilter,
+    handleUnauthorized,
+    laboratoryFilter,
+    page,
+    pageSize,
+    search,
+    sortBy,
+    sortDir,
+    statusFilter,
+  ])
 
   useEffect(() => {
     void loadOptions()
   }, [loadOptions])
+
+  useEffect(() => {
+    setPage(1)
+  }, [categoryFilter, laboratoryFilter, pageSize, search, sortBy, sortDir, statusFilter])
 
   useEffect(() => {
     void loadProducts()
@@ -1011,6 +1053,37 @@ export function ProductosPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <Select
+                value={`${sortBy}:${sortDir}`}
+                onValueChange={(value) => {
+                  const [by, dir] = value.split(':')
+                  setSortBy(by as 'name' | 'stockUnits' | 'createdAt')
+                  setSortDir(dir as 'asc' | 'desc')
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Orden" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name:asc">Nombre (A → Z)</SelectItem>
+                  <SelectItem value="name:desc">Nombre (Z → A)</SelectItem>
+                  <SelectItem value="stockUnits:desc">Stock (Mayor → Menor)</SelectItem>
+                  <SelectItem value="stockUnits:asc">Stock (Menor → Mayor)</SelectItem>
+                  <SelectItem value="createdAt:desc">Fecha registro (Recientes)</SelectItem>
+                  <SelectItem value="createdAt:asc">Fecha registro (Antiguos)</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Por página" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 / página</SelectItem>
+                  <SelectItem value="20">20 / página</SelectItem>
+                  <SelectItem value="50">50 / página</SelectItem>
+                  <SelectItem value="100">100 / página</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </Card>
 
@@ -1253,6 +1326,37 @@ export function ProductosPage() {
               </Card>
             )}
           </div>
+
+          {!isCatalogLoading && !catalogError && totalItems > 0 ? (
+            <Card>
+              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Página {page} de {totalPages} · {totalItems.toLocaleString('es-PE')} registros
+                </p>
+                {totalPages > 1 ? (
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          onClick={() => setPage(Math.max(1, page - 1))}
+                          disabled={page <= 1}
+                        />
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationLink isActive>{page}</PaginationLink>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationNext
+                          onClick={() => setPage(Math.min(totalPages, page + 1))}
+                          disabled={page >= totalPages}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="maestros" className="space-y-4 pt-4">

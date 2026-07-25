@@ -30,6 +30,11 @@ const listProductsQuerySchema = z.object({
   search: z.string().optional(),
   status: z.enum(['ACTIVO', 'INACTIVO', 'DESCONTINUADO']).optional(),
   categoryId: z.string().uuid().optional(),
+  laboratoryId: z.string().uuid().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().optional(),
+  sortBy: z.enum(['name', 'stockUnits', 'createdAt']).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional(),
 })
 
 const createProductSchema = z.object({

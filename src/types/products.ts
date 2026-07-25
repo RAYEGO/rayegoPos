@@ -52,6 +52,16 @@ export type ProductCatalogResponse = {
     withPrescription: number
     lotEnabled: number
   }
+  pagination: {
+    page: number
+    pageSize: number
+    totalItems: number
+    totalPages: number
+  }
+  sort: {
+    by: 'name' | 'stockUnits' | 'createdAt'
+    dir: 'asc' | 'desc'
+  }
 }
 
 export type ProductOptionsResponse = {

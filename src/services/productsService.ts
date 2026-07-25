@@ -19,6 +19,11 @@ type ListProductsFilters = {
   search?: string
   status?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO'
   categoryId?: string
+  laboratoryId?: string
+  page?: number
+  pageSize?: number
+  sortBy?: 'name' | 'stockUnits' | 'createdAt'
+  sortDir?: 'asc' | 'desc'
 }
 
 function buildQuery(filters: ListProductsFilters) {
@@ -34,6 +39,26 @@ function buildQuery(filters: ListProductsFilters) {
 
   if (filters.categoryId) {
     searchParams.set('categoryId', filters.categoryId)
+  }
+
+  if (filters.laboratoryId) {
+    searchParams.set('laboratoryId', filters.laboratoryId)
+  }
+
+  if (typeof filters.page === 'number' && Number.isFinite(filters.page)) {
+    searchParams.set('page', String(filters.page))
+  }
+
+  if (typeof filters.pageSize === 'number' && Number.isFinite(filters.pageSize)) {
+    searchParams.set('pageSize', String(filters.pageSize))
+  }
+
+  if (filters.sortBy) {
+    searchParams.set('sortBy', filters.sortBy)
+  }
+
+  if (filters.sortDir) {
+    searchParams.set('sortDir', filters.sortDir)
   }
 
   const query = searchParams.toString()

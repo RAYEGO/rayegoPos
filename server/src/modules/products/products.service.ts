@@ -55,6 +55,16 @@ const productInclude = {
   },
   _count: {
     select: {
+      detalleCompras: {
+        where: {
+          deletedAt: null,
+        },
+      },
+      detalleVentas: {
+        where: {
+          deletedAt: null,
+        },
+      },
       MovimientoInventario: {
         where: {
           deletedAt: null,
@@ -72,6 +82,11 @@ type ListProductsFilters = {
   search?: string
   status?: string
   categoryId?: string
+  laboratoryId?: string
+  page?: number
+  pageSize?: number
+  sortBy?: 'name' | 'stockUnits' | 'createdAt'
+  sortDir?: 'asc' | 'desc'
 }
 
 type CreateProductPayload = {
@@ -186,7 +201,10 @@ function mapProduct(product: ProductWithRelations) {
     branchCoverage: new Set(product.lotes.map((lote) => lote.sucursalId)).size,
     nextExpiry: formatDate(nextExpiry),
     canDelete:
-      product.lotes.length === 0 && (product._count?.MovimientoInventario ?? 0) === 0,
+      product.lotes.length === 0 &&
+      (product._count?.MovimientoInventario ?? 0) === 0 &&
+      (product._count?.detalleCompras ?? 0) === 0 &&
+      (product._count?.detalleVentas ?? 0) === 0,
   }
 }
 
@@ -214,11 +232,17 @@ async function getAuthenticatedUserId(request: FastifyRequest) {
 
 export async function listProductCatalog(filters: ListProductsFilters) {
   const search = filters.search?.trim()
+  const page = Math.max(1, filters.page ?? 1)
+  const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 20))
+  const sortBy = filters.sortBy ?? 'name'
+  const sortDir = filters.sortDir ?? 'asc'
+  const skip = (page - 1) * pageSize
 
   const where: Prisma.ProductoWhereInput = {
     deletedAt: null,
     ...(filters.status ? { estado: filters.status as never } : {}),
     ...(filters.categoryId ? { categoriaId: filters.categoryId } : {}),
+    ...(filters.laboratoryId ? { laboratorioId: filters.laboratoryId } : {}),
     ...(search
       ? {
           OR: [
@@ -272,22 +296,177 @@ export async function listProductCatalog(filters: ListProductsFilters) {
       : {}),
   }
 
-  const products = await prisma.producto.findMany({
-    where,
-    include: productInclude,
-    orderBy: [{ nombre: 'asc' }],
-  })
+  const [totalItems, activeCatalog, withPrescription, lotEnabled] =
+    await Promise.all([
+      prisma.producto.count({ where }),
+      prisma.producto.count({
+        where: {
+          ...where,
+          estado: EstadoProducto.ACTIVO,
+        },
+      }),
+      prisma.producto.count({
+        where: {
+          ...where,
+          requiereReceta: true,
+        },
+      }),
+      prisma.producto.count({
+        where: {
+          ...where,
+          lotes: {
+            some: {
+              deletedAt: null,
+            },
+          },
+        },
+      }),
+    ])
+
+  const statusFilter = filters.status ?? null
+  const categoryIdFilter = filters.categoryId ?? null
+  const laboratoryIdFilter = filters.laboratoryId ?? null
+  const searchFilter = search ?? null
+
+  const [{ count: lowStockCount }] = await prisma.$queryRaw<
+    Array<{ count: number }>
+  >`
+    SELECT COUNT(*)::int AS count
+    FROM (
+      SELECT p.id,
+             COALESCE(SUM(l.stock_disponible), 0) AS stock_units
+      FROM productos p
+      LEFT JOIN lotes l
+        ON l.producto_id = p.id
+       AND l.deleted_at IS NULL
+      WHERE p.deleted_at IS NULL
+        AND (${statusFilter}::text IS NULL OR p.estado = ${statusFilter}::text)
+        AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
+        AND (${laboratoryIdFilter}::uuid IS NULL OR p.laboratorio_id = ${laboratoryIdFilter}::uuid)
+        AND (
+          ${searchFilter}::text IS NULL
+          OR p.nombre ILIKE '%' || ${searchFilter} || '%'
+          OR p.sku ILIKE '%' || ${searchFilter} || '%'
+          OR COALESCE(p.codigo_interno, '') ILIKE '%' || ${searchFilter} || '%'
+          OR COALESCE(p.codigo_barras, '') ILIKE '%' || ${searchFilter} || '%'
+          OR EXISTS (
+            SELECT 1
+            FROM laboratorios lab
+            WHERE lab.id = p.laboratorio_id
+              AND lab.deleted_at IS NULL
+              AND lab.nombre ILIKE '%' || ${searchFilter} || '%'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM producto_principio_activo ppa
+            JOIN principios_activos pa
+              ON pa.id = ppa.principio_activo_id
+             AND pa.deleted_at IS NULL
+            WHERE ppa.producto_id = p.id
+              AND ppa.deleted_at IS NULL
+              AND pa.nombre ILIKE '%' || ${searchFilter} || '%'
+          )
+        )
+      GROUP BY p.id
+    ) stocks
+    WHERE stocks.stock_units <= 20;
+  `
+
+  let products: ProductWithRelations[] = []
+
+  if (sortBy === 'stockUnits') {
+    const sortRaw = Prisma.raw(sortDir === 'desc' ? 'DESC' : 'ASC')
+    const ids = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT p.id
+      FROM productos p
+      LEFT JOIN lotes l
+        ON l.producto_id = p.id
+       AND l.deleted_at IS NULL
+      WHERE p.deleted_at IS NULL
+        AND (${statusFilter}::text IS NULL OR p.estado = ${statusFilter}::text)
+        AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
+        AND (${laboratoryIdFilter}::uuid IS NULL OR p.laboratorio_id = ${laboratoryIdFilter}::uuid)
+        AND (
+          ${searchFilter}::text IS NULL
+          OR p.nombre ILIKE '%' || ${searchFilter} || '%'
+          OR p.sku ILIKE '%' || ${searchFilter} || '%'
+          OR COALESCE(p.codigo_interno, '') ILIKE '%' || ${searchFilter} || '%'
+          OR COALESCE(p.codigo_barras, '') ILIKE '%' || ${searchFilter} || '%'
+          OR EXISTS (
+            SELECT 1
+            FROM laboratorios lab
+            WHERE lab.id = p.laboratorio_id
+              AND lab.deleted_at IS NULL
+              AND lab.nombre ILIKE '%' || ${searchFilter} || '%'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM producto_principio_activo ppa
+            JOIN principios_activos pa
+              ON pa.id = ppa.principio_activo_id
+             AND pa.deleted_at IS NULL
+            WHERE ppa.producto_id = p.id
+              AND ppa.deleted_at IS NULL
+              AND pa.nombre ILIKE '%' || ${searchFilter} || '%'
+          )
+        )
+      GROUP BY p.id
+      ORDER BY COALESCE(SUM(l.stock_disponible), 0) ${sortRaw},
+               p.nombre ASC
+      LIMIT ${pageSize}
+      OFFSET ${skip};
+    `
+
+    const idList = ids.map((row) => row.id)
+    if (idList.length > 0) {
+      const entries = await prisma.producto.findMany({
+        where: {
+          id: { in: idList },
+        },
+        include: productInclude,
+      })
+
+      const byId = new Map(entries.map((entry) => [entry.id, entry]))
+      products = idList.map((id) => byId.get(id)).filter(Boolean) as ProductWithRelations[]
+    } else {
+      products = []
+    }
+  } else {
+    const orderBy =
+      sortBy === 'createdAt'
+        ? ([{ createdAt: sortDir }, { nombre: 'asc' }] as Prisma.ProductoOrderByWithRelationInput[])
+        : ([{ nombre: sortDir }, { id: 'asc' }] as Prisma.ProductoOrderByWithRelationInput[])
+
+    products = await prisma.producto.findMany({
+      where,
+      include: productInclude,
+      orderBy,
+      skip,
+      take: pageSize,
+    })
+  }
 
   const items = products.map(mapProduct)
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
 
   return {
     items,
     summary: {
-      total: items.length,
-      activeCatalog: items.filter((item) => item.status === 'ACTIVO').length,
-      lowStockCount: items.filter((item) => item.stockUnits <= 20).length,
-      withPrescription: items.filter((item) => item.requiresPrescription).length,
-      lotEnabled: items.filter((item) => item.lotCount > 0).length,
+      total: totalItems,
+      activeCatalog,
+      lowStockCount,
+      withPrescription,
+      lotEnabled,
+    },
+    pagination: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages,
+    },
+    sort: {
+      by: sortBy,
+      dir: sortDir,
     },
   }
 }
@@ -1308,6 +1487,7 @@ export async function deleteProduct(productId: string, request: FastifyRequest) 
     },
     select: {
       id: true,
+      estado: true,
       _count: {
         select: {
           MovimientoInventario: {
@@ -1316,6 +1496,16 @@ export async function deleteProduct(productId: string, request: FastifyRequest) 
             },
           },
           lotes: {
+            where: {
+              deletedAt: null,
+            },
+          },
+          detalleCompras: {
+            where: {
+              deletedAt: null,
+            },
+          },
+          detalleVentas: {
             where: {
               deletedAt: null,
             },
@@ -1329,10 +1519,19 @@ export async function deleteProduct(productId: string, request: FastifyRequest) 
     throw createHttpError(404, 'El producto no existe.')
   }
 
-  if ((product._count.MovimientoInventario ?? 0) > 0 || (product._count.lotes ?? 0) > 0) {
+  if (product.estado !== EstadoProducto.INACTIVO) {
+    throw createHttpError(409, 'Solo se puede eliminar un producto inactivo.')
+  }
+
+  if (
+    (product._count.MovimientoInventario ?? 0) > 0 ||
+    (product._count.lotes ?? 0) > 0 ||
+    (product._count.detalleCompras ?? 0) > 0 ||
+    (product._count.detalleVentas ?? 0) > 0
+  ) {
     throw createHttpError(
       409,
-      'No se puede eliminar el producto porque ya tiene movimientos o lotes registrados.',
+      'No se puede eliminar el producto porque ya tiene compras, ventas, movimientos o lotes registrados.',
     )
   }
 

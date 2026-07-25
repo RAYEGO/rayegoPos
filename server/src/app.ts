@@ -30,6 +30,7 @@ export function createApp() {
       callback(new Error('Origin not allowed'), false)
     },
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
 
   app.register(jwt, {
