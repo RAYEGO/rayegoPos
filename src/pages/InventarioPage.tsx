@@ -223,6 +223,14 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value))
 }
 
+function parseDateValue(value: string | null | undefined) {
+  if (!value) return 0
+
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  const time = date.getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
 function getLotStatusVariant(status: InventoryLotStatus) {
   if (status === 'ACTIVO') return 'success'
   if (status === 'BLOQUEADO') return 'destructive'
@@ -344,6 +352,8 @@ export function InventarioPage() {
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false)
   const [isMutating, setIsMutating] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
+  const [lotsPage, setLotsPage] = useState(1)
+  const lotsPageSize = 8
 
   const createForm = useForm<CreateLotFormValues>({
     resolver: zodResolver(createLotSchema),
@@ -423,6 +433,16 @@ export function InventarioPage() {
 
   const canTransferLots = dashboard.options.branches.length > 1
 
+  const sortedLots = useMemo(() => {
+    return [...dashboard.lots].sort(
+      (a, b) => parseDateValue(b.receivedAt) - parseDateValue(a.receivedAt),
+    )
+  }, [dashboard.lots])
+  const lotsTotalPages = Math.max(1, Math.ceil(sortedLots.length / lotsPageSize))
+  const safeLotsPage = Math.min(lotsPage, lotsTotalPages)
+  const lotsPageStart = (safeLotsPage - 1) * lotsPageSize
+  const visibleLots = sortedLots.slice(lotsPageStart, lotsPageStart + lotsPageSize)
+
   const handleUnauthorized = useCallback(async () => {
     toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
     await logout()
@@ -466,6 +486,10 @@ export function InventarioPage() {
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
+
+  useEffect(() => {
+    setLotsPage(1)
+  }, [productFilter, search, statusFilter])
 
   function openAdjustDialog(lot?: InventoryLotView) {
     adjustForm.reset({
@@ -787,101 +811,136 @@ export function InventarioPage() {
                     </div>
                   ) : null}
 
-                  <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Producto</TableHead>
-                      <TableHead>Lote</TableHead>
-                      <TableHead>Sucursal / almacén</TableHead>
-                      <TableHead>Stock</TableHead>
-                      <TableHead>Costo / vencimiento</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dashboard.lots.map((lot) => (
-                      <TableRow key={lot.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{lot.productName}</p>
-                            <p className="text-small text-muted-foreground">
-                              {lot.sku} · {lot.unitSymbol}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{lot.lotCode}</p>
-                            <p className="text-small text-muted-foreground">
-                              {lot.supplierName}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{lot.branchName}</p>
-                            <p className="text-small text-muted-foreground">
-                              {lot.warehouseName}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">
-                              {formatQuantity(lot.availableUnits)} disponibles
-                            </p>
-                            <p className="text-small text-muted-foreground">
-                              {formatQuantity(lot.reservedUnits)} reservadas ·{' '}
-                              {formatQuantity(lot.blockedUnits)} bloqueadas
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">
-                              {formatCurrency(lot.unitCost)}
-                            </p>
-                            <p className="text-small text-muted-foreground">
-                              vence {formatDate(lot.expiryDate)}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-2">
-                            <Badge variant={getLotStatusVariant(lot.status)}>
-                              {lot.status}
-                            </Badge>
-                            {lot.expiresSoon ? (
-                              <Badge variant="warning">Por vencer</Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openAdjustDialog(lot)}
-                            >
-                              Ajustar
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openTransferDialog(lot)}
-                              disabled={lot.availableUnits <= 0 || !canTransferLots}
-                            >
-                              Transferir
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                  </Table>
+                  <div className="space-y-3">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Producto</TableHead>
+                          <TableHead>Lote</TableHead>
+                          <TableHead>Sucursal / almacén</TableHead>
+                          <TableHead>Stock</TableHead>
+                          <TableHead>Costo / vencimiento</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right">Acciones</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {visibleLots.map((lot) => (
+                          <TableRow key={lot.id}>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-medium text-foreground">{lot.productName}</p>
+                                <p className="text-small text-muted-foreground">
+                                  {lot.sku} · {lot.unitSymbol}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-medium text-foreground">{lot.lotCode}</p>
+                                <p className="text-small text-muted-foreground">
+                                  {lot.supplierName}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-medium text-foreground">{lot.branchName}</p>
+                                <p className="text-small text-muted-foreground">
+                                  {lot.warehouseName}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-medium text-foreground">
+                                  {formatQuantity(lot.availableUnits)} disponibles
+                                </p>
+                                <p className="text-small text-muted-foreground">
+                                  {formatQuantity(lot.reservedUnits)} reservadas ·{' '}
+                                  {formatQuantity(lot.blockedUnits)} bloqueadas
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-medium text-foreground">
+                                  {formatCurrency(lot.unitCost)}
+                                </p>
+                                <p className="text-small text-muted-foreground">
+                                  vence {formatDate(lot.expiryDate)}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant={getLotStatusVariant(lot.status)}>
+                                  {lot.status}
+                                </Badge>
+                                {lot.expiresSoon ? (
+                                  <Badge variant="warning">Por vencer</Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openAdjustDialog(lot)}
+                                >
+                                  Ajustar
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openTransferDialog(lot)}
+                                  disabled={lot.availableUnits <= 0 || !canTransferLots}
+                                >
+                                  Transferir
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-small text-muted-foreground">
+                        Mostrando {lotsPageStart + 1}-
+                        {Math.min(lotsPageStart + lotsPageSize, sortedLots.length)} de{' '}
+                        {sortedLots.length}
+                      </p>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setLotsPage((current) => Math.max(1, current - 1))}
+                          disabled={safeLotsPage <= 1}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-small text-muted-foreground">
+                          Página {safeLotsPage} de {lotsTotalPages}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setLotsPage((current) => Math.min(lotsTotalPages, current + 1))
+                          }
+                          disabled={safeLotsPage >= lotsTotalPages}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
             </CardContent>
