@@ -956,6 +956,7 @@ model Cliente {
   observaciones   String?                 @db.VarChar(255)
   permitirCredito Boolean                 @default(false) @map("permitir_credito")
   limiteCredito   Decimal                 @default(0) @map("limite_credito") @db.Decimal(14, 2)
+  saldoPendiente  Decimal                 @default(0) @map("saldo_pendiente") @db.Decimal(14, 2)
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
   deletedAt       DateTime?               @map("deleted_at")

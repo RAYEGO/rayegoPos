@@ -14,6 +14,7 @@ export type CustomerItem = {
   direccion: string | null
   permitirCredito: boolean
   limiteCredito: number
+  saldoPendiente: number
   ubigeo: string | null
   fechaNacimiento: string | null
   activo: boolean

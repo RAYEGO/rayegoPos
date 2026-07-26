@@ -1,0 +1,3 @@
+ALTER TABLE "clientes"
+ADD COLUMN "saldo_pendiente" DECIMAL(14,2) NOT NULL DEFAULT 0;
+

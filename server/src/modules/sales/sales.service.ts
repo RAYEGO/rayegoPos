@@ -533,6 +533,7 @@ export async function getSalesDashboard(
         numeroDocumento: true,
         permitirCredito: true,
         limiteCredito: true,
+        saldoPendiente: true,
       },
     }),
     prisma.formaPago.findMany({
@@ -690,6 +691,7 @@ export async function getSalesDashboard(
         documentNumber: customer.numeroDocumento,
         permitirCredito: customer.permitirCredito,
         limiteCredito: decimalToNumber(customer.limiteCredito),
+        saldoPendiente: decimalToNumber(customer.saldoPendiente),
       })),
       paymentMethods: paymentMethods.map((method) => ({
         id: method.id,
@@ -1047,6 +1049,21 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       )
     }
 
+    if (balanceAmount > 0 && customer && customerAllowsCredit) {
+      const customerOutstandingAmount = decimalToNumber(customer.saldoPendiente)
+      const customerCreditLimit = decimalToNumber(customer.limiteCredito)
+      const availableCreditAmount = Number(
+        Math.max(0, customerCreditLimit - customerOutstandingAmount).toFixed(2),
+      )
+
+      if (balanceAmount > availableCreditAmount) {
+        throw createHttpError(
+          400,
+          'El saldo pendiente supera el límite de crédito disponible del cliente.',
+        )
+      }
+    }
+
     const lots = await tx.lote.findMany({
       where: {
         deletedAt: null,
@@ -1142,6 +1159,18 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       },
       include: saleInclude,
     })
+
+    if (balanceAmount > 0 && payload.clienteId && customer && customerAllowsCredit) {
+      await tx.cliente.update({
+        where: { id: payload.clienteId },
+        data: {
+          saldoPendiente: {
+            increment: toDecimal(balanceAmount, 2),
+          },
+          updatedById: userId,
+        },
+      })
+    }
 
     const detailMap = new Map(sale.detalles.map((detail) => [detail.productoId, detail]))
     const lotAvailabilityMap = new Map(
@@ -1535,6 +1564,35 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
 
     if (sale.estado === EstadoVenta.ANULADA) {
       throw createHttpError(400, 'La venta ya está anulada.')
+    }
+
+    const saleOutstandingAmount = decimalToNumber(sale.saldoPendiente)
+
+    if (sale.clienteId && saleOutstandingAmount > 0) {
+      const customer = await tx.cliente.findFirst({
+        where: {
+          id: sale.clienteId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          saldoPendiente: true,
+        },
+      })
+
+      if (customer) {
+        const nextOutstanding = Number(
+          Math.max(0, decimalToNumber(customer.saldoPendiente) - saleOutstandingAmount).toFixed(2),
+        )
+
+        await tx.cliente.update({
+          where: { id: customer.id },
+          data: {
+            saldoPendiente: toDecimal(nextOutstanding, 2),
+            updatedById: userId,
+          },
+        })
+      }
     }
 
     const returnReason = await ensureMovementReason(tx, userId, {

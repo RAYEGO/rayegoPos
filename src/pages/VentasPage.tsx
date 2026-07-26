@@ -349,13 +349,21 @@ export function VentasPage() {
   )
 
   const customerAllowsCredit = selectedCustomer?.permitirCredito ?? false
+  const availableCreditAmount =
+    selectedCustomer && customerAllowsCredit
+      ? Math.max(0, Number((selectedCustomer.limiteCredito - selectedCustomer.saldoPendiente).toFixed(2)))
+      : 0
+
   const requiresFullPayment = watchedCustomerId === 'SHOWROOM' || !customerAllowsCredit
+
   const paymentBlockingMessage =
     requiresFullPayment && estimatedOutstanding > 0
       ? watchedCustomerId === 'SHOWROOM'
         ? 'Las ventas de mostrador deben quedar completamente pagadas.'
         : 'El cliente seleccionado no tiene crédito habilitado. La venta debe quedar completamente pagada.'
-      : null
+      : customerAllowsCredit && estimatedOutstanding > availableCreditAmount
+        ? 'El saldo pendiente supera el límite de crédito disponible del cliente.'
+        : null
 
   function syncCartWithProduct(
     current: LocalCartItem,
@@ -559,6 +567,13 @@ export function VentasPage() {
     const selectedCustomer =
       isShowroom ? null : options.customers.find((customer) => customer.id === customerId) ?? null
     const customerAllowsCredit = selectedCustomer?.permitirCredito ?? false
+    const availableCreditAmount =
+      selectedCustomer && customerAllowsCredit
+        ? Math.max(
+            0,
+            Number((selectedCustomer.limiteCredito - selectedCustomer.saldoPendiente).toFixed(2)),
+          )
+        : 0
 
     if (outstandingAmount > 0 && (isShowroom || !customerAllowsCredit)) {
       toast.error(
@@ -566,6 +581,11 @@ export function VentasPage() {
           ? 'Las ventas de mostrador deben quedar completamente pagadas.'
           : 'El cliente seleccionado no tiene crédito habilitado. La venta debe quedar completamente pagada.',
       )
+      return
+    }
+
+    if (!isShowroom && customerAllowsCredit && outstandingAmount > availableCreditAmount) {
+      toast.error('El saldo pendiente supera el límite de crédito disponible del cliente.')
       return
     }
 

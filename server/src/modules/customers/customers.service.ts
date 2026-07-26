@@ -165,6 +165,7 @@ function mapCustomer(customer: CustomerWithRelations) {
     direccion: customer.direccion,
     permitirCredito: customer.permitirCredito,
     limiteCredito: decimalToNumber(customer.limiteCredito),
+    saldoPendiente: decimalToNumber(customer.saldoPendiente),
     ubigeo: customer.ubigeo,
     fechaNacimiento: customer.fechaNacimiento ? customer.fechaNacimiento.toISOString() : null,
     activo: customer.activo,

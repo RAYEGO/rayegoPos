@@ -501,7 +501,9 @@ export function ClientesPage() {
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span>Saldo pendiente</span>
-                        <span className="font-medium text-foreground">{formatCurrency(0)}</span>
+                        <span className="font-medium text-foreground">
+                          {formatCurrency(customer.saldoPendiente)}
+                        </span>
                       </div>
                     </div>
                   </Card>
@@ -548,7 +550,7 @@ export function ClientesPage() {
                               Nunca
                             </TableCell>
                             <TableCell className="hidden lg:table-cell text-muted-foreground">
-                              {formatCurrency(0)}
+                              {formatCurrency(customer.saldoPendiente)}
                             </TableCell>
                             <TableCell>
                               <Badge variant={getCustomerStatusVariant(customer.activo)}>
