@@ -118,11 +118,6 @@ function resolveLotStatus({
   return EstadoLote.ACTIVO
 }
 
-async function getAuthenticatedUserId(request: FastifyRequest) {
-  const { userId } = await getAuthContext(request)
-  return userId
-}
-
 function buildInventoryWarehouseMap(
   inventories: Array<{
     sucursalId: string
