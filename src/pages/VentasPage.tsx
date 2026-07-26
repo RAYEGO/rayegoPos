@@ -16,6 +16,7 @@ import {
   ClipboardList,
   Pill,
   CircleDollarSign,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,14 +24,6 @@ import {
   Card,
   CardContent,
 } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
@@ -40,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import {
   Table,
   TableBody,
@@ -238,7 +232,7 @@ export function VentasPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [cartItems, setCartItems] = useState<LocalCartItem[]>([])
-  const [isCheckoutDialogOpen, setIsCheckoutDialogOpen] = useState(false)
+  const [isCartPanelOpen, setIsCartPanelOpen] = useState(false)
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
   const [receiptSale, setReceiptSale] = useState<{ id: string; code: string } | null>(null)
   const [receiptPayload, setReceiptPayload] = useState<SaleReceiptResponse | null>(null)
@@ -257,7 +251,6 @@ export function VentasPage() {
     fields: paymentFields,
     append: appendPayment,
     remove: removePayment,
-    replace: replacePayments,
   } = useFieldArray({
     control: checkoutForm.control,
     name: 'payments',
@@ -316,6 +309,12 @@ export function VentasPage() {
       controlledItems: cartItems.filter((item) => item.isControlled).length,
     }
   }, [cartItems])
+
+  useEffect(() => {
+    if (cartItems.length === 0) {
+      setIsCartPanelOpen(false)
+    }
+  }, [cartItems.length])
 
   const watchedPaymentTotal = useMemo(
     () =>
@@ -493,32 +492,37 @@ export function VentasPage() {
     setCartItems((current) => current.filter((item) => item.productId !== productId))
   }
 
-  function openCheckoutDialog() {
+  function openCartPanel() {
     if (!cartItems.length) {
       toast.error('Agrega productos al carrito antes de continuar.')
       return
     }
 
-    const defaultBranchId =
-      branchFilter !== 'TODAS' ? branchFilter : (options.branches[0]?.id ?? '')
-    const defaultPaymentMethodId = options.paymentMethods[0]?.id ?? ''
+    const hasBranch = Boolean(checkoutForm.getValues('sucursalId'))
+    const hasPayments = checkoutForm.getValues('payments')?.length > 0
 
-    checkoutForm.reset({
-      sucursalId: defaultBranchId,
-      clienteId: 'SHOWROOM',
-      tipoComprobante: 'TICKET',
-      observaciones: '',
-      payments: [
-        {
-          formaPagoId: defaultPaymentMethodId,
-          monto: Number(cartMetrics.total.toFixed(2)),
-          referenciaExterna: '',
-          observaciones: '',
-        },
-      ],
-    })
+    if (!hasBranch || !hasPayments) {
+      const defaultBranchId =
+        branchFilter !== 'TODAS' ? branchFilter : (options.branches[0]?.id ?? '')
+      const defaultPaymentMethodId = options.paymentMethods[0]?.id ?? ''
 
-    setIsCheckoutDialogOpen(true)
+      checkoutForm.reset({
+        sucursalId: defaultBranchId,
+        clienteId: 'SHOWROOM',
+        tipoComprobante: 'TICKET',
+        observaciones: '',
+        payments: [
+          {
+            formaPagoId: defaultPaymentMethodId,
+            monto: Number(cartMetrics.total.toFixed(2)),
+            referenciaExterna: '',
+            observaciones: '',
+          },
+        ],
+      })
+    }
+
+    setIsCartPanelOpen(true)
   }
 
   async function handleCreateSale(values: SaleCheckoutFormValues) {
@@ -568,7 +572,7 @@ export function VentasPage() {
         setReceiptPayload(null)
       }
       setCartItems([])
-      setIsCheckoutDialogOpen(false)
+      setIsCartPanelOpen(false)
       checkoutForm.reset(defaultCheckoutFormValues)
       await loadDashboard()
     } catch (nextError) {
@@ -682,229 +686,105 @@ export function VentasPage() {
             </div>
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_340px]">
-            <div className="lg:col-span-1 xl:col-span-2">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader className="h-7 w-7" />
-                </div>
-              ) : error ? (
-                <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-                  {error}
-                </div>
-              ) : availableProducts.length === 0 ? (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <p className="text-sm font-medium text-foreground">
-                    No hay productos con stock disponible
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Ajusta la búsqueda o filtros
-                  </p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {availableProducts.map((product) => {
-                    const cartEntry = cartItems.find((item) => item.productId === product.id)
-                    const reservedUnits = cartEntry ? getCartItemReservedUnits(cartEntry) : 0
-                    const remainingUnits = product.availableUnits - reservedUnits
+          <div>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : error ? (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                {error}
+              </div>
+            ) : availableProducts.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  No hay productos con stock disponible
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Ajusta la búsqueda o filtros
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {availableProducts.map((product) => {
+                  const cartEntry = cartItems.find((item) => item.productId === product.id)
+                  const reservedUnits = cartEntry ? getCartItemReservedUnits(cartEntry) : 0
+                  const remainingUnits = product.availableUnits - reservedUnits
 
-                    return (
-                      <Card key={product.id} className="p-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate font-medium text-foreground">{product.name}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{product.sku}</p>
-                          </div>
+                  return (
+                    <Card key={product.id} className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-foreground">{product.name}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{product.sku}</p>
                         </div>
-
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
-                          <Badge variant={getStockVariant(product)}>
-                            {product.availableUnits.toFixed(0)} {product.unitSymbol}
-                          </Badge>
-                          {product.packagingMode === 'BLISTER' &&
-                            typeof product.availableBlisters === 'number' && (
-                              <Badge variant="outline">
-                                {product.availableBlisters.toFixed(0)} BLÍS
-                              </Badge>
-                            )}
-                          {product.requiresPrescription && <Badge variant="warning">R</Badge>}
-                          {product.isControlled && <Badge variant="destructive">C</Badge>}
-                          {product.coldChain && <Badge variant="info">❄️</Badge>}
-                        </div>
-
-                        {product.suggestedLot && (
-                          <div className="mt-3 rounded-lg border bg-muted/20 p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-medium text-foreground">
-                                Lote: {product.suggestedLot.lotCode}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Vence: {formatDate(product.suggestedLot.expiryDate)}
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="mt-3 flex gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => addToCart(product)}
-                            disabled={!product.suggestedLot || remainingUnits <= 0}
-                          >
-                            <Plus className="mr-1 h-4 w-4" />
-                            {cartEntry ? `Agregar (${cartEntry.quantity})` : 'Agregar'}
-                          </Button>
-                        </div>
-                      </Card>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="lg:col-span-1 xl:col-span-1">
-              <Card className="p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-hidden">
-                <h3 className="mb-3 font-medium text-foreground">Carrito</h3>
-
-                {cartItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed p-6 text-center">
-                    <p className="text-sm font-medium text-foreground">
-                      Aún no hay productos en el carrito
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Agrega productos desde las tarjetas del mostrador
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3 lg:h-[calc(100vh-7rem)]">
-                    <div className="space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-                      {cartItems.map((item) => (
-                        <div key={item.productId} className="rounded-lg border p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate font-medium text-foreground">{item.name}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {formatCurrency(getCartItemUnitPrice(item))} /{' '}
-                                {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
-                                  ? 'BLÍS'
-                                  : item.unitSymbol}
-                              </p>
-                              {item.packagingMode === 'BLISTER' && (
-                                <div className="mt-2 w-full max-w-[160px]">
-                                  <Select
-                                    value={item.empaque}
-                                    onValueChange={(value) =>
-                                      updateCartEmpaque(item.productId, value as 'UNIDAD' | 'BLISTER')
-                                    }
-                                  >
-                                    <SelectTrigger className="h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="UNIDAD">Unidad</SelectItem>
-                                      <SelectItem value="BLISTER">Blíster</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right">
-                              <p className="font-medium text-foreground">
-                                {formatCurrency(item.quantity * getCartItemUnitPrice(item))}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() =>
-                                  updateCartQuantity(item.productId, item.quantity - 1)
-                                }
-                              >
-                                <Minus className="h-4 w-4" />
-                              </Button>
-                              <Input
-                                type="number"
-                                min={1}
-                                max={Math.max(1, getCartItemMax(item))}
-                                value={item.quantity}
-                                onChange={(event) =>
-                                  updateCartQuantity(
-                                    item.productId,
-                                    Number(event.target.value || item.quantity),
-                                  )
-                                }
-                                className="h-8 w-16 text-center"
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() =>
-                                  updateCartQuantity(item.productId, item.quantity + 1)
-                                }
-                                disabled={item.quantity >= getCartItemMax(item)}
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </div>
-
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeFromCart(item.productId)}
-                              className="h-8 px-2"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="rounded-lg border bg-background p-3 shadow-sm ring-1 ring-border/60 lg:mt-auto">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Total</span>
-                        <span className="text-lg font-semibold text-foreground">
-                          {formatCurrency(cartMetrics.total)}
-                        </span>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCartItems([])}
-                          className="flex-1"
-                        >
-                          Vaciar
-                        </Button>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
+                        <Badge variant={getStockVariant(product)}>
+                          {product.availableUnits.toFixed(0)} {product.unitSymbol}
+                        </Badge>
+                        {product.packagingMode === 'BLISTER' &&
+                          typeof product.availableBlisters === 'number' && (
+                            <Badge variant="outline">
+                              {product.availableBlisters.toFixed(0)} BLÍS
+                            </Badge>
+                          )}
+                        {product.requiresPrescription && <Badge variant="warning">R</Badge>}
+                        {product.isControlled && <Badge variant="destructive">C</Badge>}
+                        {product.coldChain && <Badge variant="info">❄️</Badge>}
+                      </div>
+
+                      {product.suggestedLot && (
+                        <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-medium text-foreground">
+                              Lote: {product.suggestedLot.lotCode}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Vence: {formatDate(product.suggestedLot.expiryDate)}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-3 flex gap-2">
                         <Button
                           type="button"
                           size="sm"
-                          onClick={openCheckoutDialog}
                           className="flex-1"
+                          onClick={() => addToCart(product)}
+                          disabled={!product.suggestedLot || remainingUnits <= 0}
                         >
-                          <CreditCard className="mr-1 h-4 w-4" />
-                          Cobrar
+                          <Plus className="mr-1 h-4 w-4" />
+                          {cartEntry ? `Agregar (${cartEntry.quantity})` : 'Agregar'}
                         </Button>
                       </div>
-                    </div>
-                  </div>
-                )}
-              </Card>
-            </div>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
           </div>
+
+          {cartItems.length > 0 ? (
+            <button
+              type="button"
+              onClick={openCartPanel}
+              className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-2xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <ShoppingBasket className="h-5 w-5" />
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-foreground">Carrito</p>
+                <p className="text-xs text-muted-foreground">
+                  Productos: {cartMetrics.itemCount} · Total: {formatCurrency(cartMetrics.total)}
+                </p>
+              </div>
+            </button>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="operaciones" className="space-y-4 pt-4">
@@ -1176,340 +1056,432 @@ export function VentasPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog
-        open={isCheckoutDialogOpen}
-        onOpenChange={(open) => {
-          setIsCheckoutDialogOpen(open)
-
-          if (!open) {
-            checkoutForm.reset(defaultCheckoutFormValues)
-            replacePayments(defaultCheckoutFormValues.payments)
-          }
-        }}
-      >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Registrar venta</DialogTitle>
-            <DialogDescription>
-              Confirma los datos del mostrador y emite la venta con dispensación por lotes.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form className="grid gap-6" onSubmit={checkoutForm.handleSubmit(handleCreateSale)}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Sucursal</label>
-                <Controller
-                  control={checkoutForm.control}
-                  name="sucursalId"
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona sucursal" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {options.branches.map((branch) => (
-                          <SelectItem key={branch.id} value={branch.id}>
-                            {branch.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={checkoutForm.formState.errors.sucursalId?.message} />
+      <SidePanel open={isCartPanelOpen} onOpenChange={setIsCartPanelOpen}>
+        <SidePanelContent className="p-0">
+          <form
+            className="flex h-full flex-col"
+            onSubmit={checkoutForm.handleSubmit(handleCreateSale)}
+          >
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Carrito</p>
+                <p className="text-sm text-muted-foreground">
+                  Productos: {cartMetrics.itemCount} · Total: {formatCurrency(cartMetrics.total)}
+                </p>
               </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Cliente</label>
-                <Controller
-                  control={checkoutForm.control}
-                  name="clienteId"
-                  render={({ field }) => (
-                    <Select value={field.value || 'SHOWROOM'} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Venta mostrador" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="SHOWROOM">Venta mostrador</SelectItem>
-                        {options.customers.map((customer) => (
-                          <SelectItem key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-4">
+                <Card className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">Productos agregados</p>
+                      <p className="text-xs text-muted-foreground">
+                        Ajusta cantidades, presentación y elimina ítems si es necesario.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCartItems([])}
+                      disabled={cartItems.length === 0}
+                    >
+                      Vaciar
+                    </Button>
+                  </div>
+
+                  {cartItems.length === 0 ? (
+                    <div className="mt-4 rounded-lg border border-dashed p-6 text-center">
+                      <p className="text-sm font-medium text-foreground">
+                        Aún no hay productos en el carrito
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Agrega productos desde el catálogo
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {cartItems.map((item) => (
+                        <div key={item.productId} className="rounded-lg border p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-foreground">{item.name}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {formatCurrency(getCartItemUnitPrice(item))} /{' '}
+                                {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
+                                  ? 'BLÍS'
+                                  : item.unitSymbol}
+                              </p>
+                              {item.packagingMode === 'BLISTER' ? (
+                                <div className="mt-2 w-full max-w-[180px]">
+                                  <Select
+                                    value={item.empaque}
+                                    onValueChange={(value) =>
+                                      updateCartEmpaque(item.productId, value as 'UNIDAD' | 'BLISTER')
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="UNIDAD">Unidad</SelectItem>
+                                      <SelectItem value="BLISTER">Blíster</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="text-right">
+                              <p className="font-medium text-foreground">
+                                {formatCurrency(item.quantity * getCartItemUnitPrice(item))}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Lote: {item.suggestedLotCode}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
+                              >
+                                <Minus className="h-4 w-4" />
+                              </Button>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={Math.max(1, getCartItemMax(item))}
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  updateCartQuantity(
+                                    item.productId,
+                                    Number(event.target.value || item.quantity),
+                                  )
+                                }
+                                className="h-8 w-16 text-center"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
+                                disabled={item.quantity >= getCartItemMax(item)}
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeFromCart(item.productId)}
+                              className="h-8 px-2"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                />
-              </div>
+                </Card>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Tipo de comprobante</label>
-                <Controller
-                  control={checkoutForm.control}
-                  name="tipoComprobante"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="TICKET">Ticket</SelectItem>
-                        <SelectItem value="BOLETA">Boleta</SelectItem>
-                        <SelectItem value="FACTURA">Factura</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
+                <Card className="p-4">
+                  <p className="font-medium text-foreground">Detalle de venta</p>
+                  <p className="text-xs text-muted-foreground">
+                    Cliente, comprobante y observaciones.
+                  </p>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Observaciones</label>
-                <Textarea
-                  {...checkoutForm.register('observaciones')}
-                  placeholder="Notas para receta, despacho o indicaciones internas"
-                  className="min-h-24"
-                />
-                <FieldError message={checkoutForm.formState.errors.observaciones?.message} />
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Sucursal</label>
+                      <Controller
+                        control={checkoutForm.control}
+                        name="sucursalId"
+                        render={({ field }) => (
+                          <Select value={field.value || undefined} onValueChange={field.onChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecciona sucursal" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {options.branches.map((branch) => (
+                                <SelectItem key={branch.id} value={branch.id}>
+                                  {branch.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                      <FieldError message={checkoutForm.formState.errors.sucursalId?.message} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Cliente</label>
+                      <Controller
+                        control={checkoutForm.control}
+                        name="clienteId"
+                        render={({ field }) => (
+                          <Select value={field.value || 'SHOWROOM'} onValueChange={field.onChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Venta mostrador" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="SHOWROOM">Venta mostrador</SelectItem>
+                              {options.customers.map((customer) => (
+                                <SelectItem key={customer.id} value={customer.id}>
+                                  {customer.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Tipo de comprobante</label>
+                      <Controller
+                        control={checkoutForm.control}
+                        name="tipoComprobante"
+                        render={({ field }) => (
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="TICKET">Ticket</SelectItem>
+                              <SelectItem value="BOLETA">Boleta</SelectItem>
+                              <SelectItem value="FACTURA">Factura</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium">Observaciones</label>
+                      <Textarea
+                        {...checkoutForm.register('observaciones')}
+                        placeholder="Notas para receta, despacho o indicaciones internas"
+                        className="min-h-24"
+                      />
+                      <FieldError message={checkoutForm.formState.errors.observaciones?.message} />
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-foreground">Pagos</p>
+                      <p className="text-xs text-muted-foreground">
+                        Registra uno o varios medios de pago para cerrar la venta.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        appendPayment({
+                          formaPagoId: options.paymentMethods[0]?.id ?? '',
+                          monto: 0,
+                          referenciaExterna: '',
+                          observaciones: '',
+                        })
+                      }
+                    >
+                      Agregar pago
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    {paymentFields.map((field, index) => {
+                      const selectedMethod = selectedPaymentMethods[index]
+
+                      return (
+                        <div
+                          key={field.id}
+                          className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_1fr_auto]"
+                        >
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Forma de pago</label>
+                            <Controller
+                              control={checkoutForm.control}
+                              name={`payments.${index}.formaPagoId`}
+                              render={({ field: inputField }) => (
+                                <Select
+                                  value={inputField.value || undefined}
+                                  onValueChange={inputField.onChange}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Selecciona forma de pago" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {options.paymentMethods.map((method) => (
+                                      <SelectItem key={method.id} value={method.id}>
+                                        {method.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                            <FieldError
+                              message={
+                                checkoutForm.formState.errors.payments?.[index]?.formaPagoId?.message
+                              }
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Monto</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              {...checkoutForm.register(`payments.${index}.monto`, {
+                                valueAsNumber: true,
+                              })}
+                            />
+                            <FieldError
+                              message={checkoutForm.formState.errors.payments?.[index]?.monto?.message}
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Referencia</label>
+                            <Input
+                              {...checkoutForm.register(`payments.${index}.referenciaExterna`)}
+                              placeholder={
+                                selectedMethod?.requiresReference
+                                  ? 'Voucher, operación o nro. externo'
+                                  : 'Opcional'
+                              }
+                            />
+                            <FieldError
+                              message={
+                                checkoutForm.formState.errors.payments?.[index]?.referenciaExterna
+                                  ?.message
+                              }
+                            />
+                          </div>
+
+                          <div className="flex items-end justify-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removePayment(index)}
+                              disabled={paymentFields.length === 1}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+
+                          <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                            <label className="text-sm font-medium">Observaciones del pago</label>
+                            <Textarea
+                              {...checkoutForm.register(`payments.${index}.observaciones`)}
+                              placeholder="Notas del cobro o conciliación"
+                              className="min-h-20"
+                            />
+                            <FieldError
+                              message={
+                                checkoutForm.formState.errors.payments?.[index]?.observaciones?.message
+                              }
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </Card>
+
+                <Card className="p-4">
+                  <p className="font-medium text-foreground">Totales</p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                        Total venta
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-foreground">
+                        {formatCurrency(cartMetrics.total)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                        Pagos registrados
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-foreground">
+                        {formatCurrency(watchedPaymentTotal)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                        Vuelto estimado
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-foreground">
+                        {formatCurrency(estimatedChange)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                        Saldo estimado
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-foreground">
+                        {formatCurrency(estimatedOutstanding)}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
               </div>
             </div>
 
-            <div className="space-y-4 rounded-2xl border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium text-foreground">Pagos</p>
-                  <p className="text-small text-muted-foreground">
-                    Registra uno o varios medios de pago para cerrar la venta.
-                  </p>
-                </div>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    appendPayment({
-                      formaPagoId: options.paymentMethods[0]?.id ?? '',
-                      monto: 0,
-                      referenciaExterna: '',
-                      observaciones: '',
-                    })
-                  }
+                  disabled={isSubmitting}
+                  onClick={() => setIsCartPanelOpen(false)}
                 >
-                  Agregar pago
+                  Seguir vendiendo
+                </Button>
+                <Button type="submit" disabled={isSubmitting || !cartItems.length}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Registrando...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="h-4 w-4" />
+                      Emitir venta
+                    </>
+                  )}
                 </Button>
               </div>
-
-              <div className="space-y-4">
-                {paymentFields.map((field, index) => {
-                  const selectedMethod = selectedPaymentMethods[index]
-
-                  return (
-                    <div
-                      key={field.id}
-                      className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_1fr_auto]"
-                    >
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Forma de pago</label>
-                        <Controller
-                          control={checkoutForm.control}
-                          name={`payments.${index}.formaPagoId`}
-                          render={({ field: inputField }) => (
-                            <Select
-                              value={inputField.value || undefined}
-                              onValueChange={inputField.onChange}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Selecciona forma de pago" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {options.paymentMethods.map((method) => (
-                                  <SelectItem key={method.id} value={method.id}>
-                                    {method.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        <FieldError
-                          message={checkoutForm.formState.errors.payments?.[index]?.formaPagoId?.message}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Monto</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          {...checkoutForm.register(`payments.${index}.monto`, {
-                            valueAsNumber: true,
-                          })}
-                        />
-                        <FieldError
-                          message={checkoutForm.formState.errors.payments?.[index]?.monto?.message}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Referencia</label>
-                        <Input
-                          {...checkoutForm.register(`payments.${index}.referenciaExterna`)}
-                          placeholder={
-                            selectedMethod?.requiresReference
-                              ? 'Voucher, operación o nro. externo'
-                              : 'Opcional'
-                          }
-                        />
-                        <FieldError
-                          message={
-                            checkoutForm.formState.errors.payments?.[index]?.referenciaExterna
-                              ?.message
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-end justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removePayment(index)}
-                          disabled={paymentFields.length === 1}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <div className="space-y-2 md:col-span-2 xl:col-span-4">
-                        <label className="text-sm font-medium">Observaciones del pago</label>
-                        <Textarea
-                          {...checkoutForm.register(`payments.${index}.observaciones`)}
-                          placeholder="Notas del cobro o conciliación"
-                          className="min-h-20"
-                        />
-                        <FieldError
-                          message={
-                            checkoutForm.formState.errors.payments?.[index]?.observaciones?.message
-                          }
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
             </div>
-
-            <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-              <div className="rounded-2xl border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Producto</TableHead>
-                      <TableHead>Lote sugerido</TableHead>
-                      <TableHead>Cantidad</TableHead>
-                      <TableHead>Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {cartItems.map((item) => (
-                      <TableRow key={item.productId}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{item.name}</p>
-                            <p className="text-small text-muted-foreground">
-                              {item.sku} · {formatCurrency(getCartItemUnitPrice(item))} ·{' '}
-                              {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
-                                ? 'BLÍS'
-                                : item.unitSymbol}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          <div className="space-y-1">
-                            <p>{item.suggestedLotCode}</p>
-                            <p className="text-small">{formatDate(item.suggestedLotExpiryDate)}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {item.quantity.toFixed(0)}{' '}
-                          {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
-                            ? 'BLÍS'
-                            : item.unitSymbol}
-                        </TableCell>
-                        <TableCell className="font-medium text-foreground">
-                          {formatCurrency(item.quantity * getCartItemUnitPrice(item))}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-2 xl:grid-cols-1">
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Total venta
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(cartMetrics.total)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Pagos registrados
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(watchedPaymentTotal)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Vuelto estimado
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(estimatedChange)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Saldo estimado
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(estimatedOutstanding)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isSubmitting}
-                onClick={() => {
-                  setIsCheckoutDialogOpen(false)
-                  checkoutForm.reset(defaultCheckoutFormValues)
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isSubmitting || !cartItems.length}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Registrando...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="h-4 w-4" />
-                    Emitir venta
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
       <ReceiptDialog
         open={isReceiptDialogOpen}

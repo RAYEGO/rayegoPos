@@ -15,6 +15,7 @@ import {
   Trash2,
   Truck,
   Warehouse,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -42,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -751,7 +753,7 @@ export function ProveedoresPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog
+      <SidePanel
         open={isDialogOpen}
         onOpenChange={(open) => {
           setIsDialogOpen(open)
@@ -761,18 +763,28 @@ export function ProveedoresPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              {editingSupplier ? 'Editar proveedor' : 'Registrar proveedor'}
-            </DialogTitle>
-            <DialogDescription>
-              Completa la ficha maestra del proveedor para usarlo en compras e inventario.
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleSaveSupplier)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">
+                  {editingSupplier ? 'Editar proveedor' : 'Registrar proveedor'}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Completa la ficha maestra del proveedor para usarlo en compras e inventario.
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={form.handleSubmit(handleSaveSupplier)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Tipo de persona</label>
                 <Controller
@@ -892,38 +904,42 @@ export function ProveedoresPage() {
                 />
                 <FieldError message={form.formState.errors.observaciones?.message} />
               </div>
+                </div>
+              </div>
             </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsDialogOpen(false)
-                  setEditingSupplier(null)
-                  form.reset(defaultFormValues)
-                }}
-                disabled={isSubmitting}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="mr-1 h-4 w-4" />
-                    {editingSupplier ? 'Guardar cambios' : 'Crear proveedor'}
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsDialogOpen(false)
+                    setEditingSupplier(null)
+                    form.reset(defaultFormValues)
+                  }}
+                  disabled={isSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="mr-1 h-4 w-4" />
+                      {editingSupplier ? 'Guardar cambios' : 'Crear proveedor'}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
       <Dialog
         open={isDeleteDialogOpen}

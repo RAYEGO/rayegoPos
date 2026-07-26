@@ -15,6 +15,7 @@ import {
   ShoppingCart,
   Trash2,
   Truck,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,14 +26,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
@@ -42,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import {
   Table,
   TableBody,
@@ -1581,17 +1575,38 @@ export function ComprasPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Registrar orden de compra</DialogTitle>
-            <DialogDescription>
-              Alta inicial de la orden con proveedor, sucursal, costos e impuestos por línea.
-            </DialogDescription>
-          </DialogHeader>
+      <SidePanel
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open)
+          if (!open) {
+            form.reset({
+              ...defaultFormValues,
+              fechaEmision: new Date().toISOString().slice(0, 10),
+            })
+          }
+        }}
+      >
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateOrder)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Registrar orden de compra</p>
+                <p className="text-sm text-muted-foreground">
+                  Alta inicial de la orden con proveedor, sucursal, costos e impuestos por línea.
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={form.handleSubmit(handleCreateOrder)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Sucursal</label>
                 <Controller
@@ -1911,41 +1926,45 @@ export function ComprasPage() {
                 </div>
               </div>
             </div>
+              </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsCreateDialogOpen(false)
-                  form.reset({
-                    ...defaultFormValues,
-                    fechaEmision: new Date().toISOString().slice(0, 10),
-                  })
-                }}
-                disabled={isSubmitting}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <ShoppingCart className="h-4 w-4" />
-                    Guardar orden
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsCreateDialogOpen(false)
+                    form.reset({
+                      ...defaultFormValues,
+                      fechaEmision: new Date().toISOString().slice(0, 10),
+                    })
+                  }}
+                  disabled={isSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingCart className="h-4 w-4" />
+                      Guardar orden
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog
+      <SidePanel
         open={isReceiveDialogOpen}
         onOpenChange={(open) => {
           setIsReceiveDialogOpen(open)
@@ -1956,24 +1975,34 @@ export function ComprasPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Recepcionar compra</DialogTitle>
-            <DialogDescription>
-              {selectedReceipt
-                ? `${selectedReceipt.productName} · ${selectedReceipt.purchaseCode} · pendiente ${
-                    typeof selectedReceipt.pendingPacks === 'number'
-                      ? `${selectedReceipt.pendingPacks.toFixed(0)} ${
-                          selectedReceipt.packaging === 'CAJA' ? 'cajas' : 'blísteres'
-                        }`
-                      : `${selectedReceipt.pendingUnits.toFixed(0)} unidades`
-                  }`
-                : 'Registra el lote y define cómo ingresa el stock al inventario.'}
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={receiveForm.handleSubmit(handleReceiveItem)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Recepcionar compra</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedReceipt
+                    ? `${selectedReceipt.productName} · ${selectedReceipt.purchaseCode} · pendiente ${
+                        typeof selectedReceipt.pendingPacks === 'number'
+                          ? `${selectedReceipt.pendingPacks.toFixed(0)} ${
+                              selectedReceipt.packaging === 'CAJA' ? 'cajas' : 'blísteres'
+                            }`
+                          : `${selectedReceipt.pendingUnits.toFixed(0)} unidades`
+                      }`
+                    : 'Registra el lote y define cómo ingresa el stock al inventario.'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={receiveForm.handleSubmit(handleReceiveItem)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Número de lote</label>
                 <Input {...receiveForm.register('numeroLote')} placeholder="Ej. LT-250715-A" />
@@ -2086,39 +2115,43 @@ export function ComprasPage() {
                 </p>
               </div>
             </div>
+            </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isReceiving}
-                onClick={() => {
-                  setIsReceiveDialogOpen(false)
-                  setSelectedReceiptId(null)
-                  receiveForm.reset(defaultReceiveFormValues)
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isReceiving || !selectedReceipt}>
-                {isReceiving ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Recepcionando...
-                  </>
-                ) : (
-                  <>
-                    <PackageCheck className="h-4 w-4" />
-                    Confirmar recepción
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isReceiving}
+                  onClick={() => {
+                    setIsReceiveDialogOpen(false)
+                    setSelectedReceiptId(null)
+                    receiveForm.reset(defaultReceiveFormValues)
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isReceiving || !selectedReceipt}>
+                  {isReceiving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Recepcionando...
+                    </>
+                  ) : (
+                    <>
+                      <PackageCheck className="h-4 w-4" />
+                      Confirmar recepción
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog
+      <SidePanel
         open={isOrderReceiveDialogOpen}
         onOpenChange={(open) => {
           setIsOrderReceiveDialogOpen(open)
@@ -2129,17 +2162,27 @@ export function ComprasPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>Cerrar recepción por orden</DialogTitle>
-            <DialogDescription>
-              {selectedOrder && selectedOrderReceiptGroup
-                ? `${selectedOrder.code} · ${selectedOrder.supplierName} · ${selectedOrderReceiptGroup.pendingLines} líneas pendientes`
-                : 'Completa todas las líneas pendientes y la orden quedará finalizada.'}
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <div className="flex h-full flex-col">
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Cerrar recepción por orden</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedOrder && selectedOrderReceiptGroup
+                    ? `${selectedOrder.code} · ${selectedOrder.supplierName} · ${selectedOrderReceiptGroup.pendingLines} líneas pendientes`
+                    : 'Completa todas las líneas pendientes y la orden quedará finalizada.'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <div className="space-y-6">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="space-y-6">
             {selectedOrderReceiptGroup ? (
               <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-4">
                 <div>
@@ -2356,43 +2399,47 @@ export function ComprasPage() {
                 )
               })}
             </div>
+              </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isClosingOrderReceipt}
-                onClick={() => {
-                  setIsOrderReceiveDialogOpen(false)
-                  setSelectedOrderId(null)
-                  setOrderReceiptDrafts([])
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handleCloseOrderReceipt()}
-                disabled={isClosingOrderReceipt || orderReceiptDrafts.length === 0}
-              >
-                {isClosingOrderReceipt ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Cerrando recepción...
-                  </>
-                ) : (
-                  <>
-                    <PackageCheck className="h-4 w-4" />
-                    Confirmar recepción completa
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isClosingOrderReceipt}
+                  onClick={() => {
+                    setIsOrderReceiveDialogOpen(false)
+                    setSelectedOrderId(null)
+                    setOrderReceiptDrafts([])
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleCloseOrderReceipt()}
+                  disabled={isClosingOrderReceipt || orderReceiptDrafts.length === 0}
+                >
+                  {isClosingOrderReceipt ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Cerrando recepción...
+                    </>
+                  ) : (
+                    <>
+                      <PackageCheck className="h-4 w-4" />
+                      Confirmar recepción completa
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog
+      <SidePanel
         open={isReturnDialogOpen}
         onOpenChange={(open) => {
           setIsReturnDialogOpen(open)
@@ -2403,18 +2450,28 @@ export function ComprasPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Registrar devolución de compra</DialogTitle>
-            <DialogDescription>
-              {selectedReturnReceipt
-                ? `${selectedReturnReceipt.productName} · ${selectedReturnReceipt.lotCode} · ${selectedReturnReceipt.purchaseCode}`
-                : 'Selecciona el origen del stock que volverá al proveedor.'}
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={returnForm.handleSubmit(handleReturnItem)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Registrar devolución de compra</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedReturnReceipt
+                    ? `${selectedReturnReceipt.productName} · ${selectedReturnReceipt.lotCode} · ${selectedReturnReceipt.purchaseCode}`
+                    : 'Selecciona el origen del stock que volverá al proveedor.'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={returnForm.handleSubmit(handleReturnItem)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Origen de devolución</label>
                 <Controller
@@ -2485,39 +2542,43 @@ export function ComprasPage() {
                 </p>
               </div>
             </div>
+            </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isReturning}
-                onClick={() => {
-                  setIsReturnDialogOpen(false)
-                  setSelectedReturnReceiptId(null)
-                  returnForm.reset(defaultReturnFormValues)
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isReturning || !selectedReturnReceipt?.lotId}>
-                {isReturning ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Registrando devolución...
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="h-4 w-4" />
-                    Confirmar devolución
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isReturning}
+                  onClick={() => {
+                    setIsReturnDialogOpen(false)
+                    setSelectedReturnReceiptId(null)
+                    returnForm.reset(defaultReturnFormValues)
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isReturning || !selectedReturnReceipt?.lotId}>
+                  {isReturning ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Registrando devolución...
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="h-4 w-4" />
+                      Confirmar devolución
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog
+      <SidePanel
         open={isPaymentDialogOpen}
         onOpenChange={(open) => {
           setIsPaymentDialogOpen(open)
@@ -2528,18 +2589,28 @@ export function ComprasPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Registrar pago a proveedor</DialogTitle>
-            <DialogDescription>
-              {selectedPaymentOrder
-                ? `${selectedPaymentOrder.code} · ${selectedPaymentOrder.supplierName} · saldo ${formatCurrency(selectedPaymentOrder.adjustedPendingAmount)}`
-                : 'Registra un abono real para actualizar cuentas por pagar.'}
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={paymentForm.handleSubmit(handleRegisterPayment)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Registrar pago a proveedor</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedPaymentOrder
+                    ? `${selectedPaymentOrder.code} · ${selectedPaymentOrder.supplierName} · saldo ${formatCurrency(selectedPaymentOrder.adjustedPendingAmount)}`
+                    : 'Registra un abono real para actualizar cuentas por pagar.'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={paymentForm.handleSubmit(handleRegisterPayment)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Forma de pago</label>
                 <Controller
@@ -2635,39 +2706,43 @@ export function ComprasPage() {
                 </p>
               </div>
             </div>
+            </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isPaying}
-                onClick={() => {
-                  setIsPaymentDialogOpen(false)
-                  setSelectedPaymentOrderId(null)
-                  paymentForm.reset(defaultPaymentFormValues)
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isPaying || !selectedPaymentOrder}>
-                {isPaying ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Registrando pago...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="h-4 w-4" />
-                    Confirmar pago
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isPaying}
+                  onClick={() => {
+                    setIsPaymentDialogOpen(false)
+                    setSelectedPaymentOrderId(null)
+                    paymentForm.reset(defaultPaymentFormValues)
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isPaying || !selectedPaymentOrder}>
+                  {isPaying ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Registrando pago...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="h-4 w-4" />
+                      Confirmar pago
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog
+      <SidePanel
         open={isOrderSummaryDialogOpen}
         onOpenChange={(open) => {
           setIsOrderSummaryDialogOpen(open)
@@ -2677,18 +2752,28 @@ export function ComprasPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>Detalle de recepción por orden</DialogTitle>
-            <DialogDescription>
-              {selectedSummaryOrder && selectedSummaryReceiptGroup
-                ? `${selectedSummaryOrder.code} · ${selectedSummaryOrder.supplierName} · ${selectedSummaryReceiptGroup.totalLines} líneas`
-                : 'Revisa el historial de recepciones, lotes y saldos de la orden.'}
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <div className="flex h-full flex-col">
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Detalle de recepción por orden</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedSummaryOrder && selectedSummaryReceiptGroup
+                    ? `${selectedSummaryOrder.code} · ${selectedSummaryOrder.supplierName} · ${selectedSummaryReceiptGroup.totalLines} líneas`
+                    : 'Revisa el historial de recepciones, lotes y saldos de la orden.'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          {selectedSummaryOrder && selectedSummaryReceiptGroup && selectedSummaryTotals ? (
-            <div className="space-y-6">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {selectedSummaryOrder && selectedSummaryReceiptGroup && selectedSummaryTotals ? (
+                <div className="space-y-6">
               <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-5">
                 <div>
                   <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
@@ -2876,8 +2961,18 @@ export function ComprasPage() {
                   </TableBody>
                 </Table>
               </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed p-10 text-center">
+                  <p className="text-sm font-medium text-foreground">
+                    No se encontró información de recepción para esta orden.
+                  </p>
+                </div>
+              )}
+            </div>
 
-              <DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
@@ -2888,7 +2983,9 @@ export function ComprasPage() {
                 >
                   Cerrar
                 </Button>
-                {selectedSummaryReceiptGroup.pendingLines > 0 &&
+                {selectedSummaryOrder &&
+                selectedSummaryReceiptGroup &&
+                selectedSummaryReceiptGroup.pendingLines > 0 &&
                 selectedSummaryOrder.status !== 'BORRADOR' &&
                 selectedSummaryOrder.status !== 'ANULADA' ? (
                   <Button
@@ -2903,17 +3000,11 @@ export function ComprasPage() {
                     Continuar cierre
                   </Button>
                 ) : null}
-              </DialogFooter>
+              </div>
             </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed p-10 text-center">
-              <p className="text-sm font-medium text-foreground">
-                No se encontró información de recepción para esta orden.
-              </p>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          </div>
+        </SidePanelContent>
+      </SidePanel>
     </div>
   )
 }

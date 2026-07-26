@@ -6,8 +6,7 @@ import {
   FileDown,
   HandCoins,
   Printer,
-  WalletCards,
-  ChevronDown,
+  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -40,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import {
   Table,
   TableBody,
@@ -143,7 +143,6 @@ export function CajaPage() {
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showSummary, setShowSummary] = useState(true)
   const [cashDrawersPage, setCashDrawersPage] = useState(1)
   const cashDrawersPageSize = 4
 
@@ -155,7 +154,7 @@ export function CajaPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedDrawerId, setSelectedDrawerId] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState<
-    'resumen' | 'turno' | 'movimientos' | 'conciliacion' | 'historial'
+    'resumen' | 'movimientos' | 'conciliacion' | 'historial'
   >('resumen')
 
   const [reconciliationPreview, setReconciliationPreview] =
@@ -424,10 +423,29 @@ export function CajaPage() {
     }
   }, [reconciliationCounted, reconciliationPreview?.rows])
 
+  const digitalReconciliation = useMemo(() => {
+    const rows = (reconciliationPreview?.rows ?? []).filter((row) => row.code !== 'EFECTIVO')
+    const expectedAmount = rows.reduce((sum, row) => sum + row.expectedAmount, 0)
+    const countedAmount = rows.reduce(
+      (sum, row) => sum + (reconciliationCounted[row.paymentMethodId] ?? row.countedAmount),
+      0,
+    )
+    const differenceAmount = countedAmount - expectedAmount
+
+    return {
+      rows,
+      totals: {
+        expectedAmount,
+        countedAmount,
+        differenceAmount,
+      },
+    }
+  }, [reconciliationCounted, reconciliationPreview?.rows])
+
   const handleSaveReconciliation = useCallback(async () => {
     if (!accessToken || !selectedDrawerId) return
 
-    if (reconciliationTotals.differenceAmount !== 0 && reconciliationObservations.trim().length === 0) {
+    if (digitalReconciliation.totals.differenceAmount !== 0 && reconciliationObservations.trim().length === 0) {
       toast.error('Debes registrar observaciones cuando exista diferencia.')
       return
     }
@@ -455,11 +473,11 @@ export function CajaPage() {
     }
   }, [
     accessToken,
+    digitalReconciliation.totals.differenceAmount,
     handleUnauthorized,
     loadReconciliationPreview,
     reconciliationCounted,
     reconciliationObservations,
-    reconciliationTotals.differenceAmount,
     selectedDrawerId,
   ])
 
@@ -500,11 +518,6 @@ export function CajaPage() {
 
   const cashDrawers = dashboard?.cashDrawers ?? []
   const cashMovements = dashboard?.cashMovements ?? []
-  const dashboardTotals = dashboard?.dashboardTotals ?? {
-    totalSales: 0,
-    totalInternalMovements: 0,
-    pendingCollections: 0,
-  }
   const branches = dashboard?.options?.branches ?? []
   const activeDrawer = cashDrawers.find((drawer) => drawer.status !== 'CERRADA') ?? cashDrawers[0]
   const hasOpenDrawer = cashDrawers.some((drawer) => drawer.status !== 'CERRADA')
@@ -515,11 +528,34 @@ export function CajaPage() {
     ? cashMovements.filter((movement) => movement.openingId === selectedDrawerId)
     : []
   const canOperateSelected = selectedDrawer?.status === 'ABIERTA'
+  const summaryDrawer = selectedDrawer ?? activeDrawer ?? null
+  const summaryMovements = summaryDrawer
+    ? cashMovements.filter((movement) => movement.openingId === summaryDrawer.id)
+    : []
+  const cashSummaryMovements = summaryMovements.filter(
+    (movement) =>
+      (movement.paymentMethod === 'EFECTIVO' || movement.paymentMethod === 'INTERNO') &&
+      movement.type !== 'CUADRE' &&
+      movement.description !== 'Apertura de caja',
+  )
+  const summaryEntriesAmount = cashSummaryMovements.reduce(
+    (sum, movement) => sum + (movement.amount > 0 ? movement.amount : 0),
+    0,
+  )
+  const summaryExitsAmount = cashSummaryMovements.reduce(
+    (sum, movement) => sum + (movement.amount < 0 ? Math.abs(movement.amount) : 0),
+    0,
+  )
+  const summaryExpectedCashAmount =
+    (summaryDrawer?.openingAmount ?? 0) + summaryEntriesAmount - summaryExitsAmount
+  const latestCashCount = cashCounts?.rows?.[0] ?? null
   const expectedCashAmountForCount =
     reconciliationPreview?.rows.find((row) => row.code === 'EFECTIVO')?.expectedAmount ?? 0
   const watchedCountedCashAmount = cashCountForm.watch('countedCashAmount')
   const watchedCashCountObservations = cashCountForm.watch('observations')
   const cashCountDifferenceAmount = watchedCountedCashAmount - expectedCashAmountForCount
+  const watchedMovementType = createMovementForm.watch('type')
+  const isMovementIngreso = watchedMovementType === 'INGRESO'
   const cashDrawersTotalPages = Math.max(
     1,
     Math.ceil(cashDrawers.length / cashDrawersPageSize),
@@ -551,49 +587,7 @@ export function CajaPage() {
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-foreground">Caja</h1>
-        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
-          Resumen
-          <ChevronDown
-            className={`ml-1 h-4 w-4 transition-transform ${
-              showSummary ? 'rotate-180' : ''
-            }`}
-          />
-        </Button>
       </div>
-
-      {/* KPIs Section (Collapsible on Mobile) */}
-      {showSummary && (
-        <div className="flex flex-wrap gap-3">
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <WalletCards className="h-4 w-4 text-primary" />
-            <div className="flex flex-col">
-              <p className="text-lg font-bold text-foreground">{activeDrawer?.code ?? '-'}</p>
-              <p className="text-xs text-muted-foreground">Caja</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <HandCoins className="h-4 w-4 text-success" />
-            <div className="flex flex-col">
-              <p className="text-lg font-bold text-foreground">{formatCurrency(dashboardTotals.totalSales)}</p>
-              <p className="text-xs text-muted-foreground">Ventas</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <BadgeDollarSign className="h-4 w-4 text-info" />
-            <div className="flex flex-col">
-              <p className="text-lg font-bold text-foreground">{formatCurrency(dashboardTotals.totalInternalMovements)}</p>
-              <p className="text-xs text-muted-foreground">Movimientos</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <CircleDollarSign className="h-4 w-4 text-warning" />
-            <div className="flex flex-col">
-              <p className="text-lg font-bold text-foreground">{formatCurrency(dashboardTotals.pendingCollections)}</p>
-              <p className="text-xs text-muted-foreground">Pendiente</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -787,19 +781,7 @@ export function CajaPage() {
                     setCreateMovementDialogOpen(true)
                   }}
                 >
-                  Registrar ingreso
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    createMovementForm.setValue('openingId', selectedDrawer.id)
-                    createMovementForm.setValue('type', 'EGRESO')
-                    setCreateMovementDialogOpen(true)
-                  }}
-                >
-                  Registrar egreso
+                  Registrar movimiento
                 </Button>
                 <Button
                   type="button"
@@ -823,24 +805,24 @@ export function CajaPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => setDetailTab('movimientos')}
+                  onClick={() => setDetailTab('conciliacion')}
                 >
-                  Ver movimientos
+                  Conciliación
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => setDetailTab('conciliacion')}
+                  onClick={() => setDetailTab('movimientos')}
                 >
-                  Iniciar conciliación
+                  Movimientos
                 </Button>
                 <Button
                   type="button"
                   size="sm"
                   disabled={
                     !reconciliationPreview?.lastSaved ||
-                    (reconciliationTotals.differenceAmount !== 0 &&
+                    (digitalReconciliation.totals.differenceAmount !== 0 &&
                       reconciliationObservations.trim().length === 0)
                   }
                   onClick={() => setCloseConfirmDialogOpen(true)}
@@ -869,66 +851,108 @@ export function CajaPage() {
           </div>
 
           <Tabs value={detailTab} onValueChange={(value) => setDetailTab(value as any)} className="mt-6">
-            <TabsList className="grid w-full grid-cols-2 sm:w-fit sm:grid-cols-5">
+            <TabsList className="grid w-full grid-cols-2 sm:w-fit sm:grid-cols-4">
               <TabsTrigger value="resumen">Resumen</TabsTrigger>
-              <TabsTrigger value="turno">Turno</TabsTrigger>
               <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
               <TabsTrigger value="conciliacion">Conciliación</TabsTrigger>
               <TabsTrigger value="historial">Historial</TabsTrigger>
             </TabsList>
 
             <TabsContent value="resumen" className="space-y-4 pt-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Esperado</p>
-                  <p className="mt-2 text-xl font-bold text-foreground">
-                    {formatCurrency(reconciliationTotals.expectedAmount || selectedDrawer.expectedAmount)}
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Contado</p>
-                  <p className="mt-2 text-xl font-bold text-foreground">
-                    {formatCurrency(reconciliationTotals.countedAmount || selectedDrawer.countedAmount)}
-                  </p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Diferencia</p>
-                  <p className="mt-2 text-xl font-bold text-foreground">
-                    {formatCurrency(reconciliationTotals.differenceAmount || selectedDrawer.differenceAmount)}
-                  </p>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="turno" className="space-y-4 pt-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Sucursal</p>
-                  <p className="mt-1 font-medium text-foreground">{selectedDrawer.branchName}</p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Responsable</p>
-                  <p className="mt-1 font-medium text-foreground">{selectedDrawer.cashierName}</p>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Apertura</p>
-                  <div className="mt-1 space-y-1">
-                    <p className="font-medium text-foreground">
-                      {formatDateTimeDisplay(selectedDrawer.openedAt).date}
-                    </p>
-                    {formatDateTimeDisplay(selectedDrawer.openedAt).time ? (
-                      <p className="text-xs text-muted-foreground">
-                        {formatDateTimeDisplay(selectedDrawer.openedAt).time}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Card className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">Apertura</p>
+                      <p className="mt-2 truncate text-2xl font-semibold text-foreground">
+                        {formatCurrency(summaryDrawer?.openingAmount ?? 0)}
                       </p>
-                    ) : null}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {summaryDrawer?.code ?? '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2">
+                      <HandCoins className="h-4 w-4 text-primary" />
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-2xl border p-4">
-                  <p className="text-xs text-muted-foreground">Fondo inicial</p>
-                  <p className="mt-1 font-medium text-foreground">
-                    {formatCurrency(selectedDrawer.openingAmount)}
-                  </p>
-                </div>
+                </Card>
+
+                <Card className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">Movimientos</p>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm text-muted-foreground">Entradas</p>
+                          <p className="text-sm font-semibold text-emerald-600">
+                            + {formatCurrency(summaryEntriesAmount)}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm text-muted-foreground">Salidas</p>
+                          <p className="text-sm font-semibold text-rose-600">
+                            - {formatCurrency(summaryExitsAmount)}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Incluye efectivo: ventas, ingresos manuales, egresos, retiros y devoluciones.
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2">
+                      <BadgeDollarSign className="h-4 w-4 text-primary" />
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">Caja esperada</p>
+                      <p className="mt-2 truncate text-2xl font-semibold text-foreground">
+                        {formatCurrency(summaryExpectedCashAmount)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Apertura + Entradas - Salidas
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2">
+                      <CircleDollarSign className="h-4 w-4 text-primary" />
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">Arqueo</p>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm text-muted-foreground">Contado</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {latestCashCount
+                              ? formatCurrency(latestCashCount.countedCashAmount)
+                              : 'Pendiente'}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm text-muted-foreground">Diferencia</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {latestCashCount
+                              ? formatCurrency(latestCashCount.differenceCashAmount)
+                              : '--'}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {latestCashCount ? 'Arqueo registrado.' : 'Aún no se realizó arqueo.'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2">
+                      <ClipboardCheck className="h-4 w-4 text-primary" />
+                    </div>
+                  </div>
+                </Card>
               </div>
             </TabsContent>
 
@@ -1016,6 +1040,10 @@ export function CajaPage() {
                 </div>
               ) : reconciliationPreview ? (
                 <>
+                  <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+                    Conciliación de pagos digitales (Yape, Plin, tarjeta, transferencias). El efectivo se controla en el
+                    resumen y el arqueo.
+                  </div>
                   <Card>
                     <CardContent className="p-0">
                       <Table>
@@ -1028,7 +1056,16 @@ export function CajaPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {reconciliationPreview.rows.map((row) => {
+                          {digitalReconciliation.rows.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={4}>
+                                <div className="p-6 text-center text-sm text-muted-foreground">
+                                  No hay medios digitales para conciliar.
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            digitalReconciliation.rows.map((row) => {
                             const countedAmount = reconciliationCounted[row.paymentMethodId] ?? row.countedAmount
                             const difference = countedAmount - row.expectedAmount
                             return (
@@ -1062,7 +1099,8 @@ export function CajaPage() {
                                 </TableCell>
                               </TableRow>
                             )
-                          })}
+                          })
+                          )}
                         </TableBody>
                       </Table>
                     </CardContent>
@@ -1072,29 +1110,29 @@ export function CajaPage() {
                     <div className="rounded-2xl border p-4">
                       <p className="text-xs text-muted-foreground">Total esperado</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency(reconciliationTotals.expectedAmount)}
+                        {formatCurrency(digitalReconciliation.totals.expectedAmount)}
                       </p>
                     </div>
                     <div className="rounded-2xl border p-4">
                       <p className="text-xs text-muted-foreground">Total contado</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency(reconciliationTotals.countedAmount)}
+                        {formatCurrency(digitalReconciliation.totals.countedAmount)}
                       </p>
                     </div>
                     <div className="rounded-2xl border p-4">
                       <p className="text-xs text-muted-foreground">Diferencia</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency(reconciliationTotals.differenceAmount)}
+                        {formatCurrency(digitalReconciliation.totals.differenceAmount)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {reconciliationTotals.differenceAmount === 0
+                        {digitalReconciliation.totals.differenceAmount === 0
                           ? 'Caja conciliada correctamente.'
                           : 'Existen diferencias en el cierre.'}
                       </p>
                     </div>
                   </div>
 
-                  {reconciliationTotals.differenceAmount !== 0 ? (
+                  {digitalReconciliation.totals.differenceAmount !== 0 ? (
                     <div className="space-y-2">
                       <p className="text-xs font-medium text-foreground">Observaciones del cajero</p>
                       <Textarea
@@ -1496,160 +1534,173 @@ export function CajaPage() {
       </Dialog>
 
       {/* Create Cash Movement Dialog */}
-      <Dialog open={createMovementDialogOpen} onOpenChange={setCreateMovementDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Movimiento manual de caja</DialogTitle>
-            <DialogDescription>
-              Registra un ingreso o egreso manual en la caja.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={createMovementForm.handleSubmit(handleCreateMovement)} className="space-y-4">
-            <div className="space-y-2">
-              <label
-                htmlFor="openingId"
-                className="text-xs font-medium text-foreground"
-              >
-                Apertura de caja
-              </label>
-              <Select
-                onValueChange={(value) => createMovementForm.setValue('openingId', value)}
-                value={createMovementForm.getValues('openingId')}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona una apertura de caja" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cashDrawers
-                    .filter((d) => d.status !== 'CERRADA')
-                    .map((drawer) => (
-                      <SelectItem key={drawer.id} value={drawer.id}>
-                        {drawer.code} - {drawer.branchName}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              {createMovementForm.formState.errors.openingId ? (
-                <p className="text-xs text-destructive">
-                  {createMovementForm.formState.errors.openingId.message}
+      <SidePanel
+        open={createMovementDialogOpen}
+        onOpenChange={(open) => {
+          setCreateMovementDialogOpen(open)
+          if (!open) {
+            createMovementForm.reset({
+              ...createMovementForm.getValues(),
+              amount: 0,
+              concept: '',
+              reference: '',
+              observations: '',
+            })
+          }
+        }}
+      >
+        <SidePanelContent className="p-0">
+          <form
+            onSubmit={createMovementForm.handleSubmit(handleCreateMovement)}
+            className="flex h-full flex-col"
+          >
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Registrar movimiento</p>
+                <p className="text-sm text-muted-foreground">
+                  {isMovementIngreso ? 'Ingreso de efectivo en caja.' : 'Egreso de efectivo desde caja.'}
                 </p>
-              ) : null}
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
             </div>
 
-            <div className="space-y-2">
-              <label
-                htmlFor="type"
-                className="text-xs font-medium text-foreground"
-              >
-                Tipo de movimiento
-              </label>
-              <Select
-                onValueChange={(value) => createMovementForm.setValue('type', value as 'INGRESO' | 'EGRESO')}
-                value={createMovementForm.getValues('type')}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="INGRESO">Ingreso</SelectItem>
-                  <SelectItem value="EGRESO">Egreso</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-4">
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs text-muted-foreground">Turno</p>
+                  <p className="mt-1 font-medium text-foreground">{summaryDrawer?.code ?? '—'}</p>
+                  {summaryDrawer?.branchName ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{summaryDrawer.branchName}</p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <p className="text-xs font-medium text-foreground">Tipo</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant={isMovementIngreso ? 'primary' : 'outline'}
+                      onClick={() =>
+                        createMovementForm.setValue('type', 'INGRESO', {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                        })
+                      }
+                      className={isMovementIngreso ? 'bg-emerald-600 hover:bg-emerald-600/90' : undefined}
+                    >
+                      Ingreso
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={!isMovementIngreso ? 'primary' : 'outline'}
+                      onClick={() =>
+                        createMovementForm.setValue('type', 'EGRESO', {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                        })
+                      }
+                      className={!isMovementIngreso ? 'bg-rose-600 hover:bg-rose-600/90' : undefined}
+                    >
+                      Egreso
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label htmlFor="amount" className="text-xs font-medium text-foreground">
+                      Monto
+                    </label>
+                    <Input
+                      id="amount"
+                      type="number"
+                      step="0.01"
+                      {...createMovementForm.register('amount', {
+                        valueAsNumber: true,
+                      })}
+                    />
+                    {createMovementForm.formState.errors.amount ? (
+                      <p className="text-xs text-destructive">
+                        {createMovementForm.formState.errors.amount.message}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="reference" className="text-xs font-medium text-foreground">
+                      Referencia (opcional)
+                    </label>
+                    <Input
+                      id="reference"
+                      placeholder="Número de factura o referencia..."
+                      {...createMovementForm.register('reference')}
+                    />
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2">
+                    <label htmlFor="concept" className="text-xs font-medium text-foreground">
+                      Concepto
+                    </label>
+                    <Input
+                      id="concept"
+                      placeholder={
+                        isMovementIngreso
+                          ? 'Ej: Fondo adicional, ingreso por vuelto...'
+                          : 'Ej: Pago de servicios, retiro, gasto de papelería...'
+                      }
+                      {...createMovementForm.register('concept')}
+                    />
+                    {createMovementForm.formState.errors.concept ? (
+                      <p className="text-xs text-destructive">
+                        {createMovementForm.formState.errors.concept.message}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2 md:col-span-2">
+                    <label htmlFor="observations" className="text-xs font-medium text-foreground">
+                      Observaciones (opcional)
+                    </label>
+                    <Textarea
+                      id="observations"
+                      placeholder="Agrega observaciones si es necesario..."
+                      {...createMovementForm.register('observations')}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <label
-                htmlFor="amount"
-                className="text-xs font-medium text-foreground"
-              >
-                Monto
-              </label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                {...createMovementForm.register('amount', {
-                  valueAsNumber: true,
-                })}
-              />
-              {createMovementForm.formState.errors.amount ? (
-                <p className="text-xs text-destructive">
-                  {createMovementForm.formState.errors.amount.message}
-                </p>
-              ) : null}
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCreateMovementDialogOpen(false)}
+                  disabled={isSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader className="mr-2 h-4 w-4 text-current" />
+                      Guardando...
+                    </>
+                  ) : (
+                    'Registrar movimiento'
+                  )}
+                </Button>
+              </div>
             </div>
-
-            <div className="space-y-2">
-              <label
-                htmlFor="concept"
-                className="text-xs font-medium text-foreground"
-              >
-                Concepto
-              </label>
-              <Input
-                id="concept"
-                placeholder="Ej: Pago de servicios, gasto de papelería..."
-                {...createMovementForm.register('concept')}
-              />
-              {createMovementForm.formState.errors.concept ? (
-                <p className="text-xs text-destructive">
-                  {createMovementForm.formState.errors.concept.message}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <label
-                htmlFor="reference"
-                className="text-xs font-medium text-foreground"
-              >
-                Referencia (opcional)
-              </label>
-              <Input
-                id="reference"
-                placeholder="Número de factura o referencia..."
-                {...createMovementForm.register('reference')}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label
-                htmlFor="observations"
-                className="text-xs font-medium text-foreground"
-              >
-                Observaciones (opcional)
-              </label>
-              <Textarea
-                id="observations"
-                placeholder="Agrega observaciones si es necesario..."
-                {...createMovementForm.register('observations')}
-              />
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setCreateMovementDialogOpen(false)}
-                disabled={isSubmitting}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isSubmitting} size="sm">
-                {isSubmitting ? (
-                  <>
-                    <Loader className="h-4 w-4 text-current mr-2" />
-                    Guardando...
-                  </>
-                ) : (
-                  'Registrar movimiento'
-                )}
-              </Button>
-            </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
     </div>
   )
 }

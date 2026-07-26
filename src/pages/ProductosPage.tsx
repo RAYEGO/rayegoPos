@@ -18,6 +18,7 @@ import {
   Trash2,
   Copy,
   TestTubeDiagonal,
+  X,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -50,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -1368,7 +1370,7 @@ export function ProductosPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog
+      <SidePanel
         open={isCreateDialogOpen}
         onOpenChange={(open) => {
           setIsCreateDialogOpen(open)
@@ -1378,23 +1380,32 @@ export function ProductosPage() {
           }
         }}
       >
-        <DialogContent
-          ref={createDialogContentRef}
-          className={`max-h-[88vh] sm:max-w-2xl ${isPackagingDialogOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
-        >
-          <DialogHeader>
-            <DialogTitle>{editingProduct ? 'Editar producto' : 'Registrar producto'}</DialogTitle>
-            <DialogDescription>
-              {editingProduct ? 'Actualiza el maestro farmacéutico' : 'Alta inicial del maestro farmacéutico'}
-            </DialogDescription>
-          </DialogHeader>
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateProduct)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">
+                  {editingProduct ? 'Editar producto' : 'Registrar producto'}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {editingProduct ? 'Actualiza el maestro farmacéutico' : 'Alta inicial del maestro farmacéutico'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form
-            className="grid gap-4"
-            onSubmit={form.handleSubmit(handleCreateProduct)}
-          >
-            <input type="hidden" {...form.register('modoEmpaque')} />
-            <div className="grid gap-3 md:grid-cols-2">
+            <div
+              ref={createDialogContentRef}
+              className={`flex-1 px-6 py-4 ${isPackagingDialogOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
+            >
+              <div className="grid gap-4">
+                <input type="hidden" {...form.register('modoEmpaque')} />
+                <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium">SKU</label>
                 <Input {...form.register('sku')} placeholder="MED-0001" size={1} />
@@ -1634,35 +1645,38 @@ export function ProductosPage() {
                 )}
               />
             </div>
+              </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setIsCreateDialogOpen(false)
-                  setEditingProduct(null)
-                  form.reset(defaultFormValues)
-                }}
-                disabled={isSubmitting}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isSubmitting} size="sm">
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Guardando...
-                  </>
-                ) : (
-                  'Guardar producto'
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsCreateDialogOpen(false)
+                    setEditingProduct(null)
+                    form.reset(defaultFormValues)
+                  }}
+                  disabled={isSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Guardando...
+                    </>
+                  ) : (
+                    'Guardar producto'
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
       <Dialog open={isPackagingDialogOpen} onOpenChange={setIsPackagingDialogOpen}>
         <DialogContent className="bottom-0 left-0 top-auto h-[92vh] w-full max-w-none translate-x-0 translate-y-0 rounded-t-2xl rounded-b-none p-4 overflow-y-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-auto sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6">

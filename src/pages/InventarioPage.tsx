@@ -15,6 +15,7 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   TriangleAlert,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,14 +26,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
@@ -42,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import {
   Table,
   TableBody,
@@ -1102,17 +1096,35 @@ export function InventarioPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Registrar lote</DialogTitle>
-            <DialogDescription>
-              Ingresa un lote real por producto y almacén con control de reservado y bloqueado.
-            </DialogDescription>
-          </DialogHeader>
+      <SidePanel
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open)
+          if (!open) {
+            createForm.reset(defaultCreateFormValues)
+          }
+        }}
+      >
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={createForm.handleSubmit(handleCreateLot)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Registrar lote</p>
+                <p className="text-sm text-muted-foreground">
+                  Ingresa un lote real por producto y almacén con control de reservado y bloqueado.
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={createForm.handleSubmit(handleCreateLot)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Sucursal</label>
                 <Input value={activeBranchName || 'Sin sucursal'} disabled />
@@ -1267,48 +1279,70 @@ export function InventarioPage() {
                 <FieldError message={createForm.formState.errors.observaciones?.message} />
               </div>
             </div>
+              </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsCreateDialogOpen(false)
-                  createForm.reset(defaultCreateFormValues)
-                }}
-                disabled={isMutating}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isMutating}>
-                {isMutating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <PackagePlus className="h-4 w-4" />
-                    Guardar lote
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsCreateDialogOpen(false)
+                    createForm.reset(defaultCreateFormValues)
+                  }}
+                  disabled={isMutating}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isMutating}>
+                  {isMutating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Guardando...
+                    </>
+                  ) : (
+                    <>
+                      <PackagePlus className="h-4 w-4" />
+                      Guardar lote
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog open={isAdjustDialogOpen} onOpenChange={setIsAdjustDialogOpen}>
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Ajuste operativo de lote</DialogTitle>
-            <DialogDescription>
-              Mueve stock disponible, reservado o bloqueado sin salir del módulo.
-            </DialogDescription>
-          </DialogHeader>
+      <SidePanel
+        open={isAdjustDialogOpen}
+        onOpenChange={(open) => {
+          setIsAdjustDialogOpen(open)
+          if (!open) {
+            adjustForm.reset(defaultAdjustFormValues)
+          }
+        }}
+      >
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={adjustForm.handleSubmit(handleAdjustLot)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Ajuste operativo de lote</p>
+                <p className="text-sm text-muted-foreground">
+                  Mueve stock disponible, reservado o bloqueado sin salir del módulo.
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={adjustForm.handleSubmit(handleAdjustLot)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium">Lote</label>
                 <Controller
@@ -1415,48 +1449,72 @@ export function InventarioPage() {
                 <FieldError message={adjustForm.formState.errors.observaciones?.message} />
               </div>
             </div>
+              </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsAdjustDialogOpen(false)
-                  adjustForm.reset(defaultAdjustFormValues)
-                }}
-                disabled={isMutating}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isMutating}>
-                {isMutating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Registrando...
-                  </>
-                ) : (
-                  <>
-                    <SlidersHorizontal className="h-4 w-4" />
-                    Aplicar ajuste
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsAdjustDialogOpen(false)
+                    adjustForm.reset(defaultAdjustFormValues)
+                  }}
+                  disabled={isMutating}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isMutating}>
+                  {isMutating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Registrando...
+                    </>
+                  ) : (
+                    <>
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Aplicar ajuste
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
 
-      <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
-        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Transferir stock entre sucursales</DialogTitle>
-            <DialogDescription>
-              Mueve stock disponible del lote y conserva la trazabilidad del mismo número de lote.
-            </DialogDescription>
-          </DialogHeader>
+      <SidePanel
+        open={isTransferDialogOpen}
+        onOpenChange={(open) => {
+          setIsTransferDialogOpen(open)
+          if (!open) {
+            transferForm.reset(defaultTransferFormValues)
+          }
+        }}
+      >
+        <SidePanelContent className="p-0">
+          <form className="flex h-full flex-col" onSubmit={transferForm.handleSubmit(handleTransferLot)}>
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">
+                  Transferir stock entre sucursales
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Mueve stock disponible del lote y conserva la trazabilidad del mismo número de lote.
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
 
-          <form className="grid gap-6" onSubmit={transferForm.handleSubmit(handleTransferLot)}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium">Lote origen</label>
                 <Controller
@@ -1563,36 +1621,40 @@ export function InventarioPage() {
                 <FieldError message={transferForm.formState.errors.observaciones?.message} />
               </div>
             </div>
+              </div>
+            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsTransferDialogOpen(false)
-                  transferForm.reset(defaultTransferFormValues)
-                }}
-                disabled={isMutating}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isMutating}>
-                {isMutating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Registrando...
-                  </>
-                ) : (
-                  <>
-                    <ArrowRightLeft className="h-4 w-4" />
-                    Confirmar transferencia
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsTransferDialogOpen(false)
+                    transferForm.reset(defaultTransferFormValues)
+                  }}
+                  disabled={isMutating}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isMutating}>
+                  {isMutating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Registrando...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft className="h-4 w-4" />
+                      Confirmar transferencia
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SidePanelContent>
+      </SidePanel>
     </div>
   )
 }
