@@ -50,7 +50,6 @@ import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } f
 import { toast } from 'sonner'
 
 const saleCheckoutSchema = z.object({
-  sucursalId: z.string().uuid({ message: 'Selecciona una sucursal.' }),
   clienteId: z.string().optional(),
   tipoComprobante: z.enum(['TICKET', 'BOLETA', 'FACTURA']),
   observaciones: z.string().max(255, 'Máximo 255 caracteres.').optional(),
@@ -90,7 +89,6 @@ type LocalCartItem = {
 }
 
 const defaultCheckoutFormValues: SaleCheckoutFormValues = {
-  sucursalId: '',
   clienteId: 'SHOWROOM',
   tipoComprobante: 'TICKET',
   observaciones: '',
@@ -514,16 +512,12 @@ export function VentasPage() {
       return
     }
 
-    const hasBranch = Boolean(checkoutForm.getValues('sucursalId'))
     const hasPayments = checkoutForm.getValues('payments')?.length > 0
 
-    if (!hasBranch || !hasPayments) {
-      const defaultBranchId =
-        branchFilter !== 'TODAS' ? branchFilter : (options.branches[0]?.id ?? '')
+    if (!hasPayments) {
       const defaultPaymentMethodId = options.paymentMethods[0]?.id ?? ''
 
       checkoutForm.reset({
-        sucursalId: defaultBranchId,
         clienteId: 'SHOWROOM',
         tipoComprobante: 'TICKET',
         observaciones: '',
@@ -576,7 +570,6 @@ export function VentasPage() {
     }
 
     const payload: CreateSalePayload = {
-      sucursalId: values.sucursalId,
       clienteId: values.clienteId && values.clienteId !== 'SHOWROOM' ? values.clienteId : undefined,
       tipoComprobante: values.tipoComprobante,
       observaciones: values.observaciones,
@@ -1201,29 +1194,6 @@ export function VentasPage() {
                   </p>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Sucursal</label>
-                      <Controller
-                        control={checkoutForm.control}
-                        name="sucursalId"
-                        render={({ field }) => (
-                          <Select value={field.value || undefined} onValueChange={field.onChange}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecciona sucursal" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {options.branches.map((branch) => (
-                                <SelectItem key={branch.id} value={branch.id}>
-                                  {branch.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      />
-                      <FieldError message={checkoutForm.formState.errors.sucursalId?.message} />
-                    </div>
-
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Cliente</label>
                       <Controller

@@ -88,7 +88,7 @@ export type SalesDashboardResponse = {
 }
 
 export type CreateSalePayload = {
-  sucursalId: string
+  sucursalId?: string
   clienteId?: string
   tipoComprobante?: 'TICKET' | 'BOLETA' | 'FACTURA'
   observaciones?: string
