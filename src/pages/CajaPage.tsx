@@ -73,6 +73,30 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
+function formatDateTimeDisplay(value: string | null | undefined) {
+  if (!value) {
+    return { date: '—', time: '' }
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return { date: value, time: '' }
+  }
+
+  return {
+    date: new Intl.DateTimeFormat('es-PE', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date),
+    time: new Intl.DateTimeFormat('es-PE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date),
+  }
+}
+
 function getDrawerStatusVariant(status: CashDrawerStatus) {
   if (status === 'ABIERTA') return 'success'
   if (status === 'EN_CIERRE') return 'warning'
@@ -120,6 +144,8 @@ export function CajaPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(true)
+  const [cashDrawersPage, setCashDrawersPage] = useState(1)
+  const cashDrawersPageSize = 4
 
   // Dialog state
   const [openDrawerDialogOpen, setOpenDrawerDialogOpen] = useState(false)
@@ -494,6 +520,16 @@ export function CajaPage() {
   const watchedCountedCashAmount = cashCountForm.watch('countedCashAmount')
   const watchedCashCountObservations = cashCountForm.watch('observations')
   const cashCountDifferenceAmount = watchedCountedCashAmount - expectedCashAmountForCount
+  const cashDrawersTotalPages = Math.max(
+    1,
+    Math.ceil(cashDrawers.length / cashDrawersPageSize),
+  )
+  const safeCashDrawersPage = Math.min(cashDrawersPage, cashDrawersTotalPages)
+  const cashDrawersPageStart = (safeCashDrawersPage - 1) * cashDrawersPageSize
+  const visibleCashDrawers = cashDrawers.slice(
+    cashDrawersPageStart,
+    cashDrawersPageStart + cashDrawersPageSize,
+  )
 
   if (isLoading) {
     return (
@@ -574,7 +610,7 @@ export function CajaPage() {
         </div>
 
         <div className="md:hidden space-y-3">
-          {cashDrawers.map((drawer) => (
+          {visibleCashDrawers.map((drawer) => (
             <button
               key={drawer.id}
               type="button"
@@ -618,7 +654,7 @@ export function CajaPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {cashDrawers.map((drawer) => (
+                  {visibleCashDrawers.map((drawer) => (
                     <TableRow
                       key={drawer.id}
                       className="cursor-pointer"
@@ -639,7 +675,14 @@ export function CajaPage() {
                         {drawer.cashierName}
                       </TableCell>
                       <TableCell className="hidden md:table-cell text-muted-foreground">
-                        {drawer.openedAt}
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-foreground">
+                            {formatDateTimeDisplay(drawer.openedAt).date}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDateTimeDisplay(drawer.openedAt).time}
+                          </p>
+                        </div>
                       </TableCell>
                       <TableCell className="font-medium text-foreground">
                         {formatCurrency(drawer.expectedAmount)}
@@ -664,6 +707,43 @@ export function CajaPage() {
             </CardContent>
           </Card>
         </div>
+
+        {cashDrawers.length > cashDrawersPageSize ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/20 px-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              Mostrando {cashDrawersPageStart + 1}-
+              {Math.min(cashDrawersPageStart + cashDrawersPageSize, cashDrawers.length)} de{' '}
+              {cashDrawers.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={safeCashDrawersPage <= 1}
+                onClick={() => setCashDrawersPage((current) => Math.max(1, current - 1))}
+              >
+                Anterior
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Página {safeCashDrawersPage} de {cashDrawersTotalPages}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={safeCashDrawersPage >= cashDrawersTotalPages}
+                onClick={() =>
+                  setCashDrawersPage((current) =>
+                    Math.min(cashDrawersTotalPages, current + 1),
+                  )
+                }
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {selectedDrawer ? (
@@ -832,7 +912,16 @@ export function CajaPage() {
                 </div>
                 <div className="rounded-2xl border p-4">
                   <p className="text-xs text-muted-foreground">Apertura</p>
-                  <p className="mt-1 font-medium text-foreground">{selectedDrawer.openedAt ?? '—'}</p>
+                  <div className="mt-1 space-y-1">
+                    <p className="font-medium text-foreground">
+                      {formatDateTimeDisplay(selectedDrawer.openedAt).date}
+                    </p>
+                    {formatDateTimeDisplay(selectedDrawer.openedAt).time ? (
+                      <p className="text-xs text-muted-foreground">
+                        {formatDateTimeDisplay(selectedDrawer.openedAt).time}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="rounded-2xl border p-4">
                   <p className="text-xs text-muted-foreground">Fondo inicial</p>

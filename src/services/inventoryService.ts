@@ -10,7 +10,6 @@ import type {
 type InventoryDashboardFilters = {
   search?: string
   status?: InventoryLotStatus
-  branchId?: string
   productId?: string
 }
 
@@ -23,10 +22,6 @@ function buildQuery(filters: InventoryDashboardFilters) {
 
   if (filters.status) {
     searchParams.set('status', filters.status)
-  }
-
-  if (filters.branchId) {
-    searchParams.set('branchId', filters.branchId)
   }
 
   if (filters.productId) {

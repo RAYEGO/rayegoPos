@@ -69,7 +69,6 @@ import { toast } from 'sonner'
 
 const createLotSchema = z
   .object({
-    sucursalId: z.string().uuid({ message: 'Selecciona una sucursal.' }),
     productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
     proveedorId: z.string().optional(),
     numeroLote: z.string().min(2, 'Ingresa un número de lote válido.').max(80),
@@ -132,7 +131,6 @@ type TransferLotFormValues = z.infer<typeof transferLotSchema>
 type InventoryLotView = InventoryDashboardResponse['lots'][number]
 
 const defaultCreateFormValues: CreateLotFormValues = {
-  sucursalId: '',
   productoId: '',
   proveedorId: '',
   numeroLote: '',
@@ -322,13 +320,14 @@ function FieldError({ message }: { message?: string }) {
 export function InventarioPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const activeBranchId = session?.user.branchId ?? ''
+  const activeBranchName = session?.user.branchName ?? ''
   const [searchParams] = useSearchParams()
   const initialProductId = searchParams.get('productId')
   const initialTab = searchParams.get('tab')
   const initialAction = searchParams.get('action')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | InventoryLotStatus>('TODOS')
-  const [branchFilter, setBranchFilter] = useState('TODAS')
   const [productFilter, setProductFilter] = useState(() => initialProductId ?? 'TODOS')
   const [activeTab, setActiveTab] = useState<'lotes' | 'movimientos' | 'alertas'>(() => {
     if (initialTab === 'movimientos' || initialTab === 'alertas' || initialTab === 'lotes') {
@@ -399,12 +398,10 @@ export function InventarioPage() {
   )
 
   const createWarehouseSuggestions = useMemo(() => {
-    const selectedBranchId = createForm.watch('sucursalId')
-
     return dashboard.options.warehouses.filter(
-      (warehouse) => warehouse.branchId === selectedBranchId,
+      (warehouse) => warehouse.branchId === activeBranchId,
     )
-  }, [createForm, dashboard.options.warehouses])
+  }, [activeBranchId, dashboard.options.warehouses])
 
   const transferWarehouseSuggestions = useMemo(() => {
     const selectedBranchId = transferForm.watch('destinationBranchId')
@@ -443,7 +440,6 @@ export function InventarioPage() {
       const response = await inventoryService.getDashboard(accessToken, {
         search,
         status: statusFilter === 'TODOS' ? undefined : statusFilter,
-        branchId: branchFilter === 'TODAS' ? undefined : branchFilter,
         productId: productFilter === 'TODOS' ? undefined : productFilter,
       })
 
@@ -461,7 +457,6 @@ export function InventarioPage() {
     }
   }, [
     accessToken,
-    branchFilter,
     handleUnauthorized,
     productFilter,
     search,
@@ -512,7 +507,6 @@ export function InventarioPage() {
     }
 
     const payload: CreateInventoryLotPayload = {
-      sucursalId: values.sucursalId,
       productoId: values.productoId,
       proveedorId: values.proveedorId || undefined,
       numeroLote: values.numeroLote.trim(),
@@ -657,33 +651,6 @@ export function InventarioPage() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card className="hidden xl:block">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Vista por sucursal</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {dashboard.branchSummary.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-4 text-xs text-muted-foreground">
-                Aún no hay sucursales con lotes cargados.
-              </div>
-            ) : (
-              dashboard.branchSummary.map((branch) => (
-                <div key={branch.id} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-foreground">{branch.name}</p>
-                    <Badge variant="outline" className="text-xs">{branch.lotCount} lotes</Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {branch.skuCount} SKU · {formatQuantity(branch.availableUnits)} disp.
-                  </p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList className="grid w-full grid-cols-3 lg:w-fit">
           <TabsTrigger value="lotes">Stock por lotes</TabsTrigger>
@@ -751,7 +718,7 @@ export function InventarioPage() {
                 </div>
               ) : null}
 
-              <div className="grid gap-4 xl:grid-cols-[1.1fr_0.45fr_0.55fr_0.7fr]">
+              <div className="grid gap-4 xl:grid-cols-[1.1fr_0.45fr_0.7fr]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -777,20 +744,6 @@ export function InventarioPage() {
                     <SelectItem value="BLOQUEADO">Bloqueado</SelectItem>
                     <SelectItem value="VENCIDO">Vencido</SelectItem>
                     <SelectItem value="AGOTADO">Agotado</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={branchFilter} onValueChange={setBranchFilter}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sucursal" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TODAS">Todas las sucursales</SelectItem>
-                    {dashboard.options.branches.map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name}
-                      </SelectItem>
-                    ))}
                   </SelectContent>
                 </Select>
 
@@ -1095,7 +1048,7 @@ export function InventarioPage() {
           <DialogHeader>
             <DialogTitle>Registrar lote</DialogTitle>
             <DialogDescription>
-              Ingresa un lote real por producto, sucursal y almacén con control de reservado y bloqueado.
+              Ingresa un lote real por producto y almacén con control de reservado y bloqueado.
             </DialogDescription>
           </DialogHeader>
 
@@ -1103,25 +1056,7 @@ export function InventarioPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Sucursal</label>
-                <Controller
-                  control={createForm.control}
-                  name="sucursalId"
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona sucursal" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {dashboard.options.branches.map((branch) => (
-                          <SelectItem key={branch.id} value={branch.id}>
-                            {branch.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={createForm.formState.errors.sucursalId?.message} />
+                <Input value={activeBranchName || 'Sin sucursal'} disabled />
               </div>
 
               <div className="space-y-2">
@@ -1328,7 +1263,7 @@ export function InventarioPage() {
                       <SelectContent>
                         {dashboard.lots.map((lot) => (
                           <SelectItem key={lot.id} value={lot.id}>
-                            {lot.productName} · {lot.lotCode} · {lot.branchName}
+                            {lot.productName} · {lot.lotCode}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1476,7 +1411,7 @@ export function InventarioPage() {
                       <SelectContent>
                         {dashboard.lots.map((lot) => (
                           <SelectItem key={lot.id} value={lot.id}>
-                            {lot.productName} · {lot.lotCode} · {lot.branchName}
+                            {lot.productName} · {lot.lotCode}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1493,9 +1428,13 @@ export function InventarioPage() {
                     : 'Selecciona un lote para ver el resumen'}
                 </p>
                 <p className="mt-2 text-small text-muted-foreground">
-                  Origen {selectedTransferLot?.branchName ?? 'Sin sucursal'} · Disponible{' '}
-                  {formatQuantity(selectedTransferLot?.availableUnits ?? 0)}
+                  Disponible {formatQuantity(selectedTransferLot?.availableUnits ?? 0)}
                 </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Sucursal origen</label>
+                <Input value={activeBranchName || 'Sin sucursal'} disabled />
               </div>
 
               <div className="space-y-2">

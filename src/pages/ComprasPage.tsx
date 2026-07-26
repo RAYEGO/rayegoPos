@@ -219,6 +219,14 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value))
 }
 
+function parseDateValue(value: string | null | undefined) {
+  if (!value) return 0
+
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  const time = date.getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
 function getApiErrorMessage(error: unknown) {
   if (error instanceof ApiError || error instanceof ApiNetworkError) {
     return error.message
@@ -263,6 +271,8 @@ export function ComprasPage() {
   const [error, setError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [ordersPage, setOrdersPage] = useState(1)
+  const ordersPageSize = 4
   const [isReceiveDialogOpen, setIsReceiveDialogOpen] = useState(false)
   const [isReceiving, setIsReceiving] = useState(false)
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null)
@@ -359,6 +369,10 @@ export function ComprasPage() {
     void loadDashboard()
   }, [loadDashboard])
 
+  useEffect(() => {
+    setOrdersPage(1)
+  }, [branchFilter, search, statusFilter])
+
   const purchaseMetrics = {
     totalOrders: dashboard?.summary?.totalOrders ?? 0,
     activeOrders: dashboard?.summary?.activeOrders ?? 0,
@@ -373,6 +387,13 @@ export function ComprasPage() {
   }
 
   const orders = dashboard?.orders ?? []
+  const sortedOrders = useMemo(() => {
+    return [...orders].sort((a, b) => parseDateValue(b.createdAt) - parseDateValue(a.createdAt))
+  }, [orders])
+  const ordersTotalPages = Math.max(1, Math.ceil(sortedOrders.length / ordersPageSize))
+  const safeOrdersPage = Math.min(ordersPage, ordersTotalPages)
+  const ordersPageStart = (safeOrdersPage - 1) * ordersPageSize
+  const visibleOrders = sortedOrders.slice(ordersPageStart, ordersPageStart + ordersPageSize)
   const receipts = dashboard?.receipts ?? []
   const suppliers = dashboard?.supplierSummary ?? []
   const payments = dashboard?.payments ?? []
@@ -995,140 +1016,177 @@ export function ComprasPage() {
                   </p>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Orden</TableHead>
-                      <TableHead>Proveedor</TableHead>
-                      <TableHead>Sucursal</TableHead>
-                      <TableHead>Creación</TableHead>
-                      <TableHead>Entrega esperada</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead className="text-right">Acción</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orders.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{order.code}</p>
-                            <p className="text-small text-muted-foreground">
-                              {order.itemCount} items · {order.buyerName}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{order.supplierName}</p>
-                            <p className="text-small text-muted-foreground">
-                              RUC/DOC {order.supplierDocument}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {order.branchName}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDate(order.createdAt)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDate(order.expectedAt)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">
-                              {formatCurrency(order.totalAmount)}
-                            </p>
-                            {order.returnedAmount > 0 ? (
-                              <p className="text-small text-amber-700">
-                                devuelto {formatCurrency(order.returnedAmount)}
-                              </p>
-                            ) : null}
-                            <p className="text-small text-muted-foreground">
-                              neto {formatCurrency(order.netAmount)}
-                            </p>
-                            <p className="text-small text-emerald-700">
-                              pagado {formatCurrency(order.paidAmount)}
-                            </p>
-                            <p className="text-small text-muted-foreground">
-                              saldo ajustado {formatCurrency(order.adjustedPendingAmount)}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Badge variant={getOrderStatusVariant(order.status)}>
-                              {order.status}
-                            </Badge>
-                            {receiptGroupsByOrder[order.id]?.pendingLines ? (
-                              <p className="text-small text-muted-foreground">
-                                {receiptGroupsByOrder[order.id].pendingLines} líneas pendientes
-                              </p>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {receiptGroupsByOrder[order.id]?.pendingLines > 0 &&
-                          order.status !== 'BORRADOR' &&
-                          order.status !== 'ANULADA' ? (
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openOrderSummaryDialog(order.id)}
-                              >
-                                Ver detalle
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openPaymentDialog(order)}
-                                disabled={order.adjustedPendingAmount <= 0}
-                              >
-                                Registrar pago
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openOrderReceiveDialog(order.id)}
-                              >
-                                Cerrar recepción
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openPaymentDialog(order)}
-                                disabled={order.adjustedPendingAmount <= 0}
-                              >
-                                {order.adjustedPendingAmount > 0 ? 'Registrar pago' : 'Sin saldo'}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openOrderSummaryDialog(order.id)}
-                              >
-                                {order.status === 'PAGADA' ? 'Ver cierre' : 'Ver detalle'}
-                              </Button>
-                              <span className="self-center text-small text-muted-foreground">
-                                {order.status === 'PAGADA' ? 'Finalizada' : 'Sin pendientes'}
-                              </span>
-                            </div>
-                          )}
-                        </TableCell>
+                <div className="space-y-3">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Orden</TableHead>
+                        <TableHead>Proveedor</TableHead>
+                        <TableHead>Sucursal</TableHead>
+                        <TableHead>Creación</TableHead>
+                        <TableHead>Entrega esperada</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Acción</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {visibleOrders.map((order) => (
+                        <TableRow key={order.id}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{order.code}</p>
+                              <p className="text-small text-muted-foreground">
+                                {order.itemCount} items · {order.buyerName}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{order.supplierName}</p>
+                              <p className="text-small text-muted-foreground">
+                                RUC/DOC {order.supplierDocument}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {order.branchName}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatDate(order.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatDate(order.expectedAt)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">
+                                {formatCurrency(order.totalAmount)}
+                              </p>
+                              {order.returnedAmount > 0 ? (
+                                <p className="text-small text-amber-700">
+                                  devuelto {formatCurrency(order.returnedAmount)}
+                                </p>
+                              ) : null}
+                              <p className="text-small text-muted-foreground">
+                                neto {formatCurrency(order.netAmount)}
+                              </p>
+                              <p className="text-small text-emerald-700">
+                                pagado {formatCurrency(order.paidAmount)}
+                              </p>
+                              <p className="text-small text-muted-foreground">
+                                saldo ajustado {formatCurrency(order.adjustedPendingAmount)}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Badge variant={getOrderStatusVariant(order.status)}>
+                                {order.status}
+                              </Badge>
+                              {receiptGroupsByOrder[order.id]?.pendingLines ? (
+                                <p className="text-small text-muted-foreground">
+                                  {receiptGroupsByOrder[order.id].pendingLines} líneas pendientes
+                                </p>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {receiptGroupsByOrder[order.id]?.pendingLines > 0 &&
+                            order.status !== 'BORRADOR' &&
+                            order.status !== 'ANULADA' ? (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openOrderSummaryDialog(order.id)}
+                                >
+                                  Ver detalle
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openPaymentDialog(order)}
+                                  disabled={order.adjustedPendingAmount <= 0}
+                                >
+                                  Registrar pago
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openOrderReceiveDialog(order.id)}
+                                >
+                                  Cerrar recepción
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openPaymentDialog(order)}
+                                  disabled={order.adjustedPendingAmount <= 0}
+                                >
+                                  {order.adjustedPendingAmount > 0
+                                    ? 'Registrar pago'
+                                    : 'Sin saldo'}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openOrderSummaryDialog(order.id)}
+                                >
+                                  {order.status === 'PAGADA' ? 'Ver cierre' : 'Ver detalle'}
+                                </Button>
+                                <span className="self-center text-small text-muted-foreground">
+                                  {order.status === 'PAGADA' ? 'Finalizada' : 'Sin pendientes'}
+                                </span>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-small text-muted-foreground">
+                      Mostrando {ordersPageStart + 1}-
+                      {Math.min(ordersPageStart + ordersPageSize, sortedOrders.length)} de{' '}
+                      {sortedOrders.length}
+                    </p>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setOrdersPage((current) => Math.max(1, current - 1))}
+                        disabled={safeOrdersPage <= 1}
+                      >
+                        Anterior
+                      </Button>
+                      <span className="text-small text-muted-foreground">
+                        Página {safeOrdersPage} de {ordersTotalPages}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setOrdersPage((current) => Math.min(ordersTotalPages, current + 1))
+                        }
+                        disabled={safeOrdersPage >= ordersTotalPages}
+                      >
+                        Siguiente
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>

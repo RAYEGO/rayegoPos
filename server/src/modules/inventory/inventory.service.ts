@@ -1042,7 +1042,7 @@ export async function adjustInventoryLot(
   payload: AdjustInventoryLotPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
   const quantity = Number(payload.quantity)
 
   if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
@@ -1051,6 +1051,12 @@ export async function adjustInventoryLot(
 
   const result = await prisma.$transaction(async (tx) => {
     const lot = await getLotForOperation(tx, payload.lotId)
+    if (lot.sucursalId !== branchId) {
+      throw createHttpError(
+        403,
+        'No tienes permisos para ajustar lotes de otra sucursal.',
+      )
+    }
     const currentAvailable = decimalToNumber(lot.stockDisponible)
     const currentReserved = decimalToNumber(lot.stockReservado)
     const currentBlocked = decimalToNumber(lot.stockBloqueado)
@@ -1202,7 +1208,7 @@ export async function transferInventoryLot(
   payload: TransferInventoryLotPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
   const quantity = Number(payload.quantity)
 
   if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
@@ -1211,6 +1217,12 @@ export async function transferInventoryLot(
 
   const result = await prisma.$transaction(async (tx) => {
     const sourceLot = await getLotForOperation(tx, payload.lotId)
+    if (sourceLot.sucursalId !== branchId) {
+      throw createHttpError(
+        403,
+        'No tienes permisos para transferir lotes de otra sucursal.',
+      )
+    }
     const sourceAvailable = decimalToNumber(sourceLot.stockDisponible)
 
     if (payload.destinationBranchId === sourceLot.sucursalId) {

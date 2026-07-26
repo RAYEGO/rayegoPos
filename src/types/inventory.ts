@@ -114,7 +114,7 @@ export type InventoryDashboardResponse = {
 }
 
 export type CreateInventoryLotPayload = {
-  sucursalId: string
+  sucursalId?: string
   productoId: string
   proveedorId?: string
   numeroLote: string
