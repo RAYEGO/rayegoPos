@@ -1,18 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
-  Users,
-  ChevronDown,
   MoreVertical,
   Edit,
   Plus,
   Search,
   ShieldAlert,
   Trash2,
-  PhoneCall,
-  UserRoundSearch,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -78,6 +74,8 @@ const customerFormSchema = z
     email: optionalEmailSchema,
     telefono: z.string().max(30).optional(),
     direccion: z.string().max(255).optional(),
+    permitirCredito: z.boolean(),
+    limiteCredito: z.number().min(0),
     ubigeo: z.string().max(6).optional(),
     fechaNacimiento: z.string().optional(),
     observaciones: z.string().max(255).optional(),
@@ -131,10 +129,20 @@ const defaultFormValues: CustomerFormValues = {
   email: '',
   telefono: '',
   direccion: '',
+  permitirCredito: false,
+  limiteCredito: 0,
   ubigeo: '',
   fechaNacimiento: '',
   observaciones: '',
   activo: true,
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('es-PE', {
+    style: 'currency',
+    currency: 'PEN',
+    minimumFractionDigits: 2,
+  }).format(value)
 }
 
 function getApiErrorMessage(error: unknown) {
@@ -184,7 +192,6 @@ export function ClientesPage() {
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'todos' | CustomerStatusFilter>('todos')
-  const [showSummary, setShowSummary] = useState(true)
   const [dashboard, setDashboard] = useState<CustomersDashboardResponse>(defaultDashboard)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -201,16 +208,7 @@ export function ClientesPage() {
   })
 
   const formTipoPersona = form.watch('tipoPersona')
-
-  const customerMetrics = useMemo(
-    () => ({
-      total: dashboard.summary.totalCustomers,
-      active: dashboard.summary.activeCustomers,
-      withDocument: dashboard.summary.withDocument,
-      withPhone: dashboard.summary.withPhone,
-    }),
-    [dashboard],
-  )
+  const formPermitirCredito = form.watch('permitirCredito')
 
   const handleUnauthorized = useCallback(async () => {
     toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
@@ -271,6 +269,8 @@ export function ClientesPage() {
       email: customer.email ?? '',
       telefono: customer.telefono ?? '',
       direccion: customer.direccion ?? '',
+      permitirCredito: false,
+      limiteCredito: 0,
       ubigeo: customer.ubigeo ?? '',
       fechaNacimiento: customer.fechaNacimiento ? customer.fechaNacimiento.slice(0, 10) : '',
       observaciones: customer.observaciones ?? '',
@@ -374,48 +374,7 @@ export function ClientesPage() {
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-foreground">Clientes</h1>
-        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
-          Resumen
-          <ChevronDown
-            className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`}
-          />
-        </Button>
       </div>
-
-      {showSummary && (
-        <div className="flex flex-wrap gap-3">
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <Users className="h-4 w-4 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{customerMetrics.total}</span>
-              <span className="text-xs text-muted-foreground">Total</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <UserRoundSearch className="h-4 w-4 text-info" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{customerMetrics.active}</span>
-              <span className="text-xs text-muted-foreground">Activos</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <ShieldAlert className="h-4 w-4 text-warning" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{customerMetrics.withDocument}</span>
-              <span className="text-xs text-muted-foreground">Con documento</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <PhoneCall className="h-4 w-4 text-primary" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">
-                {customerMetrics.withPhone}
-              </span>
-              <span className="text-xs text-muted-foreground">Con teléfono</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       <Tabs defaultValue="padron" className="w-full">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -521,15 +480,25 @@ export function ClientesPage() {
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{customer.tipoPersona}</Badge>
                       <Badge variant={getCustomerStatusVariant(customer.activo)}>
                         {customer.activo ? 'ACTIVO' : 'INACTIVO'}
                       </Badge>
                     </div>
 
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {customer.telefono || 'Sin teléfono'} · {customer.email || 'Sin correo'}
-                    </p>
+                    <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-between gap-2">
+                        <span>Teléfono</span>
+                        <span className="text-foreground/80">{customer.telefono || '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span>Última compra</span>
+                        <span className="text-foreground/80">Nunca</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span>Saldo pendiente</span>
+                        <span className="font-medium text-foreground">{formatCurrency(0)}</span>
+                      </div>
+                    </div>
                   </Card>
                 ))}
               </div>
@@ -543,7 +512,8 @@ export function ClientesPage() {
                           <TableHead>Cliente</TableHead>
                           <TableHead className="hidden lg:table-cell">Documento</TableHead>
                           <TableHead className="hidden md:table-cell">Teléfono</TableHead>
-                          <TableHead className="hidden lg:table-cell">Correo</TableHead>
+                          <TableHead className="hidden lg:table-cell">Última compra</TableHead>
+                          <TableHead className="hidden lg:table-cell">Saldo pendiente</TableHead>
                           <TableHead>Estado</TableHead>
                           <TableHead className="w-[80px] text-right">Acciones</TableHead>
                         </TableRow>
@@ -570,7 +540,10 @@ export function ClientesPage() {
                               {customer.telefono || '—'}
                             </TableCell>
                             <TableCell className="hidden lg:table-cell text-muted-foreground">
-                              {customer.email || '—'}
+                              Nunca
+                            </TableCell>
+                            <TableCell className="hidden lg:table-cell text-muted-foreground">
+                              {formatCurrency(0)}
                             </TableCell>
                             <TableCell>
                               <Badge variant={getCustomerStatusVariant(customer.activo)}>
@@ -661,139 +634,217 @@ export function ClientesPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="grid gap-6">
-                <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Tipo de persona</label>
-                <Controller
-                  control={form.control}
-                  name="tipoPersona"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona un tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {dashboard.options.tiposPersona.map((item) => (
-                          <SelectItem key={item} value={item}>
-                            {item}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={form.formState.errors.tipoPersona?.message} />
-              </div>
+              <Tabs defaultValue="perfil" className="w-full">
+                <TabsList>
+                  <TabsTrigger value="perfil">Perfil</TabsTrigger>
+                  <TabsTrigger value="compras">Compras</TabsTrigger>
+                  <TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
+                </TabsList>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Tipo de documento</label>
-                <Controller
-                  control={form.control}
-                  name="tipoDocumento"
-                  render={({ field }) => (
-                    <Select value={field.value || ''} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Opcional" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">Sin documento</SelectItem>
-                        {dashboard.options.tiposDocumento.map((item) => (
-                          <SelectItem key={item} value={item}>
-                            {item}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={form.formState.errors.tipoDocumento?.message} />
-              </div>
+                <TabsContent value="perfil" className="space-y-4 pt-4">
+                  <Card className="p-4">
+                    <p className="font-medium text-foreground">Información personal</p>
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Tipo de persona</label>
+                        <Controller
+                          control={form.control}
+                          name="tipoPersona"
+                          render={({ field }) => (
+                            <Select value={field.value} onValueChange={field.onChange}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecciona un tipo" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {dashboard.options.tiposPersona.map((item) => (
+                                  <SelectItem key={item} value={item}>
+                                    {item}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                        <FieldError message={form.formState.errors.tipoPersona?.message} />
+                      </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Número de documento</label>
-                <Input {...form.register('numeroDocumento')} placeholder="DNI / RUC (opcional)" />
-                <FieldError message={form.formState.errors.numeroDocumento?.message} />
-              </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Tipo de documento</label>
+                        <Controller
+                          control={form.control}
+                          name="tipoDocumento"
+                          render={({ field }) => (
+                            <Select value={field.value || ''} onValueChange={field.onChange}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Opcional" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="">Sin documento</SelectItem>
+                                {dashboard.options.tiposDocumento.map((item) => (
+                                  <SelectItem key={item} value={item}>
+                                    {item}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                        <FieldError message={form.formState.errors.tipoDocumento?.message} />
+                      </div>
 
-              {formTipoPersona === 'JURIDICA' ? (
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-sm font-medium">Razón social</label>
-                  <Input {...form.register('razonSocial')} placeholder="Empresa SAC" />
-                  <FieldError message={form.formState.errors.razonSocial?.message} />
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Nombres</label>
-                    <Input {...form.register('nombres')} placeholder="Juan" />
-                    <FieldError message={form.formState.errors.nombres?.message} />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Apellidos</label>
-                    <Input {...form.register('apellidos')} placeholder="Pérez" />
-                    <FieldError message={form.formState.errors.apellidos?.message} />
-                  </div>
-                </>
-              )}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Número de documento</label>
+                        <Input
+                          {...form.register('numeroDocumento')}
+                          placeholder="DNI / RUC (opcional)"
+                        />
+                        <FieldError message={form.formState.errors.numeroDocumento?.message} />
+                      </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Teléfono</label>
-                <Input {...form.register('telefono')} placeholder="987654321" />
-                <FieldError message={form.formState.errors.telefono?.message} />
-              </div>
+                      {formTipoPersona === 'JURIDICA' ? (
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-sm font-medium">Razón social</label>
+                          <Input {...form.register('razonSocial')} placeholder="Empresa SAC" />
+                          <FieldError message={form.formState.errors.razonSocial?.message} />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Nombres</label>
+                            <Input {...form.register('nombres')} placeholder="Juan" />
+                            <FieldError message={form.formState.errors.nombres?.message} />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Apellidos</label>
+                            <Input {...form.register('apellidos')} placeholder="Pérez" />
+                            <FieldError message={form.formState.errors.apellidos?.message} />
+                          </div>
+                        </>
+                      )}
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Correo</label>
-                <Input {...form.register('email')} type="email" placeholder="cliente@email.com" />
-                <FieldError message={form.formState.errors.email?.message} />
-              </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Teléfono</label>
+                        <Input {...form.register('telefono')} placeholder="987654321" />
+                        <FieldError message={form.formState.errors.telefono?.message} />
+                      </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Dirección</label>
-                <Input {...form.register('direccion')} placeholder="Dirección (opcional)" />
-                <FieldError message={form.formState.errors.direccion?.message} />
-              </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Correo</label>
+                        <Input
+                          {...form.register('email')}
+                          type="email"
+                          placeholder="cliente@email.com"
+                        />
+                        <FieldError message={form.formState.errors.email?.message} />
+                      </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Ubigeo</label>
-                <Input {...form.register('ubigeo')} placeholder="150101" />
-                <FieldError message={form.formState.errors.ubigeo?.message} />
-              </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-sm font-medium">Dirección</label>
+                        <Input {...form.register('direccion')} placeholder="Dirección (opcional)" />
+                        <FieldError message={form.formState.errors.direccion?.message} />
+                      </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Nacimiento</label>
-                <Input {...form.register('fechaNacimiento')} type="date" />
-                <FieldError message={form.formState.errors.fechaNacimiento?.message} />
-              </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Ubigeo</label>
+                        <Input {...form.register('ubigeo')} placeholder="150101" />
+                        <FieldError message={form.formState.errors.ubigeo?.message} />
+                      </div>
 
-              <div className="flex items-center justify-between rounded-lg border p-3 md:col-span-2">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Cliente activo</p>
-                  <p className="text-xs text-muted-foreground">
-                    Disponible para selección en ventas
-                  </p>
-                </div>
-                <Controller
-                  control={form.control}
-                  name="activo"
-                  render={({ field }) => (
-                    <Switch checked={field.value} onCheckedChange={field.onChange} />
-                  )}
-                />
-              </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Nacimiento</label>
+                        <Input {...form.register('fechaNacimiento')} type="date" />
+                        <FieldError message={form.formState.errors.fechaNacimiento?.message} />
+                      </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Observaciones</label>
-                <Textarea
-                  {...form.register('observaciones')}
-                  placeholder="Notas (alergias, referencias, contacto, etc.)"
-                  className="min-h-24"
-                />
-                <FieldError message={form.formState.errors.observaciones?.message} />
-              </div>
-                </div>
-              </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-sm font-medium">Observaciones</label>
+                        <Textarea
+                          {...form.register('observaciones')}
+                          placeholder="Notas (alergias, referencias, contacto, etc.)"
+                          className="min-h-24"
+                        />
+                        <FieldError message={form.formState.errors.observaciones?.message} />
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-4">
+                    <p className="font-medium text-foreground">Configuración comercial</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Preparado para futuras funcionalidades de crédito y seguimiento comercial.
+                    </p>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Permitir crédito</p>
+                          <p className="text-xs text-muted-foreground">
+                            Disponible próximamente en Ventas
+                          </p>
+                        </div>
+                        <Controller
+                          control={form.control}
+                          name="permitirCredito"
+                          render={({ field }) => (
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          )}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Límite de crédito</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          disabled={!formPermitirCredito}
+                          {...form.register('limiteCredito', {
+                            setValueAs: (value) => {
+                              if (value === '' || value === null || typeof value === 'undefined') {
+                                return 0
+                              }
+                              const next = Number(value)
+                              return Number.isFinite(next) ? next : 0
+                            },
+                          })}
+                          placeholder="S/ 0.00"
+                        />
+                        <FieldError message={form.formState.errors.limiteCredito?.message} />
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-4">
+                    <p className="font-medium text-foreground">Estado</p>
+                    <div className="mt-3 flex items-center justify-between rounded-lg border p-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Cliente activo</p>
+                        <p className="text-xs text-muted-foreground">
+                          Disponible para selección en ventas
+                        </p>
+                      </div>
+                      <Controller
+                        control={form.control}
+                        name="activo"
+                        render={({ field }) => (
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        )}
+                      />
+                    </div>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="compras" className="pt-4">
+                  <Card className="p-4">
+                    <p className="text-sm text-muted-foreground">Disponible próximamente.</p>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="estado-cuenta" className="pt-4">
+                  <Card className="p-4">
+                    <p className="text-sm text-muted-foreground">Disponible próximamente.</p>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </div>
 
             <div className="border-t bg-popover px-6 py-4">

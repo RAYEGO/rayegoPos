@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Controller, useFieldArray, useForm } from 'react-hook-form'
+import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import {
   CreditCard,
@@ -10,12 +10,9 @@ import {
   Search,
   ShoppingBasket,
   Trash2,
-  ChevronDown,
   MoreVertical,
   History,
   ClipboardList,
-  Pill,
-  CircleDollarSign,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -256,7 +253,11 @@ export function VentasPage() {
     name: 'payments',
   })
 
-  const watchedPayments = checkoutForm.watch('payments')
+  const watchedPayments =
+    useWatch({
+      control: checkoutForm.control,
+      name: 'payments',
+    }) ?? []
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -316,21 +317,13 @@ export function VentasPage() {
     }
   }, [cartItems.length])
 
-  const watchedPaymentTotal = useMemo(
-    () =>
-      watchedPayments.reduce(
-        (sum, payment) => sum + (Number.isFinite(payment.monto) ? payment.monto : 0),
-        0,
-      ),
-    [watchedPayments],
+  const watchedPaymentTotal = watchedPayments.reduce(
+    (sum, payment) => sum + (Number.isFinite(payment?.monto) ? payment.monto : 0),
+    0,
   )
 
-  const selectedPaymentMethods = useMemo(
-    () =>
-      watchedPayments.map((payment) =>
-        options.paymentMethods.find((method) => method.id === payment.formaPagoId),
-      ),
-    [options.paymentMethods, watchedPayments],
+  const selectedPaymentMethods = watchedPayments.map((payment) =>
+    options.paymentMethods.find((method) => method.id === payment?.formaPagoId),
   )
 
   const estimatedChange =
@@ -596,58 +589,11 @@ export function VentasPage() {
     setIsReceiptDialogOpen(true)
   }, [])
 
-  const [showSummary, setShowSummary] = useState(true)
-
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-bold text-foreground">Ventas</h1>
-        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
-          Resumen
-          <ChevronDown
-            className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`}
-          />
-        </Button>
       </div>
-
-      {showSummary && (
-        <div className="flex flex-wrap gap-3">
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <ShoppingBasket className="h-4 w-4 text-muted-foreground" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{cartMetrics.itemCount}</span>
-              <span className="text-xs text-muted-foreground">Items</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <CreditCard className="h-4 w-4 text-primary" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">
-                {formatCurrency(cartMetrics.total)}
-              </span>
-              <span className="text-xs text-muted-foreground">Total</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <Pill className="h-4 w-4 text-warning" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">
-                {dashboard?.summary?.prescriptionItemsCount ?? 0}
-              </span>
-              <span className="text-xs text-muted-foreground">Con receta</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <CircleDollarSign className="h-4 w-4 text-info" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">
-                {formatCurrency(dashboard?.summary?.totalOutstandingAmount ?? 0)}
-              </span>
-              <span className="text-xs text-muted-foreground">Pendiente</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       <Tabs defaultValue="mostrador" className="w-full">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1299,6 +1245,7 @@ export function VentasPage() {
                       type="button"
                       variant="outline"
                       size="sm"
+                      disabled={paymentFields.length >= 3}
                       onClick={() =>
                         appendPayment({
                           formaPagoId: options.paymentMethods[0]?.id ?? '',
