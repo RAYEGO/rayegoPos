@@ -23,6 +23,8 @@ const createCustomerSchema = z.object({
   email: z.string().max(150).email().optional(),
   telefono: z.string().max(30).optional(),
   direccion: z.string().max(255).optional(),
+  permitirCredito: z.boolean().optional(),
+  limiteCredito: z.number().min(0).optional(),
   ubigeo: z.string().max(6).optional(),
   fechaNacimiento: z.string().max(30).optional(),
   observaciones: z.string().max(255).optional(),
@@ -54,4 +56,3 @@ export default async function customersRoutes(app: FastifyInstance) {
     return deleteCustomer(params.id, request)
   })
 }
-

@@ -254,105 +254,105 @@ model Usuario {
   createdById     String?                 @map("created_by") @db.Uuid
   updatedById     String?                 @map("updated_by") @db.Uuid
 
-  sucursal             Sucursal?      @relation(fields: [sucursalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  sucursal             Sucursal?          @relation(fields: [sucursalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   usuarioSucursales    UsuarioSucursal[]
-  createdBy            Usuario?       @relation("UsuarioCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy            Usuario?       @relation("UsuarioUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  usuariosCreados      Usuario[]      @relation("UsuarioCreatedBy")
-  usuariosActualizados Usuario[]      @relation("UsuarioUpdatedBy")
-  usuariosRoles        UsuarioRol[]   @relation("UsuarioRolesUsuario")
-  ventasResponsables   Venta[]        @relation("VentaUsuarioResponsable")
-  comprasResponsables  Compra[]       @relation("CompraUsuarioResponsable")
-  aperturasCaja        AperturaCaja[] @relation("AperturaCajaUsuario")
-  cierresCaja          CierreCaja[]   @relation("CierreCajaUsuario")
+  createdBy            Usuario?           @relation("UsuarioCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy            Usuario?           @relation("UsuarioUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  usuariosCreados      Usuario[]          @relation("UsuarioCreatedBy")
+  usuariosActualizados Usuario[]          @relation("UsuarioUpdatedBy")
+  usuariosRoles        UsuarioRol[]       @relation("UsuarioRolesUsuario")
+  ventasResponsables   Venta[]            @relation("VentaUsuarioResponsable")
+  comprasResponsables  Compra[]           @relation("CompraUsuarioResponsable")
+  aperturasCaja        AperturaCaja[]     @relation("AperturaCajaUsuario")
+  cierresCaja          CierreCaja[]       @relation("CierreCajaUsuario")
   conciliacionesCaja   ConciliacionCaja[] @relation("ConciliacionCajaUsuario")
-  arqueosCaja          ArqueoCaja[]   @relation("ArqueoCajaUsuario")
-  auditoriasActor      Auditoria[]    @relation("AuditoriaActor")
+  arqueosCaja          ArqueoCaja[]       @relation("ArqueoCajaUsuario")
+  auditoriasActor      Auditoria[]        @relation("AuditoriaActor")
 
-  empresasCreadas                   Empresa[]                    @relation("EmpresaCreatedBy")
-  empresasActualizadas              Empresa[]                    @relation("EmpresaUpdatedBy")
-  sucursalesCreadas                 Sucursal[]                   @relation("SucursalCreatedBy")
-  sucursalesActualizadas            Sucursal[]                   @relation("SucursalUpdatedBy")
-  rolesCreados                      Rol[]                        @relation("RolCreatedBy")
-  rolesActualizados                 Rol[]                        @relation("RolUpdatedBy")
-  permisosCreados                   Permiso[]                    @relation("PermisoCreatedBy")
-  permisosActualizados              Permiso[]                    @relation("PermisoUpdatedBy")
-  usuarioRolesCreados               UsuarioRol[]                 @relation("UsuarioRolCreatedBy")
-  usuarioRolesActualizados          UsuarioRol[]                 @relation("UsuarioRolUpdatedBy")
-  usuarioSucursalesCreadas          UsuarioSucursal[]            @relation("UsuarioSucursalCreatedBy")
-  usuarioSucursalesActualizadas     UsuarioSucursal[]            @relation("UsuarioSucursalUpdatedBy")
-  rolPermisosCreados                RolPermiso[]                 @relation("RolPermisoCreatedBy")
-  rolPermisosActualizados           RolPermiso[]                 @relation("RolPermisoUpdatedBy")
-  categoriasCreadas                 Categoria[]                  @relation("CategoriaCreatedBy")
-  categoriasActualizadas            Categoria[]                  @relation("CategoriaUpdatedBy")
-  laboratoriosCreados               Laboratorio[]                @relation("LaboratorioCreatedBy")
-  laboratoriosActualizados          Laboratorio[]                @relation("LaboratorioUpdatedBy")
-  presentacionesCreadas             Presentacion[]               @relation("PresentacionCreatedBy")
-  presentacionesActualizadas        Presentacion[]               @relation("PresentacionUpdatedBy")
-  unidadesCreadas                   UnidadMedida[]               @relation("UnidadMedidaCreatedBy")
-  unidadesActualizadas              UnidadMedida[]               @relation("UnidadMedidaUpdatedBy")
-  principiosCreados                 PrincipioActivo[]            @relation("PrincipioActivoCreatedBy")
-  principiosActualizados            PrincipioActivo[]            @relation("PrincipioActivoUpdatedBy")
-  productosCreados                  Producto[]                   @relation("ProductoCreatedBy")
-  productosActualizados             Producto[]                   @relation("ProductoUpdatedBy")
-  productoPrincipiosCreados         ProductoPrincipioActivo[]    @relation("ProductoPrincipioActivoCreatedBy")
-  productoPrincipiosActualizados    ProductoPrincipioActivo[]    @relation("ProductoPrincipioActivoUpdatedBy")
-  productoImpuestosCreados          ProductoImpuesto[]           @relation("ProductoImpuestoCreatedBy")
-  productoImpuestosActualizados     ProductoImpuesto[]           @relation("ProductoImpuestoUpdatedBy")
-  inventariosCreados                Inventario[]                 @relation("InventarioCreatedBy")
-  inventariosActualizados           Inventario[]                 @relation("InventarioUpdatedBy")
-  lotesCreados                      Lote[]                       @relation("LoteCreatedBy")
-  lotesActualizados                 Lote[]                       @relation("LoteUpdatedBy")
-  motivosMovimientoCreados          MotivoMovimientoInventario[] @relation("MotivoMovimientoInventarioCreatedBy")
-  motivosMovimientoActualizados     MotivoMovimientoInventario[] @relation("MotivoMovimientoInventarioUpdatedBy")
-  movimientosInventarioCreados      MovimientoInventario[]       @relation("MovimientoInventarioCreatedBy")
-  movimientosInventarioActualizados MovimientoInventario[]       @relation("MovimientoInventarioUpdatedBy")
-  proveedoresCreados                Proveedor[]                  @relation("ProveedorCreatedBy")
-  proveedoresActualizados           Proveedor[]                  @relation("ProveedorUpdatedBy")
-  comprasCreadas                    Compra[]                     @relation("CompraCreatedBy")
-  comprasActualizadas               Compra[]                     @relation("CompraUpdatedBy")
-  detalleComprasCreados             DetalleCompra[]              @relation("DetalleCompraCreatedBy")
-  detalleComprasActualizados        DetalleCompra[]              @relation("DetalleCompraUpdatedBy")
-  compraPagosCreados                CompraPago[]                 @relation("CompraPagoCreatedBy")
-  compraPagosActualizados           CompraPago[]                 @relation("CompraPagoUpdatedBy")
-  clientesCreados                   Cliente[]                    @relation("ClienteCreatedBy")
-  clientesActualizados              Cliente[]                    @relation("ClienteUpdatedBy")
-  ventasCreadas                     Venta[]                      @relation("VentaCreatedBy")
-  ventasActualizadas                Venta[]                      @relation("VentaUpdatedBy")
-  detalleVentasCreados              DetalleVenta[]               @relation("DetalleVentaCreatedBy")
-  detalleVentasActualizados         DetalleVenta[]               @relation("DetalleVentaUpdatedBy")
-  detalleVentaLotesCreados          DetalleVentaLote[]           @relation("DetalleVentaLoteCreatedBy")
-  detalleVentaLotesActualizados     DetalleVentaLote[]           @relation("DetalleVentaLoteUpdatedBy")
-  formasPagoCreadas                 FormaPago[]                  @relation("FormaPagoCreatedBy")
-  formasPagoActualizadas            FormaPago[]                  @relation("FormaPagoUpdatedBy")
-  ventaPagosCreados                 VentaPago[]                  @relation("VentaPagoCreatedBy")
-  ventaPagosActualizados            VentaPago[]                  @relation("VentaPagoUpdatedBy")
-  cajasCreadas                      Caja[]                       @relation("CajaCreatedBy")
-  cajasActualizadas                 Caja[]                       @relation("CajaUpdatedBy")
-  aperturasCreadas                  AperturaCaja[]               @relation("AperturaCajaCreatedBy")
-  aperturasActualizadas             AperturaCaja[]               @relation("AperturaCajaUpdatedBy")
-  cierresCreados                    CierreCaja[]                 @relation("CierreCajaCreatedBy")
-  cierresActualizados               CierreCaja[]                 @relation("CierreCajaUpdatedBy")
-  conciliacionesCajaCreadas         ConciliacionCaja[]           @relation("ConciliacionCajaCreatedBy")
-  conciliacionesCajaActualizadas    ConciliacionCaja[]           @relation("ConciliacionCajaUpdatedBy")
-  arqueosCajaCreados                ArqueoCaja[]                 @relation("ArqueoCajaCreatedBy")
-  arqueosCajaActualizados           ArqueoCaja[]                 @relation("ArqueoCajaUpdatedBy")
-  movimientosCajaCreados            MovimientoCaja[]             @relation("MovimientoCajaCreatedBy")
-  movimientosCajaActualizados       MovimientoCaja[]             @relation("MovimientoCajaUpdatedBy")
-  conciliacionCajaDetallesCreados        ConciliacionCajaDetalle[] @relation("ConciliacionCajaDetalleCreatedBy")
-  conciliacionCajaDetallesActualizados   ConciliacionCajaDetalle[] @relation("ConciliacionCajaDetalleUpdatedBy")
-  ingresosCreados                   Ingreso[]                    @relation("IngresoCreatedBy")
-  ingresosActualizados              Ingreso[]                    @relation("IngresoUpdatedBy")
-  egresosCreados                    Egreso[]                     @relation("EgresoCreatedBy")
-  egresosActualizados               Egreso[]                     @relation("EgresoUpdatedBy")
-  configuracionesCreadas            Configuracion[]              @relation("ConfiguracionCreatedBy")
-  configuracionesActualizadas       Configuracion[]              @relation("ConfiguracionUpdatedBy")
-  seriesCreadas                     SerieDocumento[]             @relation("SerieDocumentoCreatedBy")
-  seriesActualizadas                SerieDocumento[]             @relation("SerieDocumentoUpdatedBy")
-  impuestosCreados                  Impuesto[]                   @relation("ImpuestoCreatedBy")
-  impuestosActualizados             Impuesto[]                   @relation("ImpuestoUpdatedBy")
-  auditoriasCreadas                 Auditoria[]                  @relation("AuditoriaCreatedBy")
-  auditoriasActualizadas            Auditoria[]                  @relation("AuditoriaUpdatedBy")
+  empresasCreadas                      Empresa[]                    @relation("EmpresaCreatedBy")
+  empresasActualizadas                 Empresa[]                    @relation("EmpresaUpdatedBy")
+  sucursalesCreadas                    Sucursal[]                   @relation("SucursalCreatedBy")
+  sucursalesActualizadas               Sucursal[]                   @relation("SucursalUpdatedBy")
+  rolesCreados                         Rol[]                        @relation("RolCreatedBy")
+  rolesActualizados                    Rol[]                        @relation("RolUpdatedBy")
+  permisosCreados                      Permiso[]                    @relation("PermisoCreatedBy")
+  permisosActualizados                 Permiso[]                    @relation("PermisoUpdatedBy")
+  usuarioRolesCreados                  UsuarioRol[]                 @relation("UsuarioRolCreatedBy")
+  usuarioRolesActualizados             UsuarioRol[]                 @relation("UsuarioRolUpdatedBy")
+  usuarioSucursalesCreadas             UsuarioSucursal[]            @relation("UsuarioSucursalCreatedBy")
+  usuarioSucursalesActualizadas        UsuarioSucursal[]            @relation("UsuarioSucursalUpdatedBy")
+  rolPermisosCreados                   RolPermiso[]                 @relation("RolPermisoCreatedBy")
+  rolPermisosActualizados              RolPermiso[]                 @relation("RolPermisoUpdatedBy")
+  categoriasCreadas                    Categoria[]                  @relation("CategoriaCreatedBy")
+  categoriasActualizadas               Categoria[]                  @relation("CategoriaUpdatedBy")
+  laboratoriosCreados                  Laboratorio[]                @relation("LaboratorioCreatedBy")
+  laboratoriosActualizados             Laboratorio[]                @relation("LaboratorioUpdatedBy")
+  presentacionesCreadas                Presentacion[]               @relation("PresentacionCreatedBy")
+  presentacionesActualizadas           Presentacion[]               @relation("PresentacionUpdatedBy")
+  unidadesCreadas                      UnidadMedida[]               @relation("UnidadMedidaCreatedBy")
+  unidadesActualizadas                 UnidadMedida[]               @relation("UnidadMedidaUpdatedBy")
+  principiosCreados                    PrincipioActivo[]            @relation("PrincipioActivoCreatedBy")
+  principiosActualizados               PrincipioActivo[]            @relation("PrincipioActivoUpdatedBy")
+  productosCreados                     Producto[]                   @relation("ProductoCreatedBy")
+  productosActualizados                Producto[]                   @relation("ProductoUpdatedBy")
+  productoPrincipiosCreados            ProductoPrincipioActivo[]    @relation("ProductoPrincipioActivoCreatedBy")
+  productoPrincipiosActualizados       ProductoPrincipioActivo[]    @relation("ProductoPrincipioActivoUpdatedBy")
+  productoImpuestosCreados             ProductoImpuesto[]           @relation("ProductoImpuestoCreatedBy")
+  productoImpuestosActualizados        ProductoImpuesto[]           @relation("ProductoImpuestoUpdatedBy")
+  inventariosCreados                   Inventario[]                 @relation("InventarioCreatedBy")
+  inventariosActualizados              Inventario[]                 @relation("InventarioUpdatedBy")
+  lotesCreados                         Lote[]                       @relation("LoteCreatedBy")
+  lotesActualizados                    Lote[]                       @relation("LoteUpdatedBy")
+  motivosMovimientoCreados             MotivoMovimientoInventario[] @relation("MotivoMovimientoInventarioCreatedBy")
+  motivosMovimientoActualizados        MotivoMovimientoInventario[] @relation("MotivoMovimientoInventarioUpdatedBy")
+  movimientosInventarioCreados         MovimientoInventario[]       @relation("MovimientoInventarioCreatedBy")
+  movimientosInventarioActualizados    MovimientoInventario[]       @relation("MovimientoInventarioUpdatedBy")
+  proveedoresCreados                   Proveedor[]                  @relation("ProveedorCreatedBy")
+  proveedoresActualizados              Proveedor[]                  @relation("ProveedorUpdatedBy")
+  comprasCreadas                       Compra[]                     @relation("CompraCreatedBy")
+  comprasActualizadas                  Compra[]                     @relation("CompraUpdatedBy")
+  detalleComprasCreados                DetalleCompra[]              @relation("DetalleCompraCreatedBy")
+  detalleComprasActualizados           DetalleCompra[]              @relation("DetalleCompraUpdatedBy")
+  compraPagosCreados                   CompraPago[]                 @relation("CompraPagoCreatedBy")
+  compraPagosActualizados              CompraPago[]                 @relation("CompraPagoUpdatedBy")
+  clientesCreados                      Cliente[]                    @relation("ClienteCreatedBy")
+  clientesActualizados                 Cliente[]                    @relation("ClienteUpdatedBy")
+  ventasCreadas                        Venta[]                      @relation("VentaCreatedBy")
+  ventasActualizadas                   Venta[]                      @relation("VentaUpdatedBy")
+  detalleVentasCreados                 DetalleVenta[]               @relation("DetalleVentaCreatedBy")
+  detalleVentasActualizados            DetalleVenta[]               @relation("DetalleVentaUpdatedBy")
+  detalleVentaLotesCreados             DetalleVentaLote[]           @relation("DetalleVentaLoteCreatedBy")
+  detalleVentaLotesActualizados        DetalleVentaLote[]           @relation("DetalleVentaLoteUpdatedBy")
+  formasPagoCreadas                    FormaPago[]                  @relation("FormaPagoCreatedBy")
+  formasPagoActualizadas               FormaPago[]                  @relation("FormaPagoUpdatedBy")
+  ventaPagosCreados                    VentaPago[]                  @relation("VentaPagoCreatedBy")
+  ventaPagosActualizados               VentaPago[]                  @relation("VentaPagoUpdatedBy")
+  cajasCreadas                         Caja[]                       @relation("CajaCreatedBy")
+  cajasActualizadas                    Caja[]                       @relation("CajaUpdatedBy")
+  aperturasCreadas                     AperturaCaja[]               @relation("AperturaCajaCreatedBy")
+  aperturasActualizadas                AperturaCaja[]               @relation("AperturaCajaUpdatedBy")
+  cierresCreados                       CierreCaja[]                 @relation("CierreCajaCreatedBy")
+  cierresActualizados                  CierreCaja[]                 @relation("CierreCajaUpdatedBy")
+  conciliacionesCajaCreadas            ConciliacionCaja[]           @relation("ConciliacionCajaCreatedBy")
+  conciliacionesCajaActualizadas       ConciliacionCaja[]           @relation("ConciliacionCajaUpdatedBy")
+  arqueosCajaCreados                   ArqueoCaja[]                 @relation("ArqueoCajaCreatedBy")
+  arqueosCajaActualizados              ArqueoCaja[]                 @relation("ArqueoCajaUpdatedBy")
+  movimientosCajaCreados               MovimientoCaja[]             @relation("MovimientoCajaCreatedBy")
+  movimientosCajaActualizados          MovimientoCaja[]             @relation("MovimientoCajaUpdatedBy")
+  conciliacionCajaDetallesCreados      ConciliacionCajaDetalle[]    @relation("ConciliacionCajaDetalleCreatedBy")
+  conciliacionCajaDetallesActualizados ConciliacionCajaDetalle[]    @relation("ConciliacionCajaDetalleUpdatedBy")
+  ingresosCreados                      Ingreso[]                    @relation("IngresoCreatedBy")
+  ingresosActualizados                 Ingreso[]                    @relation("IngresoUpdatedBy")
+  egresosCreados                       Egreso[]                     @relation("EgresoCreatedBy")
+  egresosActualizados                  Egreso[]                     @relation("EgresoUpdatedBy")
+  configuracionesCreadas               Configuracion[]              @relation("ConfiguracionCreatedBy")
+  configuracionesActualizadas          Configuracion[]              @relation("ConfiguracionUpdatedBy")
+  seriesCreadas                        SerieDocumento[]             @relation("SerieDocumentoCreatedBy")
+  seriesActualizadas                   SerieDocumento[]             @relation("SerieDocumentoUpdatedBy")
+  impuestosCreados                     Impuesto[]                   @relation("ImpuestoCreatedBy")
+  impuestosActualizados                Impuesto[]                   @relation("ImpuestoUpdatedBy")
+  auditoriasCreadas                    Auditoria[]                  @relation("AuditoriaCreatedBy")
+  auditoriasActualizadas               Auditoria[]                  @relation("AuditoriaUpdatedBy")
 
   @@index([sucursalId])
   @@index([numeroDocumento])
@@ -372,11 +372,11 @@ model Rol {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
-  createdBy     Usuario?     @relation("RolCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy     Usuario?     @relation("RolUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  usuariosRoles UsuarioRol[]
+  createdBy         Usuario?          @relation("RolCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy         Usuario?          @relation("RolUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  usuariosRoles     UsuarioRol[]
   usuarioSucursales UsuarioSucursal[]
-  rolesPermisos RolPermiso[]
+  rolesPermisos     RolPermiso[]
 
   @@index([deletedAt])
   @@map("roles")
@@ -429,16 +429,16 @@ model UsuarioRol {
 }
 
 model UsuarioSucursal {
-  id        String    @id @default(uuid()) @db.Uuid
-  usuarioId String    @map("usuario_id") @db.Uuid
-  sucursalId String   @map("sucursal_id") @db.Uuid
-  rolId     String    @map("rol_id") @db.Uuid
-  activo    Boolean   @default(true)
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
-  createdById String? @map("created_by") @db.Uuid
-  updatedById String? @map("updated_by") @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  usuarioId   String    @map("usuario_id") @db.Uuid
+  sucursalId  String    @map("sucursal_id") @db.Uuid
+  rolId       String    @map("rol_id") @db.Uuid
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  createdById String?   @map("created_by") @db.Uuid
+  updatedById String?   @map("updated_by") @db.Uuid
 
   usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   sucursal  Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -490,10 +490,10 @@ model Categoria {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
-  parent   Categoria?  @relation("CategoriaHierarchy", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  children Categoria[] @relation("CategoriaHierarchy")
-  createdBy Usuario?   @relation("CategoriaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy Usuario?   @relation("CategoriaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  parent    Categoria?  @relation("CategoriaHierarchy", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  children  Categoria[] @relation("CategoriaHierarchy")
+  createdBy Usuario?    @relation("CategoriaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario?    @relation("CategoriaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
   @@index([deletedAt])
@@ -582,34 +582,34 @@ model PrincipioActivo {
 
 /// Maestro farmacéutico y comercial del producto.
 model Producto {
-  id                String         @id @default(uuid()) @db.Uuid
-  categoriaId       String         @map("categoria_id") @db.Uuid
-  laboratorioId     String?        @map("laboratorio_id") @db.Uuid
-  presentacionId    String?        @map("presentacion_id") @db.Uuid
-  unidadMedidaId    String         @map("unidad_medida_id") @db.Uuid
-  modoEmpaque       ModoEmpaqueProducto @default(SIMPLE) @map("modo_empaque")
-  unidadesPorBlister Int?          @map("unidades_por_blister")
-  blistersPorCaja   Int?           @map("blisters_por_caja")
-  sku               String         @unique @db.VarChar(50)
-  codigoInterno     String?        @unique @map("codigo_interno") @db.VarChar(50)
-  codigoBarras      String?        @unique @map("codigo_barras") @db.VarChar(50)
-  nombre            String         @db.VarChar(180)
-  descripcion       String?        @db.VarChar(500)
-  concentracion     String?        @db.VarChar(120)
-  registroSanitario String?        @map("registro_sanitario") @db.VarChar(100)
-  requiereReceta    Boolean        @default(false) @map("requiere_receta")
-  esControlado      Boolean        @default(false) @map("es_controlado")
-  precioVenta       Decimal        @default(0) @map("precio_venta") @db.Decimal(14, 2)
-  precioVentaBlister Decimal?      @map("precio_venta_blister") @db.Decimal(14, 2)
-  costoReferencia   Decimal        @default(0) @map("costo_referencia") @db.Decimal(14, 2)
-  margenReferencia  Decimal?       @map("margen_referencia") @db.Decimal(7, 4)
-  estado            EstadoProducto @default(ACTIVO)
-  observaciones     String?        @db.VarChar(500)
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
-  deletedAt         DateTime?      @map("deleted_at")
-  createdById       String?        @map("created_by") @db.Uuid
-  updatedById       String?        @map("updated_by") @db.Uuid
+  id                 String              @id @default(uuid()) @db.Uuid
+  categoriaId        String              @map("categoria_id") @db.Uuid
+  laboratorioId      String?             @map("laboratorio_id") @db.Uuid
+  presentacionId     String?             @map("presentacion_id") @db.Uuid
+  unidadMedidaId     String              @map("unidad_medida_id") @db.Uuid
+  modoEmpaque        ModoEmpaqueProducto @default(SIMPLE) @map("modo_empaque")
+  unidadesPorBlister Int?                @map("unidades_por_blister")
+  blistersPorCaja    Int?                @map("blisters_por_caja")
+  sku                String              @unique @db.VarChar(50)
+  codigoInterno      String?             @unique @map("codigo_interno") @db.VarChar(50)
+  codigoBarras       String?             @unique @map("codigo_barras") @db.VarChar(50)
+  nombre             String              @db.VarChar(180)
+  descripcion        String?             @db.VarChar(500)
+  concentracion      String?             @db.VarChar(120)
+  registroSanitario  String?             @map("registro_sanitario") @db.VarChar(100)
+  requiereReceta     Boolean             @default(false) @map("requiere_receta")
+  esControlado       Boolean             @default(false) @map("es_controlado")
+  precioVenta        Decimal             @default(0) @map("precio_venta") @db.Decimal(14, 2)
+  precioVentaBlister Decimal?            @map("precio_venta_blister") @db.Decimal(14, 2)
+  costoReferencia    Decimal             @default(0) @map("costo_referencia") @db.Decimal(14, 2)
+  margenReferencia   Decimal?            @map("margen_referencia") @db.Decimal(7, 4)
+  estado             EstadoProducto      @default(ACTIVO)
+  observaciones      String?             @db.VarChar(500)
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  deletedAt          DateTime?           @map("deleted_at")
+  createdById        String?             @map("created_by") @db.Uuid
+  updatedById        String?             @map("updated_by") @db.Uuid
 
   categoria            Categoria                 @relation(fields: [categoriaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   laboratorio          Laboratorio?              @relation(fields: [laboratorioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -879,24 +879,24 @@ model Compra {
 }
 
 model DetalleCompra {
-  id                 String    @id @default(uuid()) @db.Uuid
-  compraId           String    @map("compra_id") @db.Uuid
-  productoId         String    @map("producto_id") @db.Uuid
+  id                 String           @id @default(uuid()) @db.Uuid
+  compraId           String           @map("compra_id") @db.Uuid
+  productoId         String           @map("producto_id") @db.Uuid
   cantidad           Int
   empaque            EmpaqueProducto? @map("empaque")
-  cantidadEmpaque    Int?      @map("cantidad_empaque")
-  factorEmpaque      Int?      @map("factor_empaque")
-  costoUnitario      Decimal   @map("costo_unitario") @db.Decimal(14, 6)
-  descuentoTotal     Decimal   @default(0) @map("descuento_total") @db.Decimal(14, 2)
-  porcentajeImpuesto Decimal?  @map("porcentaje_impuesto") @db.Decimal(7, 4)
-  impuestoTotal      Decimal   @default(0) @map("impuesto_total") @db.Decimal(14, 2)
-  subtotal           Decimal   @default(0) @db.Decimal(14, 2)
-  total              Decimal   @default(0) @db.Decimal(14, 2)
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  deletedAt          DateTime? @map("deleted_at")
-  createdById        String?   @map("created_by") @db.Uuid
-  updatedById        String?   @map("updated_by") @db.Uuid
+  cantidadEmpaque    Int?             @map("cantidad_empaque")
+  factorEmpaque      Int?             @map("factor_empaque")
+  costoUnitario      Decimal          @map("costo_unitario") @db.Decimal(14, 6)
+  descuentoTotal     Decimal          @default(0) @map("descuento_total") @db.Decimal(14, 2)
+  porcentajeImpuesto Decimal?         @map("porcentaje_impuesto") @db.Decimal(7, 4)
+  impuestoTotal      Decimal          @default(0) @map("impuesto_total") @db.Decimal(14, 2)
+  subtotal           Decimal          @default(0) @db.Decimal(14, 2)
+  total              Decimal          @default(0) @db.Decimal(14, 2)
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  deletedAt          DateTime?        @map("deleted_at")
+  createdById        String?          @map("created_by") @db.Uuid
+  updatedById        String?          @map("updated_by") @db.Uuid
 
   compra                Compra                 @relation(fields: [compraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   producto              Producto               @relation(fields: [productoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -926,10 +926,10 @@ model CompraPago {
   createdById       String?   @map("created_by") @db.Uuid
   updatedById       String?   @map("updated_by") @db.Uuid
 
-  compra     Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  formaPago  FormaPago @relation(fields: [formaPagoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdBy  Usuario?  @relation("CompraPagoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy  Usuario?  @relation("CompraPagoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  compra    Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  formaPago FormaPago @relation(fields: [formaPagoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy Usuario?  @relation("CompraPagoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario?  @relation("CompraPagoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([compraId, fechaPago])
   @@index([formaPagoId])
@@ -954,6 +954,8 @@ model Cliente {
   fechaNacimiento DateTime?               @map("fecha_nacimiento") @db.Date
   activo          Boolean                 @default(true)
   observaciones   String?                 @db.VarChar(255)
+  permitirCredito Boolean                 @default(false) @map("permitir_credito")
+  limiteCredito   Decimal                 @default(0) @map("limite_credito") @db.Decimal(14, 2)
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
   deletedAt       DateTime?               @map("deleted_at")
@@ -1012,25 +1014,25 @@ model Venta {
 }
 
 model DetalleVenta {
-  id                 String    @id @default(uuid()) @db.Uuid
-  ventaId            String    @map("venta_id") @db.Uuid
-  productoId         String    @map("producto_id") @db.Uuid
+  id                 String           @id @default(uuid()) @db.Uuid
+  ventaId            String           @map("venta_id") @db.Uuid
+  productoId         String           @map("producto_id") @db.Uuid
   cantidad           Int
   empaque            EmpaqueProducto? @map("empaque")
-  cantidadEmpaque    Int?      @map("cantidad_empaque")
-  factorEmpaque      Int?      @map("factor_empaque")
-  precioUnitario     Decimal   @map("precio_unitario") @db.Decimal(14, 6)
-  descuentoTotal     Decimal   @default(0) @map("descuento_total") @db.Decimal(14, 2)
-  porcentajeImpuesto Decimal?  @map("porcentaje_impuesto") @db.Decimal(7, 4)
-  impuestoTotal      Decimal   @default(0) @map("impuesto_total") @db.Decimal(14, 2)
-  subtotal           Decimal   @default(0) @db.Decimal(14, 2)
-  total              Decimal   @default(0) @db.Decimal(14, 2)
-  costoReferencia    Decimal?  @map("costo_referencia") @db.Decimal(14, 6)
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  deletedAt          DateTime? @map("deleted_at")
-  createdById        String?   @map("created_by") @db.Uuid
-  updatedById        String?   @map("updated_by") @db.Uuid
+  cantidadEmpaque    Int?             @map("cantidad_empaque")
+  factorEmpaque      Int?             @map("factor_empaque")
+  precioUnitario     Decimal          @map("precio_unitario") @db.Decimal(14, 6)
+  descuentoTotal     Decimal          @default(0) @map("descuento_total") @db.Decimal(14, 2)
+  porcentajeImpuesto Decimal?         @map("porcentaje_impuesto") @db.Decimal(7, 4)
+  impuestoTotal      Decimal          @default(0) @map("impuesto_total") @db.Decimal(14, 2)
+  subtotal           Decimal          @default(0) @db.Decimal(14, 2)
+  total              Decimal          @default(0) @db.Decimal(14, 2)
+  costoReferencia    Decimal?         @map("costo_referencia") @db.Decimal(14, 6)
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  deletedAt          DateTime?        @map("deleted_at")
+  createdById        String?          @map("created_by") @db.Uuid
+  updatedById        String?          @map("updated_by") @db.Uuid
 
   venta                 Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   producto              Producto               @relation(fields: [productoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -1084,11 +1086,11 @@ model FormaPago {
   createdById        String?         @map("created_by") @db.Uuid
   updatedById        String?         @map("updated_by") @db.Uuid
 
-  createdBy       Usuario?         @relation("FormaPagoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy       Usuario?         @relation("FormaPagoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  compraPagos     CompraPago[]
-  ventaPagos      VentaPago[]
-  movimientosCaja MovimientoCaja[]
+  createdBy          Usuario?                  @relation("FormaPagoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy          Usuario?                  @relation("FormaPagoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  compraPagos        CompraPago[]
+  ventaPagos         VentaPago[]
+  movimientosCaja    MovimientoCaja[]
   conciliacionesCaja ConciliacionCajaDetalle[]
 
   @@index([activo, orden])
@@ -1162,14 +1164,14 @@ model AperturaCaja {
   createdById           String?            @map("created_by") @db.Uuid
   updatedById           String?            @map("updated_by") @db.Uuid
 
-  caja        Caja             @relation(fields: [cajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  usuario     Usuario          @relation("AperturaCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdBy   Usuario?         @relation("AperturaCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy   Usuario?         @relation("AperturaCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  cierre      CierreCaja?
+  caja           Caja               @relation(fields: [cajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  usuario        Usuario            @relation("AperturaCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy      Usuario?           @relation("AperturaCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy      Usuario?           @relation("AperturaCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  cierre         CierreCaja?
   conciliaciones ConciliacionCaja[]
-  arqueos     ArqueoCaja[]
-  movimientos MovimientoCaja[]
+  arqueos        ArqueoCaja[]
+  movimientos    MovimientoCaja[]
 
   @@index([cajaId, estado])
   @@index([usuarioId, fechaApertura])
@@ -1178,24 +1180,24 @@ model AperturaCaja {
 }
 
 model ConciliacionCaja {
-  id               String    @id @default(uuid()) @db.Uuid
-  aperturaCajaId   String    @map("apertura_caja_id") @db.Uuid
-  usuarioId        String    @map("usuario_id") @db.Uuid
-  fechaConciliacion DateTime @default(now()) @map("fecha_conciliacion")
-  montoSistemaTotal Decimal  @default(0) @map("monto_sistema_total") @db.Decimal(14, 2)
-  montoDeclaradoTotal Decimal @default(0) @map("monto_declarado_total") @db.Decimal(14, 2)
-  diferenciaTotal  Decimal   @default(0) @map("diferencia_total") @db.Decimal(14, 2)
-  observaciones    String?   @db.VarChar(255)
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  deletedAt        DateTime? @map("deleted_at")
-  createdById      String?   @map("created_by") @db.Uuid
-  updatedById      String?   @map("updated_by") @db.Uuid
+  id                  String    @id @default(uuid()) @db.Uuid
+  aperturaCajaId      String    @map("apertura_caja_id") @db.Uuid
+  usuarioId           String    @map("usuario_id") @db.Uuid
+  fechaConciliacion   DateTime  @default(now()) @map("fecha_conciliacion")
+  montoSistemaTotal   Decimal   @default(0) @map("monto_sistema_total") @db.Decimal(14, 2)
+  montoDeclaradoTotal Decimal   @default(0) @map("monto_declarado_total") @db.Decimal(14, 2)
+  diferenciaTotal     Decimal   @default(0) @map("diferencia_total") @db.Decimal(14, 2)
+  observaciones       String?   @db.VarChar(255)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  deletedAt           DateTime? @map("deleted_at")
+  createdById         String?   @map("created_by") @db.Uuid
+  updatedById         String?   @map("updated_by") @db.Uuid
 
-  aperturaCaja AperturaCaja               @relation(fields: [aperturaCajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  usuario      Usuario                    @relation("ConciliacionCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  createdBy    Usuario?                   @relation("ConciliacionCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy    Usuario?                   @relation("ConciliacionCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  aperturaCaja AperturaCaja              @relation(fields: [aperturaCajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  usuario      Usuario                   @relation("ConciliacionCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy    Usuario?                  @relation("ConciliacionCajaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy    Usuario?                  @relation("ConciliacionCajaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   detalles     ConciliacionCajaDetalle[]
 
   @@index([usuarioId, fechaConciliacion])
@@ -1229,19 +1231,19 @@ model ConciliacionCajaDetalle {
 }
 
 model ArqueoCaja {
-  id                  String    @id @default(uuid()) @db.Uuid
-  aperturaCajaId      String    @map("apertura_caja_id") @db.Uuid
-  usuarioId           String    @map("usuario_id") @db.Uuid
-  fechaArqueo         DateTime  @default(now()) @map("fecha_arqueo")
-  montoSistemaEfectivo Decimal  @default(0) @map("monto_sistema_efectivo") @db.Decimal(14, 2)
-  montoDeclaradoEfectivo Decimal @default(0) @map("monto_declarado_efectivo") @db.Decimal(14, 2)
-  diferenciaEfectivo  Decimal   @default(0) @map("diferencia_efectivo") @db.Decimal(14, 2)
-  observaciones       String?   @db.VarChar(255)
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-  deletedAt           DateTime? @map("deleted_at")
-  createdById         String?   @map("created_by") @db.Uuid
-  updatedById         String?   @map("updated_by") @db.Uuid
+  id                     String    @id @default(uuid()) @db.Uuid
+  aperturaCajaId         String    @map("apertura_caja_id") @db.Uuid
+  usuarioId              String    @map("usuario_id") @db.Uuid
+  fechaArqueo            DateTime  @default(now()) @map("fecha_arqueo")
+  montoSistemaEfectivo   Decimal   @default(0) @map("monto_sistema_efectivo") @db.Decimal(14, 2)
+  montoDeclaradoEfectivo Decimal   @default(0) @map("monto_declarado_efectivo") @db.Decimal(14, 2)
+  diferenciaEfectivo     Decimal   @default(0) @map("diferencia_efectivo") @db.Decimal(14, 2)
+  observaciones          String?   @db.VarChar(255)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+  deletedAt              DateTime? @map("deleted_at")
+  createdById            String?   @map("created_by") @db.Uuid
+  updatedById            String?   @map("updated_by") @db.Uuid
 
   aperturaCaja AperturaCaja @relation(fields: [aperturaCajaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   usuario      Usuario      @relation("ArqueoCajaUsuario", fields: [usuarioId], references: [id], onDelete: Restrict, onUpdate: Cascade)

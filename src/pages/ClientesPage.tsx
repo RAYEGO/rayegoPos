@@ -162,6 +162,9 @@ function getCustomerStatusVariant(isActive: boolean) {
 }
 
 function toPayload(values: CustomerFormValues): CreateCustomerPayload {
+  const rawCreditLimit = Number.isFinite(values.limiteCredito) ? values.limiteCredito : 0
+  const limiteCredito = values.permitirCredito ? Math.max(0, rawCreditLimit) : 0
+
   return {
     tipoPersona: values.tipoPersona,
     tipoDocumento: values.tipoDocumento?.trim() ? values.tipoDocumento : undefined,
@@ -172,6 +175,8 @@ function toPayload(values: CustomerFormValues): CreateCustomerPayload {
     email: values.email?.trim() || undefined,
     telefono: values.telefono?.trim() || undefined,
     direccion: values.direccion?.trim() || undefined,
+    permitirCredito: values.permitirCredito,
+    limiteCredito: Number(limiteCredito.toFixed(2)),
     ubigeo: values.ubigeo?.trim() || undefined,
     fechaNacimiento: values.fechaNacimiento?.trim() || undefined,
     observaciones: values.observaciones?.trim() || undefined,
@@ -269,8 +274,8 @@ export function ClientesPage() {
       email: customer.email ?? '',
       telefono: customer.telefono ?? '',
       direccion: customer.direccion ?? '',
-      permitirCredito: false,
-      limiteCredito: 0,
+      permitirCredito: customer.permitirCredito,
+      limiteCredito: customer.limiteCredito,
       ubigeo: customer.ubigeo ?? '',
       fechaNacimiento: customer.fechaNacimiento ? customer.fechaNacimiento.slice(0, 10) : '',
       observaciones: customer.observaciones ?? '',

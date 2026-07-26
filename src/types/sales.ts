@@ -74,6 +74,8 @@ export type SalesDashboardResponse = {
       id: string
       name: string
       documentNumber: string | null
+      permitirCredito: boolean
+      limiteCredito: number
     }>
     paymentMethods: Array<{
       id: string

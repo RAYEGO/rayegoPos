@@ -12,6 +12,8 @@ export type CustomerItem = {
   email: string | null
   telefono: string | null
   direccion: string | null
+  permitirCredito: boolean
+  limiteCredito: number
   ubigeo: string | null
   fechaNacimiento: string | null
   activo: boolean
@@ -47,6 +49,8 @@ export type CreateCustomerPayload = {
   email?: string
   telefono?: string
   direccion?: string
+  permitirCredito?: boolean
+  limiteCredito?: number
   ubigeo?: string
   fechaNacimiento?: string
   observaciones?: string
@@ -55,4 +59,3 @@ export type CreateCustomerPayload = {
 export type UpdateCustomerPayload = Partial<CreateCustomerPayload> & {
   activo?: boolean
 }
-

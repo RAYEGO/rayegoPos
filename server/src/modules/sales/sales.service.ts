@@ -531,6 +531,8 @@ export async function getSalesDashboard(
         nombreCompleto: true,
         razonSocial: true,
         numeroDocumento: true,
+        permitirCredito: true,
+        limiteCredito: true,
       },
     }),
     prisma.formaPago.findMany({
@@ -686,6 +688,8 @@ export async function getSalesDashboard(
         id: customer.id,
         name: customer.nombreCompleto ?? customer.razonSocial ?? 'Cliente',
         documentNumber: customer.numeroDocumento,
+        permitirCredito: customer.permitirCredito,
+        limiteCredito: decimalToNumber(customer.limiteCredito),
       })),
       paymentMethods: paymentMethods.map((method) => ({
         id: method.id,
@@ -1028,6 +1032,19 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           'Solo un pago único con efectivo puede generar vuelto en esta versión.',
         )
       }
+    }
+
+    const customerAllowsCredit = customer?.permitirCredito ?? false
+
+    if (balanceAmount > 0 && (!customer || !customerAllowsCredit)) {
+      if (!customer) {
+        throw createHttpError(400, 'Las ventas de mostrador deben quedar completamente pagadas.')
+      }
+
+      throw createHttpError(
+        400,
+        'El cliente seleccionado no tiene crédito habilitado. La venta debe quedar completamente pagada.',
+      )
     }
 
     const lots = await tx.lote.findMany({

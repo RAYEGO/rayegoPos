@@ -22,6 +22,8 @@ type CreateCustomerPayload = {
   email?: string
   telefono?: string
   direccion?: string
+  permitirCredito?: boolean
+  limiteCredito?: number
   ubigeo?: string
   fechaNacimiento?: string
   observaciones?: string
@@ -38,6 +40,18 @@ function createHttpError(statusCode: number, message: string) {
 function toOptionalString(value?: string | null) {
   const normalized = value?.trim()
   return normalized ? normalized : undefined
+}
+
+function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
+  if (typeof value === 'number') {
+    return value
+  }
+
+  return Number(value ?? 0)
+}
+
+function toDecimal(value: number, fractionDigits: number) {
+  return new Prisma.Decimal(value.toFixed(fractionDigits))
 }
 
 function parseOptionalDate(value?: string | null) {
@@ -149,6 +163,8 @@ function mapCustomer(customer: CustomerWithRelations) {
     email: customer.email,
     telefono: customer.telefono,
     direccion: customer.direccion,
+    permitirCredito: customer.permitirCredito,
+    limiteCredito: decimalToNumber(customer.limiteCredito),
     ubigeo: customer.ubigeo,
     fechaNacimiento: customer.fechaNacimiento ? customer.fechaNacimiento.toISOString() : null,
     activo: customer.activo,
@@ -262,6 +278,14 @@ export async function createCustomer(payload: CreateCustomerPayload, request: Fa
     razonSocial: payload.razonSocial,
   })
 
+  const rawCreditLimit = payload.limiteCredito ?? 0
+  if (!Number.isFinite(rawCreditLimit) || rawCreditLimit < 0) {
+    throw createHttpError(400, 'El límite de crédito debe ser mayor o igual a 0.')
+  }
+
+  const permitirCredito = payload.permitirCredito ?? false
+  const limiteCredito = permitirCredito ? Number(rawCreditLimit.toFixed(2)) : 0
+
   const customer = await prisma.cliente.create({
     data: {
       tipoPersona,
@@ -271,6 +295,8 @@ export async function createCustomer(payload: CreateCustomerPayload, request: Fa
       email: toOptionalString(payload.email),
       telefono: toOptionalString(payload.telefono),
       direccion: toOptionalString(payload.direccion),
+      permitirCredito,
+      limiteCredito: toDecimal(limiteCredito, 2),
       ubigeo: toOptionalString(payload.ubigeo),
       fechaNacimiento: parseOptionalDate(payload.fechaNacimiento) ?? null,
       observaciones: toOptionalString(payload.observaciones),
@@ -327,6 +353,21 @@ export async function updateCustomer(
       })
     : null
 
+  const shouldUpdateCredit =
+    payload.permitirCredito !== undefined || payload.limiteCredito !== undefined
+  const nextPermitirCredito =
+    payload.permitirCredito ?? existingCustomer.permitirCredito
+  const nextCreditLimitRaw =
+    payload.limiteCredito ?? decimalToNumber(existingCustomer.limiteCredito)
+
+  if (shouldUpdateCredit) {
+    if (!Number.isFinite(nextCreditLimitRaw) || nextCreditLimitRaw < 0) {
+      throw createHttpError(400, 'El límite de crédito debe ser mayor o igual a 0.')
+    }
+  }
+
+  const nextLimiteCredito = nextPermitirCredito ? Number(nextCreditLimitRaw.toFixed(2)) : 0
+
   const updateData: Prisma.ClienteUncheckedUpdateInput = {
     ...(payload.tipoPersona !== undefined ? { tipoPersona } : {}),
     ...(payload.tipoDocumento !== undefined ? { tipoDocumento: payload.tipoDocumento } : {}),
@@ -335,6 +376,12 @@ export async function updateCustomer(
     ...(payload.email !== undefined ? { email: toOptionalString(payload.email) } : {}),
     ...(payload.telefono !== undefined ? { telefono: toOptionalString(payload.telefono) } : {}),
     ...(payload.direccion !== undefined ? { direccion: toOptionalString(payload.direccion) } : {}),
+    ...(shouldUpdateCredit
+      ? {
+          permitirCredito: nextPermitirCredito,
+          limiteCredito: toDecimal(nextLimiteCredito, 2),
+        }
+      : {}),
     ...(payload.ubigeo !== undefined ? { ubigeo: toOptionalString(payload.ubigeo) } : {}),
     ...(payload.fechaNacimiento !== undefined
       ? { fechaNacimiento: parseOptionalDate(payload.fechaNacimiento) ?? null }
@@ -377,4 +424,3 @@ export async function deleteCustomer(customerId: string, request: FastifyRequest
 
   return { success: true }
 }
-

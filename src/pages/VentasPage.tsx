@@ -259,6 +259,12 @@ export function VentasPage() {
       name: 'payments',
     }) ?? []
 
+  const watchedCustomerId =
+    useWatch({
+      control: checkoutForm.control,
+      name: 'clienteId',
+    }) ?? 'SHOWROOM'
+
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
       return
@@ -335,6 +341,23 @@ export function VentasPage() {
     0,
     cartMetrics.total - Math.min(cartMetrics.total, watchedPaymentTotal),
   )
+
+  const selectedCustomer = useMemo(
+    () =>
+      watchedCustomerId === 'SHOWROOM'
+        ? null
+        : options.customers.find((customer) => customer.id === watchedCustomerId) ?? null,
+    [options.customers, watchedCustomerId],
+  )
+
+  const customerAllowsCredit = selectedCustomer?.permitirCredito ?? false
+  const requiresFullPayment = watchedCustomerId === 'SHOWROOM' || !customerAllowsCredit
+  const paymentBlockingMessage =
+    requiresFullPayment && estimatedOutstanding > 0
+      ? watchedCustomerId === 'SHOWROOM'
+        ? 'Las ventas de mostrador deben quedar completamente pagadas.'
+        : 'El cliente seleccionado no tiene crédito habilitado. La venta debe quedar completamente pagada.'
+      : null
 
   function syncCartWithProduct(
     current: LocalCartItem,
@@ -526,6 +549,29 @@ export function VentasPage() {
 
     if (!cartItems.length) {
       toast.error('No hay productos en el carrito para emitir la venta.')
+      return
+    }
+
+    const paidAmount = values.payments.reduce(
+      (sum, payment) => sum + (Number.isFinite(payment.monto) ? payment.monto : 0),
+      0,
+    )
+    const outstandingAmount = Math.max(
+      0,
+      cartMetrics.total - Math.min(cartMetrics.total, paidAmount),
+    )
+    const customerId = values.clienteId ?? 'SHOWROOM'
+    const isShowroom = customerId === 'SHOWROOM'
+    const selectedCustomer =
+      isShowroom ? null : options.customers.find((customer) => customer.id === customerId) ?? null
+    const customerAllowsCredit = selectedCustomer?.permitirCredito ?? false
+
+    if (outstandingAmount > 0 && (isShowroom || !customerAllowsCredit)) {
+      toast.error(
+        isShowroom
+          ? 'Las ventas de mostrador deben quedar completamente pagadas.'
+          : 'El cliente seleccionado no tiene crédito habilitado. La venta debe quedar completamente pagada.',
+      )
       return
     }
 
@@ -1397,6 +1443,11 @@ export function VentasPage() {
                       </p>
                     </div>
                   </div>
+                  {paymentBlockingMessage ? (
+                    <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                      {paymentBlockingMessage}
+                    </div>
+                  ) : null}
                 </Card>
               </div>
             </div>
@@ -1411,7 +1462,10 @@ export function VentasPage() {
                 >
                   Seguir vendiendo
                 </Button>
-                <Button type="submit" disabled={isSubmitting || !cartItems.length}>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || !cartItems.length || Boolean(paymentBlockingMessage)}
+                >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
