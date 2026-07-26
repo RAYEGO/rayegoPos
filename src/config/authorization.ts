@@ -151,6 +151,13 @@ export const roleDefinitions: RoleDefinition[] = [
       'caja.read',
     ],
   },
+  {
+    key: 'ALMACEN',
+    label: 'Almacén',
+    description: 'Gestiona recepción, lotes, stock y transferencias entre sucursales.',
+    badgeVariant: 'outline',
+    permissions: ['dashboard.read', 'compras.read', 'inventario.read', 'productos.read'],
+  },
 ]
 
 export const permissionDefinitionMap = Object.fromEntries(

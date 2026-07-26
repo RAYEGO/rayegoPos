@@ -1,17 +1,37 @@
-import { useState } from 'react'
-import { ChevronDown, History, MonitorSmartphone, RefreshCcw, ShieldCheck, UserPlus, Users2 } from 'lucide-react'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useMemo, useState } from 'react'
+import { Controller, useForm } from 'react-hook-form'
+import { z } from 'zod'
+import { Edit, MoreVertical, Search, UserPlus, Users2 } from 'lucide-react'
 import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
-import { PermissionBadge } from '@/components/auth/PermissionBadge'
 import { RoleBadge } from '@/components/auth/RoleBadge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -20,26 +40,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  permissionDefinitions,
-  permissionModules,
-  roleDefinitions,
-} from '@/config/authorization'
+import { roleDefinitions } from '@/config/authorization'
 import { useAuthorization } from '@/hooks/useAuthorization'
-import type { AuthPermission } from '@/types/auth'
-import {
-  auditRecords,
-  securitySessions,
-  securityUsers,
-} from '@/modules/security/mock-data'
-
-function roleGrantsPermission(
-  rolePermissions: AuthPermission[],
-  permission: Exclude<AuthPermission, '*'>,
-) {
-  return rolePermissions.includes('*') || rolePermissions.includes(permission)
-}
+import { usersModuleBranches, usersModuleUsers, type UserStatus, type UsersModuleUserRecord } from '@/modules/users/mock-data'
+import type { AuthRole } from '@/types/auth'
+import { toast } from 'sonner'
 
 function getUserStatusVariant(status: 'ACTIVO' | 'BLOQUEADO' | 'INVITADO') {
   if (status === 'ACTIVO') return 'success'
@@ -47,436 +52,733 @@ function getUserStatusVariant(status: 'ACTIVO' | 'BLOQUEADO' | 'INVITADO') {
   return 'warning'
 }
 
-function getSessionStatusVariant(status: 'ACTIVA' | 'INACTIVA' | 'REVOCADA') {
-  if (status === 'ACTIVA') return 'success'
-  if (status === 'INACTIVA') return 'warning'
-  return 'destructive'
+type UsersFilters = {
+  search: string
+  role: 'TODOS' | AuthRole
+  status: 'TODOS' | UserStatus
+  branchId: 'TODAS' | string
 }
 
-function getSeverityVariant(severity: 'INFO' | 'WARNING' | 'CRITICAL') {
-  if (severity === 'INFO') return 'info'
-  if (severity === 'WARNING') return 'warning'
-  return 'destructive'
+const usersFormSchema = z
+  .object({
+    firstName: z.string().min(1, 'Ingresa los nombres.'),
+    lastName: z.string().min(1, 'Ingresa los apellidos.'),
+    documentId: z.string().min(1, 'Ingresa el documento.').max(20),
+    phone: z.string().min(1, 'Ingresa el celular.').max(40),
+    email: z.string().min(1, 'Ingresa el correo.').email('Ingresa un correo válido.'),
+    username: z.string().min(1, 'Ingresa el usuario.').max(60),
+    password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.'),
+    confirmPassword: z.string().min(8, 'Confirma la contraseña.'),
+    role: z.enum(['ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
+    branchIds: z.array(z.string()).min(1, 'Selecciona al menos una sucursal.'),
+    isActive: z.boolean(),
+    mustChangePassword: z.boolean(),
+    mfaEnabled: z.boolean(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    path: ['confirmPassword'],
+    message: 'Las contraseñas no coinciden.',
+  })
+
+type UsersFormValues = z.infer<typeof usersFormSchema>
+
+const defaultUserFormValues: UsersFormValues = {
+  firstName: '',
+  lastName: '',
+  documentId: '',
+  phone: '',
+  email: '',
+  username: '',
+  password: '',
+  confirmPassword: '',
+  role: 'CAJERO',
+  branchIds: [],
+  isActive: true,
+  mustChangePassword: false,
+  mfaEnabled: false,
+}
+
+function getUserFullName(user: Pick<UsersModuleUserRecord, 'firstName' | 'lastName'>) {
+  return `${user.firstName} ${user.lastName}`.trim()
+}
+
+function formatBranchSummary(branchNames: string[]) {
+  if (branchNames.length === 0) return '—'
+  if (branchNames.length <= 2) return branchNames.join('\n')
+  return `${branchNames.length} sucursales`
 }
 
 export function UsuariosPage() {
   const { can, hasRole } = useAuthorization()
-  const [showSummary, setShowSummary] = useState(false)
+  const [filters, setFilters] = useState<UsersFilters>({
+    search: '',
+    role: 'TODOS',
+    status: 'TODOS',
+    branchId: 'TODAS',
+  })
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false)
+  const [editingUser, setEditingUser] = useState<UsersModuleUserRecord | null>(null)
+
+  const branchNameMap = useMemo(() => {
+    return Object.fromEntries(usersModuleBranches.map((branch) => [branch.id, branch.name]))
+  }, [])
+
+  const filteredUsers = useMemo(() => {
+    const normalizedSearch = filters.search.trim().toLowerCase()
+
+    return usersModuleUsers.filter((user) => {
+      const userFullName = getUserFullName(user).toLowerCase()
+      const matchesSearch =
+        normalizedSearch.length === 0 ||
+        userFullName.includes(normalizedSearch) ||
+        user.email.toLowerCase().includes(normalizedSearch) ||
+        user.username.toLowerCase().includes(normalizedSearch)
+
+      const matchesRole = filters.role === 'TODOS' || user.primaryRole === filters.role
+      const matchesStatus = filters.status === 'TODOS' || user.status === filters.status
+      const matchesBranch =
+        filters.branchId === 'TODAS' || user.branchIds.includes(filters.branchId)
+
+      return matchesSearch && matchesRole && matchesStatus && matchesBranch
+    })
+  }, [filters])
+
+  const usersMetrics = useMemo(() => {
+    return {
+      total: usersModuleUsers.length,
+      active: usersModuleUsers.filter((user) => user.status === 'ACTIVO').length,
+      blocked: usersModuleUsers.filter((user) => user.status === 'BLOQUEADO').length,
+    }
+  }, [])
+
+  const userForm = useForm<UsersFormValues>({
+    resolver: zodResolver(usersFormSchema),
+    defaultValues: defaultUserFormValues,
+  })
+
+  const watchedBranchIds = userForm.watch('branchIds')
+
+  function toggleBranch(branchId: string, checked: boolean) {
+    const nextValue = checked
+      ? Array.from(new Set([...watchedBranchIds, branchId]))
+      : watchedBranchIds.filter((id) => id !== branchId)
+    userForm.setValue('branchIds', nextValue, { shouldValidate: true })
+  }
+
+  function openCreateUserDialog() {
+    setEditingUser(null)
+    userForm.reset(defaultUserFormValues)
+    setIsUserDialogOpen(true)
+  }
+
+  function openEditUserDialog(user: UsersModuleUserRecord) {
+    setEditingUser(user)
+    userForm.reset({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      documentId: user.documentId,
+      phone: user.phone,
+      email: user.email,
+      username: user.username,
+      password: '',
+      confirmPassword: '',
+      role: user.primaryRole,
+      branchIds: user.branchIds,
+      isActive: user.status === 'ACTIVO',
+      mustChangePassword: user.mustChangePassword,
+      mfaEnabled: user.mfaEnabled,
+    })
+    setIsUserDialogOpen(true)
+  }
+
+  function closeUserDialog() {
+    setIsUserDialogOpen(false)
+    setEditingUser(null)
+  }
+
+  async function onSubmitUserForm(values: UsersFormValues) {
+    toast.message(
+      editingUser
+        ? 'Interfaz lista para conectar edición de usuarios.'
+        : 'Interfaz lista para conectar creación de usuarios.',
+    )
+    closeUserDialog()
+    void values
+  }
 
   return (
     <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-bold text-foreground">Usuarios</h1>
-        <Button variant="ghost" size="sm" onClick={() => setShowSummary(!showSummary)}>
-          Resumen
-          <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showSummary ? 'rotate-180' : ''}`} />
-        </Button>
-      </div>
+      <AuthorizationGate
+        permission="usuarios.read"
+        fallback={
+          <Card>
+            <CardContent className="p-6">
+              <Badge variant="warning">No tienes acceso al módulo de Usuarios.</Badge>
+            </CardContent>
+          </Card>
+        }
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold text-foreground">Usuarios</h1>
+            <p className="text-small text-muted-foreground">
+              Administra personas, roles principales y sucursales autorizadas.
+            </p>
+          </div>
 
-      {showSummary && (
+          <AuthorizationGate
+            permission="usuarios.manage"
+            fallback={
+              <Button type="button" size="sm" disabled>
+                <UserPlus className="h-4 w-4" />
+                Crear usuario
+              </Button>
+            }
+          >
+            <Button type="button" size="sm" onClick={openCreateUserDialog}>
+              <UserPlus className="h-4 w-4" />
+              Crear usuario
+            </Button>
+          </AuthorizationGate>
+        </div>
+
         <div className="flex flex-wrap gap-3">
           <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
             <Users2 className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{securityUsers.length}</span>
+              <span className="text-lg font-bold text-foreground">{usersMetrics.total}</span>
               <span className="text-xs text-muted-foreground">Usuarios</span>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <MonitorSmartphone className="h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{securitySessions.filter((s) => s.status === 'ACTIVA').length}</span>
-              <span className="text-xs text-muted-foreground">Sesiones</span>
+              <span className="text-lg font-bold text-foreground">{usersMetrics.active}</span>
+              <span className="text-xs text-muted-foreground">Activos</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+            <div className="flex flex-col">
+              <span className="text-lg font-bold text-foreground">{usersMetrics.blocked}</span>
+              <span className="text-xs text-muted-foreground">Bloqueados</span>
             </div>
           </div>
         </div>
-      )}
 
-      <Tabs defaultValue={can('usuarios.read') ? 'usuarios' : can('sesiones.read') ? 'sesiones' : 'auditoria'}>
-        <TabsList className="grid w-full grid-cols-3 lg:w-fit">
-          <TabsTrigger value="usuarios">Gestión de usuarios</TabsTrigger>
-          <TabsTrigger value="sesiones">Gestión de sesiones</TabsTrigger>
-          <TabsTrigger value="auditoria">Auditoría</TabsTrigger>
-        </TabsList>
+        <Card>
+          <CardHeader className="gap-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle>Directorio de usuarios</CardTitle>
+                <CardDescription>
+                  La sucursal activa se define en el login. Este módulo solo administra usuarios.
+                </CardDescription>
+              </div>
+              {hasRole('ADMIN') ? (
+                <Badge variant="outline">Preparado para roles múltiples</Badge>
+              ) : null}
+            </div>
 
-        <TabsContent value="usuarios" className="space-y-6">
-          <AuthorizationGate
-            permission="usuarios.read"
-            fallback={
-              <Card>
-                <CardContent className="p-6">
-                  <Badge variant="warning">No tienes acceso al detalle de usuarios.</Badge>
-                </CardContent>
-              </Card>
-            }
-          >
-            <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-              <Card>
-                <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Users2 className="h-5 w-5 text-primary" />
-                      Gestión de usuarios
-                    </CardTitle>
-                    <CardDescription>
-                      Estado, rol, MFA y última actividad de cada usuario.
-                    </CardDescription>
-                  </div>
+            <div className="grid gap-3 lg:grid-cols-[1.4fr_0.6fr_0.6fr_0.6fr]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={filters.search}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, search: event.target.value }))
+                  }
+                  placeholder="Buscar usuario, correo o usuario…"
+                  className="pl-9"
+                />
+              </div>
 
-                  <AuthorizationGate
-                    permission="usuarios.manage"
-                    fallback={
-                      <Button type="button" variant="outline" size="sm" disabled>
-                        <UserPlus className="h-4 w-4" />
-                        Crear usuario
-                      </Button>
-                    }
-                  >
-                    <Button type="button" size="sm">
-                      <UserPlus className="h-4 w-4" />
-                      Crear usuario
-                    </Button>
-                  </AuthorizationGate>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Usuario</TableHead>
-                        <TableHead>Roles</TableHead>
-                        <TableHead>Sucursal</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead>MFA</TableHead>
-                        <TableHead>Último acceso</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {securityUsers.map((user) => (
+              <Select
+                value={filters.role}
+                onValueChange={(value) =>
+                  setFilters((current) => ({ ...current, role: value as UsersFilters['role'] }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Rol" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos los roles</SelectItem>
+                  {roleDefinitions.map((role) => (
+                    <SelectItem key={role.key} value={role.key}>
+                      {role.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={filters.status}
+                onValueChange={(value) =>
+                  setFilters((current) => ({
+                    ...current,
+                    status: value as UsersFilters['status'],
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos los estados</SelectItem>
+                  <SelectItem value="ACTIVO">Activo</SelectItem>
+                  <SelectItem value="INVITADO">Invitado</SelectItem>
+                  <SelectItem value="BLOQUEADO">Bloqueado</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={filters.branchId}
+                onValueChange={(value) =>
+                  setFilters((current) => ({ ...current, branchId: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Sucursal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODAS">Todas las sucursales</SelectItem>
+                  {usersModuleBranches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3 sm:hidden">
+              {filteredUsers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed p-10 text-center text-muted-foreground">
+                  No hay usuarios con los filtros actuales.
+                </div>
+              ) : (
+                filteredUsers.map((user) => {
+                  const branchNames = user.branchIds
+                    .map((branchId) => branchNameMap[branchId])
+                    .filter(Boolean)
+                  const branchSummary = formatBranchSummary(branchNames)
+
+                  return (
+                    <div key={user.id} className="rounded-2xl border p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="font-semibold text-foreground">{getUserFullName(user)}</p>
+                          <p className="text-small text-muted-foreground">{user.email}</p>
+                        </div>
+                        <AuthorizationGate
+                          permission="usuarios.manage"
+                          fallback={
+                            <Button type="button" size="icon" variant="ghost" disabled>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          }
+                        >
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openEditUserDialog(user)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </AuthorizationGate>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 rounded-xl bg-muted/30 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Rol principal
+                          </span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <RoleBadge role={user.primaryRole} />
+                            {user.roles.length > 1 ? (
+                              <Badge variant="outline">+{user.roles.length - 1}</Badge>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Sucursales
+                          </span>
+                          <span className="whitespace-pre-line text-right text-small text-foreground">
+                            {branchSummary}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Estado
+                          </span>
+                          <Badge variant={getUserStatusVariant(user.status)}>{user.status}</Badge>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Último acceso
+                          </span>
+                          <span className="text-small text-foreground">{user.lastAccessAt}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="hidden overflow-x-auto sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Usuario</TableHead>
+                    <TableHead>Rol principal</TableHead>
+                    <TableHead>Sucursales</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Último acceso</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredUsers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                        No hay usuarios con los filtros actuales.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredUsers.map((user) => {
+                      const branchNames = user.branchIds
+                        .map((branchId) => branchNameMap[branchId])
+                        .filter(Boolean)
+                      const branchSummary = formatBranchSummary(branchNames)
+
+                      return (
                         <TableRow key={user.id}>
                           <TableCell>
-                            <div>
-                              <p className="font-medium text-foreground">{user.fullName}</p>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{getUserFullName(user)}</p>
                               <p className="text-small text-muted-foreground">{user.email}</p>
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              {user.roles.map((role) => <RoleBadge key={role} role={role} />)}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <RoleBadge role={user.primaryRole} />
+                              {user.roles.length > 1 ? (
+                                <Badge variant="outline">+{user.roles.length - 1}</Badge>
+                              ) : null}
                             </div>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{user.branchName}</TableCell>
+                          <TableCell className="whitespace-pre-line text-muted-foreground">
+                            {branchSummary}
+                          </TableCell>
                           <TableCell>
                             <Badge variant={getUserStatusVariant(user.status)}>{user.status}</Badge>
                           </TableCell>
-                          <TableCell>
-                            <Badge variant={user.mfaEnabled ? 'success' : 'outline'}>
-                              {user.mfaEnabled ? 'Activo' : 'Pendiente'}
-                            </Badge>
-                          </TableCell>
                           <TableCell className="text-muted-foreground">{user.lastAccessAt}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Matriz de roles</CardTitle>
-                    <CardDescription>
-                      Base del sistema de autorización lista para backend.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {roleDefinitions.map((role) => (
-                      <div key={role.key} className="rounded-2xl border p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <RoleBadge role={role.key} />
-                          <Badge variant="outline">
-                            {role.permissions.includes('*')
-                              ? 'Acceso total'
-                              : `${role.permissions.length} permisos`}
-                          </Badge>
-                        </div>
-                        <p className="mt-3 text-small text-muted-foreground">{role.description}</p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Permisos de seguridad</CardTitle>
-                    <CardDescription>
-                      Catálogo visible para usuarios, sesiones y auditoría.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-wrap gap-2">
-                    {permissionDefinitions
-                      .filter((permission) => permission.module === 'Seguridad')
-                      .map((permission) => (
-                        <PermissionBadge key={permission.key} permission={permission.key} />
-                      ))}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </AuthorizationGate>
-        </TabsContent>
-
-        <TabsContent value="sesiones" className="space-y-6">
-          <AuthorizationGate
-            permission="sesiones.read"
-            fallback={
-              <Card>
-                <CardContent className="p-6">
-                  <Badge variant="warning">No tienes acceso al monitoreo de sesiones.</Badge>
-                </CardContent>
-              </Card>
-            }
-          >
-            <Card>
-              <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <MonitorSmartphone className="h-5 w-5 text-primary" />
-                    Gestión de sesiones
-                  </CardTitle>
-                  <CardDescription>
-                    Seguimiento de sesiones activas, inactivas y revocadas por dispositivo.
-                  </CardDescription>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm">
-                    <RefreshCcw className="h-4 w-4" />
-                    Actualizar
-                  </Button>
-                  <AuthorizationGate
-                    permission="sesiones.revoke"
-                    fallback={
-                      <Button type="button" variant="outline" size="sm" disabled>
-                        Cerrar sesión remota
-                      </Button>
-                    }
-                  >
-                    <Button type="button" variant="danger" size="sm">
-                      Cerrar sesión remota
-                    </Button>
-                  </AuthorizationGate>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Usuario</TableHead>
-                      <TableHead>Dispositivo</TableHead>
-                      <TableHead>IP</TableHead>
-                      <TableHead>Inicio</TableHead>
-                      <TableHead>Última actividad</TableHead>
-                      <TableHead>Estado</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {securitySessions.map((sessionItem) => (
-                      <TableRow key={sessionItem.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{sessionItem.userName}</p>
-                            <RoleBadge role={sessionItem.role} />
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{sessionItem.device}</TableCell>
-                        <TableCell className="text-muted-foreground">{sessionItem.ipAddress}</TableCell>
-                        <TableCell className="text-muted-foreground">{sessionItem.startedAt}</TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="text-muted-foreground">{sessionItem.lastSeenAt}</p>
-                            {sessionItem.isCurrent ? (
-                              <Badge variant="info">Sesión actual</Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getSessionStatusVariant(sessionItem.status)}>
-                            {sessionItem.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </AuthorizationGate>
-        </TabsContent>
-
-        <TabsContent value="auditoria" className="space-y-6">
-          <AuthorizationGate
-            permission="auditoria.read"
-            fallback={
-              <Card>
-                <CardContent className="p-6">
-                  <Badge variant="warning">No tienes acceso al historial de auditoría.</Badge>
-                </CardContent>
-              </Card>
-            }
-          >
-            <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <History className="h-5 w-5 text-primary" />
-                    Auditoría operativa
-                  </CardTitle>
-                  <CardDescription>
-                    Historial de acciones sensibles listo para integrarse con la tabla `auditoria`.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Fecha</TableHead>
-                        <TableHead>Actor</TableHead>
-                        <TableHead>Módulo</TableHead>
-                        <TableHead>Acción</TableHead>
-                        <TableHead>Objetivo</TableHead>
-                        <TableHead>Severidad</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {auditRecords.map((record) => (
-                        <TableRow key={record.id}>
-                          <TableCell className="text-muted-foreground">{record.createdAt}</TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <p className="font-medium text-foreground">{record.actorName}</p>
-                              <RoleBadge role={record.actorRole} />
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">{record.module}</TableCell>
-                          <TableCell>{record.action}</TableCell>
-                          <TableCell className="text-muted-foreground">{record.target}</TableCell>
-                          <TableCell>
-                            <Badge variant={getSeverityVariant(record.severity)}>
-                              {record.severity}
-                            </Badge>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button type="button" size="icon" variant="ghost">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <AuthorizationGate
+                                  permission="usuarios.manage"
+                                  fallback={
+                                    <DropdownMenuItem disabled>
+                                      <Edit className="h-4 w-4" />
+                                      Editar
+                                    </DropdownMenuItem>
+                                  }
+                                >
+                                  <DropdownMenuItem onClick={() => openEditUserDialog(user)}>
+                                    <Edit className="h-4 w-4" />
+                                    Editar
+                                  </DropdownMenuItem>
+                                </AuthorizationGate>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Controles de auditoría</CardTitle>
-                    <CardDescription>
-                      Acciones futuras preparadas para exportar, filtrar y retener eventos.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="rounded-2xl border p-4">
-                      <p className="font-medium text-foreground">Eventos críticos</p>
-                      <p className="mt-1 text-small text-muted-foreground">
-                        {auditRecords.filter((record) => record.severity === 'CRITICAL').length} registros requieren revisión prioritaria.
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border p-4">
-                      <p className="font-medium text-foreground">IP registradas</p>
-                      <p className="mt-1 text-small text-muted-foreground">
-                        {new Set(auditRecords.map((record) => record.ipAddress)).size} orígenes distintos en el historial mostrado.
-                      </p>
-                    </div>
-                    <AuthorizationGate
-                      role="ADMIN"
-                      fallback={
-                        <Badge variant="warning">
-                          Solo administradores podrán exportar bitácoras completas.
-                        </Badge>
-                      }
-                    >
-                      <Button type="button" variant="outline" size="sm">
-                        <ShieldCheck className="h-4 w-4" />
-                        Exportar bitácora
-                      </Button>
-                    </AuthorizationGate>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Mapa de permisos</CardTitle>
-                    <CardDescription>
-                      Cobertura por módulo para seguridad y trazabilidad.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Módulo</TableHead>
-                          <TableHead>Permiso</TableHead>
-                          <TableHead>Roles con acceso</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {permissionModules.flatMap((module) =>
-                          permissionDefinitions
-                            .filter((permission) => permission.module === module)
-                            .map((permission, index) => (
-                              <TableRow key={permission.key}>
-                                <TableCell className="font-medium">
-                                  {index === 0 ? module : ''}
-                                </TableCell>
-                                <TableCell>
-                                  <PermissionBadge permission={permission.key} />
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-wrap gap-2">
-                                    {roleDefinitions
-                                      .filter((role) =>
-                                        roleGrantsPermission(role.permissions, permission.key),
-                                      )
-                                      .map((role) => (
-                                        <RoleBadge key={role.key} role={role.key} />
-                                      ))}
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            )),
-                        )}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </div>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          </AuthorizationGate>
-        </TabsContent>
-      </Tabs>
-
-      {hasRole('ADMIN') ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Acciones administrativas</CardTitle>
-            <CardDescription>
-              Zona preparada para acciones críticas sobre políticas de acceso.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Badge variant="info">Crear rol</Badge>
-            <Badge variant="info">Asignar permisos</Badge>
-            <Badge variant="info">Editar políticas</Badge>
           </CardContent>
         </Card>
-      ) : null}
+
+        <Dialog
+          open={isUserDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeUserDialog()
+            }
+          }}
+        >
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{editingUser ? 'Editar usuario' : 'Crear usuario'}</DialogTitle>
+              <DialogDescription>
+                Interfaz preparada para conectar backend. Los cambios aún no se guardan.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form
+              className="space-y-4"
+              onSubmit={userForm.handleSubmit(onSubmitUserForm)}
+            >
+              <div className="space-y-4">
+                <div className="rounded-2xl border p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Información personal</p>
+                    <p className="text-small text-muted-foreground">
+                      Datos base para identificar al usuario en el sistema.
+                    </p>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="firstName">
+                        Nombres
+                      </label>
+                      <Input id="firstName" {...userForm.register('firstName')} />
+                      {userForm.formState.errors.firstName ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.firstName.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="lastName">
+                        Apellidos
+                      </label>
+                      <Input id="lastName" {...userForm.register('lastName')} />
+                      {userForm.formState.errors.lastName ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.lastName.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2">
+                      <label
+                        className="text-small font-medium text-foreground"
+                        htmlFor="documentId"
+                      >
+                        Documento
+                      </label>
+                      <Input id="documentId" {...userForm.register('documentId')} />
+                      {userForm.formState.errors.documentId ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.documentId.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="phone">
+                        Celular
+                      </label>
+                      <Input id="phone" {...userForm.register('phone')} />
+                      {userForm.formState.errors.phone ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.phone.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="email">
+                        Correo
+                      </label>
+                      <Input id="email" type="email" {...userForm.register('email')} />
+                      {userForm.formState.errors.email ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.email.message}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Cuenta</p>
+                    <p className="text-small text-muted-foreground">
+                      Credenciales de acceso para iniciar sesión.
+                    </p>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="username">
+                        Usuario
+                      </label>
+                      <Input id="username" {...userForm.register('username')} />
+                      {userForm.formState.errors.username ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.username.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="password">
+                        Contraseña
+                      </label>
+                      <Input id="password" type="password" {...userForm.register('password')} />
+                      {userForm.formState.errors.password ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.password.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-2">
+                      <label
+                        className="text-small font-medium text-foreground"
+                        htmlFor="confirmPassword"
+                      >
+                        Confirmar contraseña
+                      </label>
+                      <Input
+                        id="confirmPassword"
+                        type="password"
+                        {...userForm.register('confirmPassword')}
+                      />
+                      {userForm.formState.errors.confirmPassword ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.confirmPassword.message}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Accesos</p>
+                    <p className="text-small text-muted-foreground">
+                      Rol principal asignado al usuario (preparado para múltiples roles).
+                    </p>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-small font-medium text-foreground" htmlFor="role">
+                        Rol
+                      </label>
+                      <Controller
+                        control={userForm.control}
+                        name="role"
+                        render={({ field }) => (
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <SelectTrigger id="role">
+                              <SelectValue placeholder="Selecciona un rol" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {roleDefinitions.map((role) => (
+                                <SelectItem key={role.key} value={role.key}>
+                                  {role.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                      {userForm.formState.errors.role ? (
+                        <p className="text-xs text-destructive">
+                          {userForm.formState.errors.role.message}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Sucursales autorizadas</p>
+                    <p className="text-small text-muted-foreground">
+                      Selecciona una o varias sucursales donde el usuario podrá operar.
+                    </p>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {usersModuleBranches.map((branch) => (
+                      <label
+                        key={branch.id}
+                        className="flex items-center gap-3 rounded-xl border px-3 py-2"
+                      >
+                        <Checkbox
+                          checked={watchedBranchIds.includes(branch.id)}
+                          onCheckedChange={(checked) => toggleBranch(branch.id, Boolean(checked))}
+                        />
+                        <span className="text-small text-foreground">{branch.name}</span>
+                      </label>
+                    ))}
+                    {userForm.formState.errors.branchIds ? (
+                      <p className="text-xs text-destructive">
+                        {userForm.formState.errors.branchIds.message}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Configuración</p>
+                    <p className="text-small text-muted-foreground">
+                      Ajustes operativos y soporte futuro para MFA.
+                    </p>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2">
+                      <span className="text-small font-medium text-foreground">Usuario activo</span>
+                      <Controller
+                        control={userForm.control}
+                        name="isActive"
+                        render={({ field }) => (
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        )}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2">
+                      <span className="text-small font-medium text-foreground">
+                        Requiere cambiar contraseña
+                      </span>
+                      <Controller
+                        control={userForm.control}
+                        name="mustChangePassword"
+                        render={({ field }) => (
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        )}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 md:col-span-2">
+                      <span className="text-small font-medium text-foreground">MFA (futuro)</span>
+                      <Controller
+                        control={userForm.control}
+                        name="mfaEnabled"
+                        render={({ field }) => (
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        )}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button type="button" variant="outline" onClick={closeUserDialog}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={!can('usuarios.manage')}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </AuthorizationGate>
     </div>
   )
 }
