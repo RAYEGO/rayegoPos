@@ -2,21 +2,13 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Edit, MoreVertical, Search, UserPlus, Users2 } from 'lucide-react'
+import { Edit, MoreVertical, Search, UserPlus, Users2, X } from 'lucide-react'
 import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { RoleBadge } from '@/components/auth/RoleBadge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -515,7 +508,7 @@ export function UsuariosPage() {
           </CardContent>
         </Card>
 
-        <Dialog
+        <SidePanel
           open={isUserDialogOpen}
           onOpenChange={(open) => {
             if (!open) {
@@ -523,19 +516,27 @@ export function UsuariosPage() {
             }
           }}
         >
-          <DialogContent className="max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>{editingUser ? 'Editar usuario' : 'Crear usuario'}</DialogTitle>
-              <DialogDescription>
-                Interfaz preparada para conectar backend. Los cambios aún no se guardan.
-              </DialogDescription>
-            </DialogHeader>
+          <SidePanelContent className="p-0">
+            <form className="flex h-full flex-col" onSubmit={userForm.handleSubmit(onSubmitUserForm)}>
+              <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-foreground">
+                    {editingUser ? 'Editar usuario' : 'Crear usuario'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Interfaz preparada para conectar backend. Los cambios aún no se guardan.
+                  </p>
+                </div>
+                <SidePanelClose asChild>
+                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Cerrar</span>
+                  </Button>
+                </SidePanelClose>
+              </div>
 
-            <form
-              className="space-y-4"
-              onSubmit={userForm.handleSubmit(onSubmitUserForm)}
-            >
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                <div className="space-y-4">
                 <div className="rounded-2xl border p-4">
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-foreground">Información personal</p>
@@ -766,18 +767,21 @@ export function UsuariosPage() {
                   </div>
                 </div>
               </div>
+              </div>
 
-              <DialogFooter className="gap-2">
-                <Button type="button" variant="outline" onClick={closeUserDialog}>
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={!can('usuarios.manage')}>
-                  Guardar
-                </Button>
-              </DialogFooter>
+              <div className="border-t bg-popover px-6 py-4">
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button type="button" variant="outline" onClick={closeUserDialog}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" disabled={!can('usuarios.manage')}>
+                    Guardar
+                  </Button>
+                </div>
+              </div>
             </form>
-          </DialogContent>
-        </Dialog>
+          </SidePanelContent>
+        </SidePanel>
       </AuthorizationGate>
     </div>
   )
