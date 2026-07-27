@@ -325,7 +325,7 @@ export async function getInventoryDashboard(
   request: FastifyRequest,
 ) {
   const search = filters.search?.trim()
-  const { branchId } = await getAuthContext(request)
+  const { branchId, companyId } = await getAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -414,6 +414,7 @@ export async function getInventoryDashboard(
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: {
           nombre: 'asc',
@@ -423,6 +424,7 @@ export async function getInventoryDashboard(
         where: {
           deletedAt: null,
           estado: 'ACTIVO',
+          empresaId: companyId,
         },
         orderBy: {
           nombre: 'asc',
@@ -437,6 +439,7 @@ export async function getInventoryDashboard(
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: {
           razonSocial: 'asc',
@@ -449,6 +452,7 @@ export async function getInventoryDashboard(
       prisma.inventario.findMany({
         where: {
           deletedAt: null,
+          sucursalId: branchId,
         },
         select: {
           sucursalId: true,

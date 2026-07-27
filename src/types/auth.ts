@@ -23,6 +23,8 @@ export type AuthUser = {
   email: string
   fullName: string
   roleName: string
+  companyId: string
+  companyName: string
   branchId: string
   branchCode: string
   branchName: string
@@ -40,6 +42,8 @@ export type AuthBranch = {
   id: string
   code: string
   name: string
+  companyId: string
+  companyName: string
 }
 
 export type AuthBranchSelectionResponse = {

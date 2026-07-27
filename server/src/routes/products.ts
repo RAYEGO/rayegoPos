@@ -107,9 +107,9 @@ export async function productRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/options', async () => getProductOptions())
+  app.get('/options', async (request) => getProductOptions(request))
 
-  app.get('/masters/categories', async () => listMasterCategories())
+  app.get('/masters/categories', async (request) => listMasterCategories(request))
 
   app.post('/masters/categories', async (request) => {
     const body = masterCategorySchema.parse(request.body)
@@ -127,7 +127,7 @@ export async function productRoutes(app: FastifyInstance) {
     return deleteMasterCategory(params.id, request)
   })
 
-  app.get('/masters/laboratories', async () => listMasterLaboratories())
+  app.get('/masters/laboratories', async (request) => listMasterLaboratories(request))
 
   app.post('/masters/laboratories', async (request) => {
     const body = masterLaboratorySchema.parse(request.body)
@@ -145,7 +145,7 @@ export async function productRoutes(app: FastifyInstance) {
     return deleteMasterLaboratory(params.id, request)
   })
 
-  app.get('/masters/presentations', async () => listMasterPresentations())
+  app.get('/masters/presentations', async (request) => listMasterPresentations(request))
 
   app.post('/masters/presentations', async (request) => {
     const body = masterPresentationSchema.parse(request.body)
@@ -163,7 +163,7 @@ export async function productRoutes(app: FastifyInstance) {
     return deleteMasterPresentation(params.id, request)
   })
 
-  app.get('/masters/units', async () => listMasterUnits())
+  app.get('/masters/units', async (request) => listMasterUnits(request))
 
   app.post('/masters/units', async (request) => {
     const body = masterUnitSchema.parse(request.body)

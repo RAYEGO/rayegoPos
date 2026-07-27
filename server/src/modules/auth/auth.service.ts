@@ -28,10 +28,18 @@ type AuthTokenPayload = {
   sub: string
   email: string
   typ: 'access' | 'refresh' | 'reset-password'
+  companyId?: string | null
   branchId?: string | null
+  roles?: string[]
 }
 
 type AuthenticatedUser = Awaited<ReturnType<typeof findUserByIdentifier>>
+
+function createHttpError(statusCode: number, message: string) {
+  const error = new Error(message) as Error & { statusCode: number }
+  error.statusCode = statusCode
+  return error
+}
 
 async function findUserByIdentifier(identifier: string) {
   const normalizedIdentifier = identifier.trim().toLowerCase()
@@ -56,6 +64,14 @@ async function findUserByIdentifier(identifier: string) {
           id: true,
           codigo: true,
           nombre: true,
+          empresaId: true,
+          activo: true,
+          deletedAt: true,
+          empresa: {
+            select: {
+              razonSocial: true,
+            },
+          },
         },
       },
       usuarioSucursales: {
@@ -69,6 +85,12 @@ async function findUserByIdentifier(identifier: string) {
               id: true,
               codigo: true,
               nombre: true,
+              empresaId: true,
+              empresa: {
+                select: {
+                  razonSocial: true,
+                },
+              },
               activo: true,
               deletedAt: true,
             },
@@ -121,16 +143,39 @@ async function findUserByIdentifier(identifier: string) {
 }
 
 function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBranch[] {
+  const userCompanyId = user.empresaId
+  const companyIds = new Set<string>()
+
   const memberships = user.usuarioSucursales
     .filter((entry) => entry.sucursal.activo && entry.sucursal.deletedAt === null)
-    .map((entry) => ({
-      id: entry.sucursal.id,
-      code: entry.sucursal.codigo,
-      name: entry.sucursal.nombre,
-    }))
+    .map((entry) => {
+      companyIds.add(entry.sucursal.empresaId)
+      return {
+        id: entry.sucursal.id,
+        code: entry.sucursal.codigo,
+        name: entry.sucursal.nombre,
+        companyId: entry.sucursal.empresaId,
+        companyName: entry.sucursal.empresa?.razonSocial ?? 'Empresa',
+      }
+    })
+
+  if (user.sucursal && user.sucursal.activo && user.sucursal.deletedAt === null) {
+    companyIds.add(user.sucursal.empresaId)
+  }
+
+  if (companyIds.size > 1) {
+    throw createHttpError(
+      409,
+      'El usuario está asociado a más de una empresa. Esta versión de Rayego POS no lo permite.',
+    )
+  }
+
+  if (companyIds.size === 1 && !companyIds.has(userCompanyId)) {
+    throw createHttpError(409, 'La empresa del usuario no es válida para sus sucursales.')
+  }
 
   if (memberships.length > 0) {
-    return memberships
+    return memberships.filter((branch) => branch.companyId === userCompanyId)
   }
 
   if (user.sucursal) {
@@ -139,6 +184,8 @@ function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBra
         id: user.sucursal.id,
         code: user.sucursal.codigo,
         name: user.sucursal.nombre,
+        companyId: user.sucursal.empresaId,
+        companyName: user.sucursal.empresa?.razonSocial ?? 'Empresa',
       },
     ]
   }
@@ -191,6 +238,8 @@ function buildSessionFromUser(
       email: user.email ?? user.username,
       fullName: `${user.nombres} ${user.apellidos}`.trim(),
       roleName: getRoleLabel(primaryRole),
+      companyId: branch.companyId,
+      companyName: branch.companyName,
       branchId: branch.id,
       branchCode: branch.code,
       branchName: branch.name,
@@ -222,12 +271,14 @@ async function writeAuditEntry(
 async function signSessionTokens(
   request: FastifyRequest,
   user: NonNullable<AuthenticatedUser>,
+  companyId: string | null,
   branchId: string | null,
   roles: string[],
 ) {
   const payload = {
     sub: user.id,
     email: user.email ?? user.username,
+    companyId,
     branchId,
     roles,
   }
@@ -300,11 +351,18 @@ export async function login(
     })
   }
 
+  if (activeBranch.companyId !== user.empresaId) {
+    return reply.code(409).send({
+      message: 'La sucursal seleccionada pertenece a una empresa distinta a la del usuario.',
+    })
+  }
+
   const { roles } = resolveRoleContext(user, activeBranch.id)
 
   const { accessToken, refreshToken } = await signSessionTokens(
     request,
     user,
+    activeBranch.companyId,
     activeBranch.id,
     roles,
   )
@@ -368,6 +426,14 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
           id: true,
           codigo: true,
           nombre: true,
+          empresaId: true,
+          activo: true,
+          deletedAt: true,
+          empresa: {
+            select: {
+              razonSocial: true,
+            },
+          },
         },
       },
       usuarioSucursales: {
@@ -381,6 +447,12 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
               id: true,
               codigo: true,
               nombre: true,
+              empresaId: true,
+              empresa: {
+                select: {
+                  razonSocial: true,
+                },
+              },
               activo: true,
               deletedAt: true,
             },

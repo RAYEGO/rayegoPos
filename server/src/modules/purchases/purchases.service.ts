@@ -719,7 +719,7 @@ export async function getPurchaseDashboard(
   request: FastifyRequest,
 ) {
   const search = filters.search?.trim().toLowerCase()
-  const { branchId } = await getAuthContext(request)
+  const { branchId, companyId } = await getAuthContext(request)
   await ensureDefaultPaymentMethods(prisma)
 
   if (filters.branchId && filters.branchId !== branchId) {
@@ -744,6 +744,7 @@ export async function getPurchaseDashboard(
       where: {
         deletedAt: null,
         activo: true,
+        empresaId: companyId,
       },
       orderBy: {
         nombre: 'asc',
@@ -757,6 +758,7 @@ export async function getPurchaseDashboard(
       where: {
         deletedAt: null,
         activo: true,
+        empresaId: companyId,
       },
       orderBy: {
         razonSocial: 'asc',
@@ -772,6 +774,7 @@ export async function getPurchaseDashboard(
       where: {
         deletedAt: null,
         estado: 'ACTIVO',
+        empresaId: companyId,
       },
       orderBy: {
         nombre: 'asc',
@@ -1003,7 +1006,7 @@ export async function createPurchaseOrder(
   payload: CreatePurchaseOrderPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await getAuthContext(request)
   const targetBranchId = payload.sucursalId ?? branchId
 
   if (payload.sucursalId && payload.sucursalId !== branchId) {
@@ -1051,6 +1054,7 @@ export async function createPurchaseOrder(
           id: targetBranchId,
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
       }),
       tx.proveedor.findFirst({
@@ -1058,6 +1062,7 @@ export async function createPurchaseOrder(
           id: payload.proveedorId,
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
       }),
       tx.usuario.findFirst({
@@ -1065,6 +1070,7 @@ export async function createPurchaseOrder(
           id: userId,
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
       }),
       tx.producto.findMany({
@@ -1074,6 +1080,7 @@ export async function createPurchaseOrder(
           },
           deletedAt: null,
           estado: 'ACTIVO',
+          empresaId: companyId,
         },
         select: {
           id: true,

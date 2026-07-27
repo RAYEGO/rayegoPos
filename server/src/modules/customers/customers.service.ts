@@ -3,11 +3,6 @@ import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
-
 type CustomersFilters = {
   search?: string
   status?: 'activo' | 'inactivo'
@@ -108,28 +103,6 @@ function buildFullName(payload: {
   }
 }
 
-async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
-}
-
 const customerInclude = {
   createdBy: {
     select: {
@@ -182,7 +155,7 @@ export async function getCustomersDashboard(
   filters: CustomersFilters = {},
   request: FastifyRequest,
 ) {
-  await getAuthenticatedUserId(request)
+  const { companyId } = await getAuthContext(request)
 
   const search = filters.search?.trim()
   const isActive =
@@ -190,6 +163,7 @@ export async function getCustomersDashboard(
 
   const where: Prisma.ClienteWhereInput = {
     deletedAt: null,
+    empresaId: companyId,
     ...(isActive !== undefined ? { activo: isActive } : {}),
     ...(search
       ? {
@@ -259,14 +233,14 @@ export async function getCustomersDashboard(
 }
 
 export async function createCustomer(payload: CreateCustomerPayload, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
   const tipoPersona = payload.tipoPersona ?? TipoPersona.NATURAL
 
   const normalizedDocument = toOptionalString(payload.numeroDocumento)
 
   if (normalizedDocument) {
-    const existingCustomer = await prisma.cliente.findUnique({
-      where: { numeroDocumento: normalizedDocument },
+    const existingCustomer = await prisma.cliente.findFirst({
+      where: { numeroDocumento: normalizedDocument, empresaId: companyId, deletedAt: null },
     })
     if (existingCustomer) {
       throw createHttpError(409, 'Ya existe un cliente con ese número de documento.')
@@ -290,6 +264,7 @@ export async function createCustomer(payload: CreateCustomerPayload, request: Fa
 
   const customer = await prisma.cliente.create({
     data: {
+      empresaId: companyId,
       tipoPersona,
       tipoDocumento: payload.tipoDocumento ?? null,
       numeroDocumento: normalizedDocument,
@@ -317,10 +292,10 @@ export async function updateCustomer(
   payload: UpdateCustomerPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const existingCustomer = await prisma.cliente.findFirst({
-    where: { id: customerId, deletedAt: null },
+    where: { id: customerId, deletedAt: null, empresaId: companyId },
   })
 
   if (!existingCustomer) {
@@ -331,8 +306,8 @@ export async function updateCustomer(
     payload.numeroDocumento !== undefined ? toOptionalString(payload.numeroDocumento) : undefined
 
   if (normalizedDocument && normalizedDocument !== existingCustomer.numeroDocumento) {
-    const duplicateCustomer = await prisma.cliente.findUnique({
-      where: { numeroDocumento: normalizedDocument },
+    const duplicateCustomer = await prisma.cliente.findFirst({
+      where: { numeroDocumento: normalizedDocument, deletedAt: null, empresaId: companyId },
     })
     if (duplicateCustomer && duplicateCustomer.id !== customerId) {
       throw createHttpError(409, 'Ya existe otro cliente con ese número de documento.')
@@ -405,10 +380,10 @@ export async function updateCustomer(
 }
 
 export async function deleteCustomer(customerId: string, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const existingCustomer = await prisma.cliente.findFirst({
-    where: { id: customerId, deletedAt: null },
+    where: { id: customerId, deletedAt: null, empresaId: companyId },
   })
 
   if (!existingCustomer) {
@@ -440,12 +415,24 @@ function toMoney(value: Prisma.Decimal | number) {
 }
 
 export async function getCustomerSales(customerId: string, request: FastifyRequest) {
-  await getAuthContext(request)
+  const { companyId } = await getAuthContext(request)
+
+  const customer = await prisma.cliente.findFirst({
+    where: { id: customerId, deletedAt: null, empresaId: companyId },
+    select: { id: true },
+  })
+
+  if (!customer) {
+    throw createHttpError(404, 'El cliente no fue encontrado.')
+  }
 
   const sales = await prisma.venta.findMany({
     where: {
       deletedAt: null,
       clienteId: customerId,
+      sucursal: {
+        empresaId: companyId,
+      },
     },
     select: {
       id: true,
@@ -481,10 +468,10 @@ export async function getCustomerSales(customerId: string, request: FastifyReque
 }
 
 export async function getCustomerAccountStatement(customerId: string, request: FastifyRequest) {
-  await getAuthContext(request)
+  const { companyId } = await getAuthContext(request)
 
   const customer = await prisma.cliente.findFirst({
-    where: { id: customerId, deletedAt: null },
+    where: { id: customerId, deletedAt: null, empresaId: companyId },
     select: {
       id: true,
       permitirCredito: true,
@@ -505,6 +492,9 @@ export async function getCustomerAccountStatement(customerId: string, request: F
     where: {
       deletedAt: null,
       clienteId: customerId,
+      sucursal: {
+        empresaId: companyId,
+      },
       saldoPendiente: {
         gt: 0,
       },

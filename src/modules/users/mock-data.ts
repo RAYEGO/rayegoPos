@@ -20,9 +20,27 @@ export type UsersModuleUserRecord = {
 }
 
 export const usersModuleBranches: AuthBranch[] = [
-  { id: 'br-pichanaki', code: 'PIC', name: 'Pichanaki' },
-  { id: 'br-lamerced', code: 'LAM', name: 'La Merced' },
-  { id: 'br-satipo', code: 'SAT', name: 'Satipo' },
+  {
+    id: 'br-pichanaki',
+    code: 'PIC',
+    name: 'Pichanaki',
+    companyId: 'co-rayego',
+    companyName: 'Rayego Botica SAC',
+  },
+  {
+    id: 'br-lamerced',
+    code: 'LAM',
+    name: 'La Merced',
+    companyId: 'co-rayego',
+    companyName: 'Rayego Botica SAC',
+  },
+  {
+    id: 'br-satipo',
+    code: 'SAT',
+    name: 'Satipo',
+    companyId: 'co-rayego',
+    companyName: 'Rayego Botica SAC',
+  },
 ]
 
 export const usersModuleUsers: UsersModuleUserRecord[] = [
@@ -107,4 +125,3 @@ export const usersModuleUsers: UsersModuleUserRecord[] = [
     mfaEnabled: false,
   },
 ]
-

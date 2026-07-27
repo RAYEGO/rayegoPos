@@ -114,11 +114,6 @@ type CreateProductPayload = {
   observaciones?: string
 }
 
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
-
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
   error.statusCode = statusCode
@@ -209,33 +204,11 @@ function mapProduct(product: ProductWithRelations) {
   }
 }
 
-async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
-}
-
 export async function listProductCatalog(
   filters: ListProductsFilters,
   request: FastifyRequest,
 ) {
-  const { branchId } = await getAuthContext(request)
+  const { branchId, companyId } = await getAuthContext(request)
   const search = filters.search?.trim()
   const page = Math.max(1, filters.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 20))
@@ -245,6 +218,7 @@ export async function listProductCatalog(
 
   const where: Prisma.ProductoWhereInput = {
     deletedAt: null,
+    empresaId: companyId,
     ...(filters.status ? { estado: filters.status as never } : {}),
     ...(filters.categoryId ? { categoriaId: filters.categoryId } : {}),
     ...(filters.laboratoryId ? { laboratorioId: filters.laboratoryId } : {}),
@@ -344,6 +318,7 @@ export async function listProductCatalog(
   const categoryIdFilter = filters.categoryId ?? null
   const laboratoryIdFilter = filters.laboratoryId ?? null
   const searchFilter = search ?? null
+  const companyIdFilter = companyId
   const branchIdFilter = branchId
 
   const [{ count: lowStockCount }] = await prisma.$queryRaw<
@@ -359,6 +334,7 @@ export async function listProductCatalog(
        AND l.deleted_at IS NULL
        AND l.sucursal_id = ${branchIdFilter}::uuid
       WHERE p.deleted_at IS NULL
+        AND p.empresa_id = ${companyIdFilter}::uuid
         AND (${statusFilter}::text IS NULL OR p.estado::text = ${statusFilter}::text)
         AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
         AND (${laboratoryIdFilter}::uuid IS NULL OR p.laboratorio_id = ${laboratoryIdFilter}::uuid)
@@ -403,6 +379,7 @@ export async function listProductCatalog(
        AND l.deleted_at IS NULL
        AND l.sucursal_id = ${branchIdFilter}::uuid
       WHERE p.deleted_at IS NULL
+        AND p.empresa_id = ${companyIdFilter}::uuid
         AND (${statusFilter}::text IS NULL OR p.estado::text = ${statusFilter}::text)
         AND (${categoryIdFilter}::uuid IS NULL OR p.categoria_id = ${categoryIdFilter}::uuid)
         AND (${laboratoryIdFilter}::uuid IS NULL OR p.laboratorio_id = ${laboratoryIdFilter}::uuid)
@@ -442,6 +419,7 @@ export async function listProductCatalog(
       const entries = await prisma.producto.findMany({
         where: {
           id: { in: idList },
+          empresaId: companyId,
         },
         include: productIncludeByBranch,
       })
@@ -491,13 +469,15 @@ export async function listProductCatalog(
   }
 }
 
-export async function getProductOptions() {
+export async function getProductOptions(request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
   const [categories, laboratories, presentations, units, activePrinciples] =
     await Promise.all([
       prisma.categoria.findMany({
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
         include: {
@@ -521,6 +501,7 @@ export async function getProductOptions() {
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: {
           nombre: 'asc',
@@ -541,6 +522,7 @@ export async function getProductOptions() {
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: {
           nombre: 'asc',
@@ -550,6 +532,7 @@ export async function getProductOptions() {
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: {
           nombre: 'asc',
@@ -559,6 +542,7 @@ export async function getProductOptions() {
         where: {
           deletedAt: null,
           activo: true,
+          empresaId: companyId,
         },
         orderBy: {
           nombre: 'asc',
@@ -651,10 +635,12 @@ function normalizeName(value: string) {
   return value.trim()
 }
 
-export async function listMasterCategories() {
+export async function listMasterCategories(request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
   const categories = await prisma.categoria.findMany({
     where: {
       deletedAt: null,
+      empresaId: companyId,
     },
     orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
     include: {
@@ -697,13 +683,14 @@ export async function createMasterCategory(
   payload: MasterCategoryPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   if (payload.parentId) {
     const parent = await prisma.categoria.findFirst({
       where: {
         id: payload.parentId,
         deletedAt: null,
+        empresaId: companyId,
       },
       select: { id: true },
     })
@@ -715,6 +702,7 @@ export async function createMasterCategory(
   try {
     const created = await prisma.categoria.create({
       data: {
+        empresaId: companyId,
         parentId: payload.parentId ?? null,
         codigo: normalizeCode(payload.codigo),
         nombre: normalizeName(payload.nombre),
@@ -744,7 +732,7 @@ export async function updateMasterCategory(
   payload: MasterCategoryPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   if (payload.parentId === categoryId) {
     throw createHttpError(400, 'La categoría padre no puede ser la misma categoría.')
@@ -755,6 +743,7 @@ export async function updateMasterCategory(
       where: {
         id: payload.parentId,
         deletedAt: null,
+        empresaId: companyId,
       },
       select: { id: true },
     })
@@ -768,6 +757,7 @@ export async function updateMasterCategory(
       where: {
         id: categoryId,
         deletedAt: null,
+        empresaId: companyId,
       },
       data: {
         parentId: payload.parentId ?? null,
@@ -797,12 +787,13 @@ export async function deleteMasterCategory(
   categoryId: string,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const childCount = await prisma.categoria.count({
     where: {
       deletedAt: null,
       parentId: categoryId,
+      empresaId: companyId,
     },
   })
 
@@ -817,6 +808,7 @@ export async function deleteMasterCategory(
     where: {
       deletedAt: null,
       categoriaId: categoryId,
+      empresaId: companyId,
     },
   })
 
@@ -831,6 +823,7 @@ export async function deleteMasterCategory(
     where: {
       id: categoryId,
       deletedAt: null,
+      empresaId: companyId,
     },
     data: {
       deletedAt: new Date(),
@@ -842,10 +835,12 @@ export async function deleteMasterCategory(
   return { success: true }
 }
 
-export async function listMasterLaboratories() {
+export async function listMasterLaboratories(request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
   const laboratories = await prisma.laboratorio.findMany({
     where: {
       deletedAt: null,
+      empresaId: companyId,
     },
     orderBy: [{ nombre: 'asc' }],
     include: {
@@ -879,11 +874,12 @@ export async function createMasterLaboratory(
   payload: MasterLaboratoryPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   try {
     const created = await prisma.laboratorio.create({
       data: {
+        empresaId: companyId,
         nombre: normalizeName(payload.nombre),
         pais: toOptionalString(payload.pais),
         descripcion: toOptionalString(payload.descripcion),
@@ -910,13 +906,14 @@ export async function updateMasterLaboratory(
   payload: MasterLaboratoryPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   try {
     await prisma.laboratorio.update({
       where: {
         id: laboratoryId,
         deletedAt: null,
+        empresaId: companyId,
       },
       data: {
         nombre: normalizeName(payload.nombre),
@@ -943,12 +940,13 @@ export async function deleteMasterLaboratory(
   laboratoryId: string,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const productCount = await prisma.producto.count({
     where: {
       deletedAt: null,
       laboratorioId: laboratoryId,
+      empresaId: companyId,
     },
   })
 
@@ -963,6 +961,7 @@ export async function deleteMasterLaboratory(
     where: {
       id: laboratoryId,
       deletedAt: null,
+      empresaId: companyId,
     },
     data: {
       deletedAt: new Date(),
@@ -974,10 +973,12 @@ export async function deleteMasterLaboratory(
   return { success: true }
 }
 
-export async function listMasterPresentations() {
+export async function listMasterPresentations(request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
   const presentations = await prisma.presentacion.findMany({
     where: {
       deletedAt: null,
+      empresaId: companyId,
     },
     orderBy: [{ nombre: 'asc' }],
     include: {
@@ -1010,11 +1011,12 @@ export async function createMasterPresentation(
   payload: MasterPresentationPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   try {
     const created = await prisma.presentacion.create({
       data: {
+        empresaId: companyId,
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
         activo: payload.activo ?? true,
@@ -1040,13 +1042,14 @@ export async function updateMasterPresentation(
   payload: MasterPresentationPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   try {
     await prisma.presentacion.update({
       where: {
         id: presentationId,
         deletedAt: null,
+        empresaId: companyId,
       },
       data: {
         nombre: normalizeName(payload.nombre),
@@ -1072,12 +1075,13 @@ export async function deleteMasterPresentation(
   presentationId: string,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const productCount = await prisma.producto.count({
     where: {
       deletedAt: null,
       presentacionId: presentationId,
+      empresaId: companyId,
     },
   })
 
@@ -1092,6 +1096,7 @@ export async function deleteMasterPresentation(
     where: {
       id: presentationId,
       deletedAt: null,
+      empresaId: companyId,
     },
     data: {
       deletedAt: new Date(),
@@ -1103,10 +1108,12 @@ export async function deleteMasterPresentation(
   return { success: true }
 }
 
-export async function listMasterUnits() {
+export async function listMasterUnits(request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
   const units = await prisma.unidadMedida.findMany({
     where: {
       deletedAt: null,
+      empresaId: companyId,
     },
     orderBy: [{ nombre: 'asc' }],
     include: {
@@ -1141,11 +1148,12 @@ export async function createMasterUnit(
   payload: MasterUnitPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   try {
     const created = await prisma.unidadMedida.create({
       data: {
+        empresaId: companyId,
         codigo: normalizeCode(payload.codigo),
         nombre: normalizeName(payload.nombre),
         simbolo: normalizeName(payload.simbolo),
@@ -1173,13 +1181,14 @@ export async function updateMasterUnit(
   payload: MasterUnitPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   try {
     await prisma.unidadMedida.update({
       where: {
         id: unitId,
         deletedAt: null,
+        empresaId: companyId,
       },
       data: {
         codigo: normalizeCode(payload.codigo),
@@ -1204,12 +1213,13 @@ export async function updateMasterUnit(
 }
 
 export async function deleteMasterUnit(unitId: string, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const productCount = await prisma.producto.count({
     where: {
       deletedAt: null,
       unidadMedidaId: unitId,
+      empresaId: companyId,
     },
   })
 
@@ -1224,6 +1234,7 @@ export async function deleteMasterUnit(unitId: string, request: FastifyRequest) 
     where: {
       id: unitId,
       deletedAt: null,
+      empresaId: companyId,
     },
     data: {
       deletedAt: new Date(),
@@ -1239,7 +1250,7 @@ export async function createProduct(
   payload: CreateProductPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
   const normalizedName = payload.nombre.trim()
   const packagingMode = payload.modoEmpaque ?? ModoEmpaqueProducto.SIMPLE
   let unitsPerBlister: number | null = null
@@ -1291,6 +1302,7 @@ export async function createProduct(
   try {
     const product = await prisma.producto.create({
       data: {
+        empresaId: companyId,
         categoriaId: payload.categoriaId,
         laboratorioId: toOptionalString(payload.laboratorioId),
         presentacionId: toOptionalString(payload.presentacionId),
@@ -1355,12 +1367,13 @@ export async function updateProduct(
   payload: CreateProductPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const existing = await prisma.producto.findFirst({
     where: {
       id: productId,
       deletedAt: null,
+      empresaId: companyId,
     },
     select: {
       id: true,
@@ -1424,6 +1437,7 @@ export async function updateProduct(
       where: {
         id: productId,
         deletedAt: null,
+        empresaId: companyId,
       },
       data: {
         categoriaId: payload.categoriaId,
@@ -1477,12 +1491,13 @@ export async function updateProductStatus(
   status: EstadoProducto,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const updated = await prisma.producto.updateMany({
     where: {
       id: productId,
       deletedAt: null,
+      empresaId: companyId,
     },
     data: {
       estado: status,
@@ -1498,12 +1513,13 @@ export async function updateProductStatus(
 }
 
 export async function deleteProduct(productId: string, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const product = await prisma.producto.findFirst({
     where: {
       id: productId,
       deletedAt: null,
+      empresaId: companyId,
     },
     select: {
       id: true,
@@ -1559,6 +1575,7 @@ export async function deleteProduct(productId: string, request: FastifyRequest) 
     where: {
       id: productId,
       deletedAt: null,
+      empresaId: companyId,
     },
     data: {
       deletedAt: new Date(),

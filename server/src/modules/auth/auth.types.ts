@@ -22,6 +22,8 @@ export type AuthBranch = {
   id: string
   code: string
   name: string
+  companyId: string
+  companyName: string
 }
 
 export type AuthSession = {
@@ -32,6 +34,8 @@ export type AuthSession = {
     email: string
     fullName: string
     roleName: string
+    companyId: string
+    companyName: string
     branchId: string
     branchCode: string
     branchName: string

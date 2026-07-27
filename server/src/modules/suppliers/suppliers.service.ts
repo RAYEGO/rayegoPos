@@ -1,38 +1,12 @@
 import { Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
+import { getAuthContext } from '../../lib/auth.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
   error.statusCode = statusCode
   return error
-}
-
-type AuthTokenPayload = {
-  sub: string
-  typ: 'access' | 'refresh' | 'reset-password'
-}
-
-async function getAuthenticatedUserId(request: FastifyRequest) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-
-  if (!token) {
-    throw createHttpError(401, 'Sesión no disponible.')
-  }
-
-  let decoded: AuthTokenPayload | null = null
-
-  try {
-    decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
-  } catch {
-    decoded = null
-  }
-
-  if (!decoded || decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
-  }
-
-  return decoded.sub
 }
 
 function toOptionalString(value?: string | null) {
@@ -108,13 +82,14 @@ export async function getSuppliersDashboard(
   filters: GetSuppliersFilters = {},
   request: FastifyRequest,
 ) {
-  await getAuthenticatedUserId(request)
+  const { companyId } = await getAuthContext(request)
   const search = filters.search?.trim().toLowerCase()
   const isActive =
     filters.status === 'activo' ? true : filters.status === 'inactivo' ? false : undefined
 
   const where: Prisma.ProveedorWhereInput = {
     deletedAt: null,
+    empresaId: companyId,
     ...(isActive !== undefined ? { activo: isActive } : {}),
   }
 
@@ -161,7 +136,7 @@ export async function getSuppliersDashboard(
 }
 
 export async function createSupplier(payload: CreateSupplierPayload, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   if (!payload.razonSocial.trim()) {
     throw createHttpError(400, 'La razón social es obligatoria.')
@@ -170,9 +145,11 @@ export async function createSupplier(payload: CreateSupplierPayload, request: Fa
     throw createHttpError(400, 'El número de documento es obligatorio.')
   }
 
-  const existingSupplier = await prisma.proveedor.findUnique({
+  const existingSupplier = await prisma.proveedor.findFirst({
     where: {
+      empresaId: companyId,
       numeroDocumento: payload.numeroDocumento.trim(),
+      deletedAt: null,
     },
   })
   if (existingSupplier) {
@@ -181,6 +158,7 @@ export async function createSupplier(payload: CreateSupplierPayload, request: Fa
 
   const supplier = await prisma.proveedor.create({
     data: {
+      empresaId: companyId,
       tipoPersona: payload.tipoPersona ?? TipoPersona.JURIDICA,
       tipoDocumento: payload.tipoDocumento ?? TipoDocumentoIdentidad.RUC,
       numeroDocumento: payload.numeroDocumento.trim(),
@@ -209,12 +187,13 @@ export async function updateSupplier(
   payload: UpdateSupplierPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const existingSupplier = await prisma.proveedor.findFirst({
     where: {
       id: supplierId,
       deletedAt: null,
+      empresaId: companyId,
     },
   })
 
@@ -234,9 +213,11 @@ export async function updateSupplier(
     payload.numeroDocumento &&
     payload.numeroDocumento.trim() !== existingSupplier.numeroDocumento
   ) {
-    const duplicateSupplier = await prisma.proveedor.findUnique({
+    const duplicateSupplier = await prisma.proveedor.findFirst({
       where: {
+        empresaId: companyId,
         numeroDocumento: payload.numeroDocumento.trim(),
+        deletedAt: null,
       },
     })
     if (duplicateSupplier && duplicateSupplier.id !== supplierId) {
@@ -285,10 +266,10 @@ export async function updateSupplier(
 }
 
 export async function deleteSupplier(supplierId: string, request: FastifyRequest) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, companyId } = await getAuthContext(request)
 
   const supplier = await prisma.proveedor.findFirst({
-    where: { id: supplierId, deletedAt: null },
+    where: { id: supplierId, deletedAt: null, empresaId: companyId },
   })
 
   if (!supplier) {

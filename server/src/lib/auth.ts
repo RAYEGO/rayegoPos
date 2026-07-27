@@ -4,6 +4,7 @@ type AuthTokenPayload = {
   sub: string
   email: string
   typ: 'access' | 'refresh' | 'reset-password'
+  companyId?: string | null
   branchId?: string | null
   roles?: string[]
 }
@@ -34,8 +35,14 @@ export async function getAuthContext(request: FastifyRequest) {
     throw createHttpError(409, 'No hay una sucursal activa en la sesión.')
   }
 
+  const companyId = decoded.companyId
+  if (!companyId) {
+    throw createHttpError(409, 'No hay una empresa activa en la sesión.')
+  }
+
   const ctx = {
     userId: decoded.sub,
+    companyId,
     branchId,
     roles: decoded.roles ?? [],
   }
@@ -43,4 +50,3 @@ export async function getAuthContext(request: FastifyRequest) {
   request.auth = ctx
   return ctx
 }
-

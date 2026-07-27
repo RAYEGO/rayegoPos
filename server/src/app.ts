@@ -57,6 +57,7 @@ export function createApp() {
       const decoded = await request.server.jwt.verify<{
         sub: string
         typ: 'access' | 'refresh' | 'reset-password'
+        companyId?: string | null
         branchId?: string | null
         roles?: string[]
       }>(token)
@@ -71,8 +72,14 @@ export function createApp() {
         return
       }
 
+      if (!decoded.companyId) {
+        reply.code(409).send({ message: 'No hay una empresa activa en la sesión.' })
+        return
+      }
+
       request.auth = {
         userId: decoded.sub,
+        companyId: decoded.companyId,
         branchId: decoded.branchId,
         roles: decoded.roles ?? [],
       }

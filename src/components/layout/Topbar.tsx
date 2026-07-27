@@ -1,5 +1,5 @@
 import { RoleBadge } from '@/components/auth/RoleBadge'
-import { Bell, LogOut, Menu, Search, UserCircle2 } from 'lucide-react'
+import { Bell, Building2, LogOut, MapPin, Menu, Search, UserCircle2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -51,10 +51,21 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {session?.user.companyName ? (
+            <div className="hidden items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
+              <Building2 className="h-3.5 w-3.5" />
+              <span className="truncate">Empresa: {session.user.companyName}</span>
+            </div>
+          ) : null}
           {session?.user.branchName ? (
-            <div className="hidden items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
-              <span>📍</span>
+            <div className="hidden items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
+              <MapPin className="h-3.5 w-3.5" />
               <span className="truncate">Sucursal: {session.user.branchName}</span>
+            </div>
+          ) : null}
+          {session?.user.roleName ? (
+            <div className="hidden items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground md:flex">
+              <span className="truncate">Usuario: {session.user.roleName}</span>
             </div>
           ) : null}
           <Button type="button" variant="ghost" size="icon" aria-label="Notificaciones">
@@ -77,7 +88,8 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
                   <div className="flex items-center gap-2">
                     {session?.user.roles[0] ? <RoleBadge role={session.user.roles[0]} /> : null}
                     <span className="text-xs text-muted-foreground">
-                      {session?.user.branchName}
+                      {session?.user.companyName}
+                      {session?.user.branchName ? ` · ${session.user.branchName}` : ''}
                     </span>
                   </div>
                 </div>

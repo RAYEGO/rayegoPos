@@ -198,6 +198,15 @@ model Empresa {
   configuraciones  Configuracion[]
   seriesDocumentos SerieDocumento[]
   impuestos        Impuesto[]
+  usuarios         Usuario[]
+  clientes         Cliente[]
+  proveedores      Proveedor[]
+  categorias       Categoria[]
+  laboratorios     Laboratorio[]
+  presentaciones   Presentacion[]
+  unidadesMedida   UnidadMedida[]
+  principiosActivos PrincipioActivo[]
+  productos        Producto[]
 
   @@index([deletedAt])
   @@map("empresas")
@@ -246,6 +255,7 @@ model Sucursal {
 /// Módulo: Usuarios / Seguridad
 model Usuario {
   id              String                  @id @default(uuid()) @db.Uuid
+  empresaId       String                  @map("empresa_id") @db.Uuid
   sucursalId      String?                 @map("sucursal_id") @db.Uuid
   username        String                  @unique @db.VarChar(50)
   email           String?                 @unique @db.VarChar(150)
@@ -263,6 +273,7 @@ model Usuario {
   createdById     String?                 @map("created_by") @db.Uuid
   updatedById     String?                 @map("updated_by") @db.Uuid
 
+  empresa              Empresa            @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   sucursal             Sucursal?          @relation(fields: [sucursalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   usuarioSucursales    UsuarioSucursal[]
   createdBy            Usuario?           @relation("UsuarioCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
@@ -367,6 +378,7 @@ model Usuario {
   auditoriasCreadas                    Auditoria[]                  @relation("AuditoriaCreatedBy")
   auditoriasActualizadas               Auditoria[]                  @relation("AuditoriaUpdatedBy")
 
+  @@index([empresaId])
   @@index([sucursalId])
   @@index([numeroDocumento])
   @@index([deletedAt])
@@ -490,9 +502,10 @@ model RolPermiso {
 /// Módulo: Productos
 model Categoria {
   id          String    @id @default(uuid()) @db.Uuid
+  empresaId   String    @map("empresa_id") @db.Uuid
   parentId    String?   @map("parent_id") @db.Uuid
-  codigo      String    @unique @db.VarChar(30)
-  nombre      String    @unique @db.VarChar(120)
+  codigo      String    @db.VarChar(30)
+  nombre      String    @db.VarChar(120)
   descripcion String?   @db.VarChar(255)
   color       String?   @db.VarChar(20)
   orden       Int       @default(0)
@@ -503,12 +516,16 @@ model Categoria {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
-  parent    Categoria?  @relation("CategoriaHierarchy", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  children  Categoria[] @relation("CategoriaHierarchy")
-  createdBy Usuario?    @relation("CategoriaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  updatedBy Usuario?    @relation("CategoriaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  empresa  Empresa     @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  parent   Categoria?  @relation("CategoriaHierarchy", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  children Categoria[] @relation("CategoriaHierarchy")
+  createdBy Usuario?   @relation("CategoriaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario?   @relation("CategoriaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
+  @@unique([empresaId, codigo])
+  @@unique([empresaId, nombre])
+  @@index([empresaId])
   @@index([deletedAt])
   @@index([parentId])
   @@map("categorias")
@@ -516,7 +533,8 @@ model Categoria {
 
 model Laboratorio {
   id          String    @id @default(uuid()) @db.Uuid
-  nombre      String    @unique @db.VarChar(150)
+  empresaId   String    @map("empresa_id") @db.Uuid
+  nombre      String    @db.VarChar(150)
   pais        String?   @db.VarChar(80)
   descripcion String?   @db.VarChar(255)
   activo      Boolean   @default(true)
@@ -526,17 +544,21 @@ model Laboratorio {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
+  empresa   Empresa    @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy Usuario?   @relation("LaboratorioCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario?   @relation("LaboratorioUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
+  @@unique([empresaId, nombre])
+  @@index([empresaId])
   @@index([deletedAt])
   @@map("laboratorios")
 }
 
 model Presentacion {
   id          String    @id @default(uuid()) @db.Uuid
-  nombre      String    @unique @db.VarChar(120)
+  empresaId   String    @map("empresa_id") @db.Uuid
+  nombre      String    @db.VarChar(120)
   descripcion String?   @db.VarChar(255)
   activo      Boolean   @default(true)
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -545,19 +567,23 @@ model Presentacion {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
+  empresa   Empresa   @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy Usuario?   @relation("PresentacionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario?   @relation("PresentacionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
+  @@unique([empresaId, nombre])
+  @@index([empresaId])
   @@index([deletedAt])
   @@map("presentaciones")
 }
 
 model UnidadMedida {
   id          String    @id @default(uuid()) @db.Uuid
-  codigo      String    @unique @db.VarChar(20)
-  nombre      String    @unique @db.VarChar(80)
-  simbolo     String    @unique @db.VarChar(20)
+  empresaId   String    @map("empresa_id") @db.Uuid
+  codigo      String    @db.VarChar(20)
+  nombre      String    @db.VarChar(80)
+  simbolo     String    @db.VarChar(20)
   descripcion String?   @db.VarChar(255)
   activo      Boolean   @default(true)
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -566,17 +592,23 @@ model UnidadMedida {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
+  empresa   Empresa   @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy Usuario?   @relation("UnidadMedidaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario?   @relation("UnidadMedidaUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
+  @@unique([empresaId, codigo])
+  @@unique([empresaId, nombre])
+  @@unique([empresaId, simbolo])
+  @@index([empresaId])
   @@index([deletedAt])
   @@map("unidades_medida")
 }
 
 model PrincipioActivo {
   id          String    @id @default(uuid()) @db.Uuid
-  nombre      String    @unique @db.VarChar(150)
+  empresaId   String    @map("empresa_id") @db.Uuid
+  nombre      String    @db.VarChar(150)
   descripcion String?   @db.VarChar(255)
   activo      Boolean   @default(true)
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -585,10 +617,13 @@ model PrincipioActivo {
   createdById String?   @map("created_by") @db.Uuid
   updatedById String?   @map("updated_by") @db.Uuid
 
+  empresa   Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy Usuario?                  @relation("PrincipioActivoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario?                  @relation("PrincipioActivoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos ProductoPrincipioActivo[]
 
+  @@unique([empresaId, nombre])
+  @@index([empresaId])
   @@index([deletedAt])
   @@map("principios_activos")
 }
@@ -596,6 +631,7 @@ model PrincipioActivo {
 /// Maestro farmacéutico y comercial del producto.
 model Producto {
   id                 String              @id @default(uuid()) @db.Uuid
+  empresaId          String              @map("empresa_id") @db.Uuid
   categoriaId        String              @map("categoria_id") @db.Uuid
   laboratorioId      String?             @map("laboratorio_id") @db.Uuid
   presentacionId     String?             @map("presentacion_id") @db.Uuid
@@ -603,9 +639,9 @@ model Producto {
   modoEmpaque        ModoEmpaqueProducto @default(SIMPLE) @map("modo_empaque")
   unidadesPorBlister Int?                @map("unidades_por_blister")
   blistersPorCaja    Int?                @map("blisters_por_caja")
-  sku                String              @unique @db.VarChar(50)
-  codigoInterno      String?             @unique @map("codigo_interno") @db.VarChar(50)
-  codigoBarras       String?             @unique @map("codigo_barras") @db.VarChar(50)
+  sku                String              @db.VarChar(50)
+  codigoInterno      String?             @map("codigo_interno") @db.VarChar(50)
+  codigoBarras       String?             @map("codigo_barras") @db.VarChar(50)
   nombre             String              @db.VarChar(180)
   descripcion        String?             @db.VarChar(500)
   concentracion      String?             @db.VarChar(120)
@@ -624,7 +660,8 @@ model Producto {
   createdById        String?             @map("created_by") @db.Uuid
   updatedById        String?             @map("updated_by") @db.Uuid
 
-  categoria            Categoria                 @relation(fields: [categoriaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  empresa              Empresa                    @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  categoria            Categoria                  @relation(fields: [categoriaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   laboratorio          Laboratorio?              @relation(fields: [laboratorioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   presentacion         Presentacion?             @relation(fields: [presentacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   unidadMedida         UnidadMedida              @relation(fields: [unidadMedidaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -639,6 +676,10 @@ model Producto {
   MovimientoInventario MovimientoInventario[]
   cargasInventarioInicialDetalle CargaInventarioInicialDetalle[]
 
+  @@unique([empresaId, sku])
+  @@unique([empresaId, codigoInterno])
+  @@unique([empresaId, codigoBarras])
+  @@index([empresaId])
   @@index([categoriaId, estado])
   @@index([laboratorioId])
   @@index([nombre])
@@ -879,9 +920,10 @@ model CargaInventarioInicialDetalle {
 /// Módulo: Compras
 model Proveedor {
   id               String                 @id @default(uuid()) @db.Uuid
+  empresaId        String                 @map("empresa_id") @db.Uuid
   tipoPersona      TipoPersona            @default(JURIDICA) @map("tipo_persona")
   tipoDocumento    TipoDocumentoIdentidad @default(RUC) @map("tipo_documento")
-  numeroDocumento  String                 @unique @map("numero_documento") @db.VarChar(20)
+  numeroDocumento  String                 @map("numero_documento") @db.VarChar(20)
   razonSocial      String                 @map("razon_social") @db.VarChar(200)
   nombreComercial  String?                @map("nombre_comercial") @db.VarChar(200)
   contactoNombre   String?                @map("contacto_nombre") @db.VarChar(150)
@@ -897,11 +939,14 @@ model Proveedor {
   createdById      String?                @map("created_by") @db.Uuid
   updatedById      String?                @map("updated_by") @db.Uuid
 
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy Usuario? @relation("ProveedorCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario? @relation("ProveedorUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   compras   Compra[]
   lotes     Lote[]
 
+  @@unique([empresaId, numeroDocumento])
+  @@index([empresaId])
   @@index([razonSocial])
   @@index([deletedAt])
   @@map("proveedores")
@@ -1007,9 +1052,10 @@ model CompraPago {
 /// Módulo: Ventas
 model Cliente {
   id              String                  @id @default(uuid()) @db.Uuid
+  empresaId       String                  @map("empresa_id") @db.Uuid
   tipoPersona     TipoPersona             @default(NATURAL) @map("tipo_persona")
   tipoDocumento   TipoDocumentoIdentidad? @map("tipo_documento")
-  numeroDocumento String?                 @unique @map("numero_documento") @db.VarChar(20)
+  numeroDocumento String?                 @map("numero_documento") @db.VarChar(20)
   nombres         String?                 @db.VarChar(120)
   apellidos       String?                 @db.VarChar(120)
   razonSocial     String?                 @map("razon_social") @db.VarChar(200)
@@ -1030,10 +1076,13 @@ model Cliente {
   createdById     String?                 @map("created_by") @db.Uuid
   updatedById     String?                 @map("updated_by") @db.Uuid
 
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdBy Usuario? @relation("ClienteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy Usuario? @relation("ClienteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   ventas    Venta[]
 
+  @@unique([empresaId, numeroDocumento])
+  @@index([empresaId])
   @@index([nombreCompleto])
   @@index([razonSocial])
   @@index([deletedAt])

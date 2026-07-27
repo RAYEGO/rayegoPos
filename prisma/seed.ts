@@ -422,6 +422,7 @@ async function main() {
         username: userData.username,
       },
       update: {
+        empresaId: company.id,
         email: userData.email,
         nombres: userData.nombres,
         apellidos: userData.apellidos,
@@ -430,6 +431,7 @@ async function main() {
         activo: true,
       },
       create: {
+        empresaId: company.id,
         sucursalId: branch.id,
         username: userData.username,
         email: userData.email,
@@ -472,7 +474,10 @@ async function main() {
   for (const [index, category] of productCatalog.categories.entries()) {
     await prisma.categoria.upsert({
       where: {
-        nombre: category.name,
+        empresaId_nombre: {
+          empresaId: company.id,
+          nombre: category.name,
+        },
       },
       update: {
         codigo: category.code,
@@ -482,6 +487,7 @@ async function main() {
         updatedById: adminUserId,
       },
       create: {
+        empresaId: company.id,
         codigo: category.code,
         nombre: category.name,
         descripcion: category.description,
@@ -496,7 +502,10 @@ async function main() {
   for (const laboratory of productCatalog.laboratories) {
     await prisma.laboratorio.upsert({
       where: {
-        nombre: laboratory.name,
+        empresaId_nombre: {
+          empresaId: company.id,
+          nombre: laboratory.name,
+        },
       },
       update: {
         pais: laboratory.country,
@@ -504,6 +513,7 @@ async function main() {
         updatedById: adminUserId,
       },
       create: {
+        empresaId: company.id,
         nombre: laboratory.name,
         pais: laboratory.country,
         activo: true,
@@ -516,13 +526,17 @@ async function main() {
   for (const presentationName of productCatalog.presentations) {
     await prisma.presentacion.upsert({
       where: {
-        nombre: presentationName,
+        empresaId_nombre: {
+          empresaId: company.id,
+          nombre: presentationName,
+        },
       },
       update: {
         activo: true,
         updatedById: adminUserId,
       },
       create: {
+        empresaId: company.id,
         nombre: presentationName,
         activo: true,
         createdById: adminUserId,
@@ -534,7 +548,10 @@ async function main() {
   for (const unit of productCatalog.units) {
     await prisma.unidadMedida.upsert({
       where: {
-        codigo: unit.code,
+        empresaId_codigo: {
+          empresaId: company.id,
+          codigo: unit.code,
+        },
       },
       update: {
         nombre: unit.name,
@@ -543,6 +560,7 @@ async function main() {
         updatedById: adminUserId,
       },
       create: {
+        empresaId: company.id,
         codigo: unit.code,
         nombre: unit.name,
         simbolo: unit.symbol,
@@ -556,13 +574,17 @@ async function main() {
   for (const activePrincipleName of productCatalog.activePrinciples) {
     await prisma.principioActivo.upsert({
       where: {
-        nombre: activePrincipleName,
+        empresaId_nombre: {
+          empresaId: company.id,
+          nombre: activePrincipleName,
+        },
       },
       update: {
         activo: true,
         updatedById: adminUserId,
       },
       create: {
+        empresaId: company.id,
         nombre: activePrincipleName,
         activo: true,
         createdById: adminUserId,
@@ -574,29 +596,39 @@ async function main() {
   for (const product of productCatalog.products) {
     const [category, laboratory, presentation, unit, activePrinciple] =
       await Promise.all([
-        prisma.categoria.findUniqueOrThrow({
+        prisma.categoria.findFirstOrThrow({
           where: {
+            empresaId: company.id,
             nombre: product.categoryName,
+            deletedAt: null,
           },
         }),
-        prisma.laboratorio.findUniqueOrThrow({
+        prisma.laboratorio.findFirstOrThrow({
           where: {
+            empresaId: company.id,
             nombre: product.laboratoryName,
+            deletedAt: null,
           },
         }),
-        prisma.presentacion.findUniqueOrThrow({
+        prisma.presentacion.findFirstOrThrow({
           where: {
+            empresaId: company.id,
             nombre: product.presentationName,
+            deletedAt: null,
           },
         }),
-        prisma.unidadMedida.findUniqueOrThrow({
+        prisma.unidadMedida.findFirstOrThrow({
           where: {
+            empresaId: company.id,
             codigo: product.unitCode,
+            deletedAt: null,
           },
         }),
-        prisma.principioActivo.findUniqueOrThrow({
+        prisma.principioActivo.findFirstOrThrow({
           where: {
+            empresaId: company.id,
             nombre: product.activePrincipleName,
+            deletedAt: null,
           },
         }),
       ])
@@ -608,7 +640,10 @@ async function main() {
 
     const dbProduct = await prisma.producto.upsert({
       where: {
-        sku: product.sku,
+        empresaId_sku: {
+          empresaId: company.id,
+          sku: product.sku,
+        },
       },
       update: {
         categoriaId: category.id,
@@ -627,6 +662,7 @@ async function main() {
         updatedById: adminUserId,
       },
       create: {
+        empresaId: company.id,
         categoriaId: category.id,
         laboratorioId: laboratory.id,
         presentacionId: presentation.id,
@@ -665,7 +701,10 @@ async function main() {
 
   const supplier = await prisma.proveedor.upsert({
     where: {
-      numeroDocumento: '20654321987',
+      empresaId_numeroDocumento: {
+        empresaId: company.id,
+        numeroDocumento: '20654321987',
+      },
     },
     update: {
       razonSocial: 'Droguería Distribuidora Peruana SAC',
@@ -674,6 +713,7 @@ async function main() {
       updatedById: adminUserId,
     },
     create: {
+      empresaId: company.id,
       tipoDocumento: TipoDocumentoIdentidad.RUC,
       numeroDocumento: '20654321987',
       razonSocial: 'Droguería Distribuidora Peruana SAC',
@@ -753,7 +793,10 @@ async function main() {
   for (const entry of inventorySeed) {
     const product = await prisma.producto.findUniqueOrThrow({
       where: {
-        sku: entry.sku,
+        empresaId_sku: {
+          empresaId: company.id,
+          sku: entry.sku,
+        },
       },
       select: {
         id: true,
