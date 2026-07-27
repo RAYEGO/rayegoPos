@@ -179,6 +179,53 @@ function createHttpError(statusCode: number, message: string) {
   return error
 }
 
+// #region debug-point purchase-payment-advance-500.reporter
+function getDebugServerUrl() {
+  const value = process.env.DEBUG_SERVER_URL?.trim()
+  return value ? value.replace(/\/+$/, '') : null
+}
+
+function getDebugSessionId() {
+  const value = process.env.DEBUG_SESSION_ID?.trim()
+  return value ? value : 'session'
+}
+
+function extractErrorInfo(err: unknown) {
+  const error = err as {
+    name?: unknown
+    message?: unknown
+    stack?: unknown
+    code?: unknown
+    meta?: unknown
+    statusCode?: unknown
+  }
+
+  return {
+    name: typeof error?.name === 'string' ? error.name : null,
+    message: typeof error?.message === 'string' ? error.message : null,
+    stack: typeof error?.stack === 'string' ? error.stack : null,
+    statusCode: typeof error?.statusCode === 'number' ? error.statusCode : null,
+    prismaCode: typeof error?.code === 'string' ? error.code : null,
+    prismaMeta: error?.meta ?? null,
+  }
+}
+
+function reportDebugEvent(event: string, payload: Record<string, unknown>) {
+  const debugServerUrl = getDebugServerUrl()
+  if (!debugServerUrl) return
+
+  void fetch(`${debugServerUrl}/log`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: getDebugSessionId(),
+      event,
+      ...payload,
+    }),
+  }).catch(() => null)
+}
+// #endregion debug-point purchase-payment-advance-500.reporter
+
 function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
   if (typeof value === 'number') {
     return value
@@ -1396,21 +1443,16 @@ export async function registerPurchasePayment(
     ? new Date(`${payload.fechaPago}T00:00:00`)
     : new Date()
 
-  //#region debug-point purchase-payment-partial.register-payment.start
-  void fetch('http://localhost:4311/log', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      event: 'purchase.payment.start',
-      purchaseId: payload.compraId,
-      formPaymentId: payload.formaPagoId,
-      amount,
-      userId,
-      branchId,
-      paymentDate: paymentDate.toISOString(),
-    }),
-  }).catch(() => null)
-  //#endregion debug-point purchase-payment-partial.register-payment.start
+  // #region debug-point purchase-payment-advance-500.register-payment.start
+  reportDebugEvent('purchase.payment.start', {
+    purchaseId: payload.compraId,
+    formPaymentId: payload.formaPagoId,
+    amount,
+    userId,
+    branchId,
+    paymentDate: paymentDate.toISOString(),
+  })
+  // #endregion debug-point purchase-payment-advance-500.register-payment.start
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw createHttpError(400, 'El monto del pago debe ser mayor a 0.')
@@ -1459,6 +1501,18 @@ export async function registerPurchasePayment(
           },
         }),
       ])
+
+      // #region debug-point purchase-payment-advance-500.register-payment.loaded
+      reportDebugEvent('purchase.payment.loaded', {
+        purchaseId: payload.compraId,
+        purchaseFound: Boolean(purchase),
+        purchaseStatus: purchase?.estado ?? null,
+        purchaseBranchId: purchase?.sucursalId ?? null,
+        paymentMethodFound: Boolean(paymentMethod),
+        paymentMethodId: paymentMethod?.id ?? null,
+        paymentMethodCode: paymentMethod?.codigo ?? null,
+      })
+      // #endregion debug-point purchase-payment-advance-500.register-payment.loaded
 
     if (!purchase) {
       throw createHttpError(404, 'La compra seleccionada no está disponible.')
@@ -1514,6 +1568,14 @@ export async function registerPurchasePayment(
         ].join('\n\n'),
       )
     }
+
+    // #region debug-point purchase-payment-advance-500.register-payment.opening
+    reportDebugEvent('purchase.payment.opening', {
+      purchaseId: purchase.id,
+      openingId: opening.id,
+      openingCashAmount: decimalToNumber(opening.montoAperturaEfectivo),
+    })
+    // #endregion debug-point purchase-payment-advance-500.register-payment.opening
 
     await tx.$queryRaw(
       Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id} FOR UPDATE`,
@@ -1605,6 +1667,19 @@ export async function registerPurchasePayment(
       returnedAmount,
       paidAmount,
     })
+
+    // #region debug-point purchase-payment-advance-500.register-payment.balances
+    reportDebugEvent('purchase.payment.balances', {
+      purchaseId: purchase.id,
+      isCashPayment,
+      availableCash,
+      totalAmount,
+      returnedAmount,
+      paidAmount,
+      outstandingAmount,
+      amount,
+    })
+    // #endregion debug-point purchase-payment-advance-500.register-payment.balances
 
     if (amount - outstandingAmount > 0.0001) {
       throw createHttpError(
@@ -1702,37 +1777,21 @@ export async function registerPurchasePayment(
       }
     })
 
-    //#region debug-point purchase-payment-partial.register-payment.success
-    void fetch('http://localhost:4311/log', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        event: 'purchase.payment.success',
-        purchaseId: payload.compraId,
-        amount,
-        result,
-      }),
-    }).catch(() => null)
-    //#endregion debug-point purchase-payment-partial.register-payment.success
+    // #region debug-point purchase-payment-advance-500.register-payment.success
+    reportDebugEvent('purchase.payment.success', {
+      purchaseId: payload.compraId,
+      amount,
+      result,
+    })
+    // #endregion debug-point purchase-payment-advance-500.register-payment.success
   } catch (err) {
-    //#region debug-point purchase-payment-partial.register-payment.error
-    void fetch('http://localhost:4311/log', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        event: 'purchase.payment.error',
-        purchaseId: payload.compraId,
-        amount,
-        error: {
-          name: (err as any)?.name ?? null,
-          message: (err as any)?.message ?? null,
-          stack: (err as any)?.stack ?? null,
-          prismaCode: (err as any)?.code ?? null,
-          prismaMeta: (err as any)?.meta ?? null,
-        },
-      }),
-    }).catch(() => null)
-    //#endregion debug-point purchase-payment-partial.register-payment.error
+    // #region debug-point purchase-payment-advance-500.register-payment.error
+    reportDebugEvent('purchase.payment.error', {
+      purchaseId: payload.compraId,
+      amount,
+      error: extractErrorInfo(err),
+    })
+    // #endregion debug-point purchase-payment-advance-500.register-payment.error
     throw err
   }
 

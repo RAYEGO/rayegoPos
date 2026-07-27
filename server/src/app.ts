@@ -157,13 +157,14 @@ export function createApp() {
   })
 
   app.setErrorHandler((error, _request, reply) => {
-    //#region debug-point purchase-payment-partial.error-handler
+    // #region debug-point purchase-payment-advance-500.error-handler
     try {
+      const debugServerUrl = process.env.DEBUG_SERVER_URL?.trim()
+      const sessionId = (process.env.DEBUG_SESSION_ID ?? 'session').trim() || 'session'
       const request = _request as {
         id?: string
         method?: string
         url?: string
-        headers?: Record<string, unknown>
       }
       const statusCode =
         error instanceof ZodError
@@ -174,32 +175,36 @@ export function createApp() {
               typeof (error as { statusCode?: unknown }).statusCode === 'number'
             ? (error as { statusCode: number }).statusCode
             : 500
-      void fetch('http://localhost:4311/log', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          event: 'api.error',
-          statusCode,
-          requestId: request.id ?? null,
-          method: request.method ?? null,
-          url: request.url ?? null,
-          error: {
-            name: (error as { name?: unknown })?.name ?? null,
-            message: (error as { message?: unknown })?.message ?? null,
-            stack: (error as { stack?: unknown })?.stack ?? null,
-            prismaCode:
-              typeof error === 'object' && error !== null && 'code' in error
-                ? (error as { code?: unknown }).code
-                : null,
-            prismaMeta:
-              typeof error === 'object' && error !== null && 'meta' in error
-                ? (error as { meta?: unknown }).meta
-                : null,
-          },
-        }),
-      }).catch(() => null)
+
+      if (debugServerUrl) {
+        void fetch(`${debugServerUrl.replace(/\\/+$/, '')}/log`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            event: 'api.error',
+            statusCode,
+            requestId: request.id ?? null,
+            method: request.method ?? null,
+            url: request.url ?? null,
+            error: {
+              name: (error as { name?: unknown })?.name ?? null,
+              message: (error as { message?: unknown })?.message ?? null,
+              stack: (error as { stack?: unknown })?.stack ?? null,
+              prismaCode:
+                typeof error === 'object' && error !== null && 'code' in error
+                  ? (error as { code?: unknown }).code
+                  : null,
+              prismaMeta:
+                typeof error === 'object' && error !== null && 'meta' in error
+                  ? (error as { meta?: unknown }).meta
+                  : null,
+            },
+          }),
+        }).catch(() => null)
+      }
     } catch {}
-    //#endregion debug-point purchase-payment-partial.error-handler
+    // #endregion debug-point purchase-payment-advance-500.error-handler
 
     if (error instanceof ZodError) {
       return reply.code(400).send({
