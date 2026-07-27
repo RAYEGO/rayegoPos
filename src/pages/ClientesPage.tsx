@@ -52,7 +52,9 @@ import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { customersService } from '@/services/customersService'
 import type {
   CreateCustomerPayload,
+  CustomerAccountStatementResponse,
   CustomerItem,
+  CustomerSalesResponse,
   CustomerStatusFilter,
   CustomersDashboardResponse,
 } from '@/types/customers'
@@ -161,6 +163,133 @@ function getCustomerStatusVariant(isActive: boolean) {
   return isActive ? 'success' : 'outline'
 }
 
+function getCustomerDisplayName(customer: CustomerItem) {
+  return customer.nombreCompleto ?? customer.razonSocial ?? 'Cliente'
+}
+
+function getCustomerSearchTokens(customer: CustomerItem) {
+  return [
+    getCustomerDisplayName(customer),
+    customer.numeroDocumento ?? '',
+    customer.telefono ?? '',
+    customer.email ?? '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat('es-PE', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function getSaleStatusVariant(status: string) {
+  if (status === 'COBRADA') return 'success'
+  if (status === 'EMITIDA') return 'info'
+  if (status === 'BORRADOR') return 'warning'
+  return 'destructive'
+}
+
+function getSaleStatusLabel(status: string) {
+  if (status === 'COBRADA') return 'COBRADA'
+  if (status === 'EMITIDA') return 'EMITIDA'
+  if (status === 'BORRADOR') return 'BORRADOR'
+  return 'ANULADA'
+}
+
+function CustomerAutocomplete({
+  customers,
+  value,
+  onValueChange,
+  placeholder,
+}: {
+  customers: CustomerItem[]
+  value: string
+  onValueChange: (value: string) => void
+  placeholder: string
+}) {
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === value) ?? null,
+    [customers, value],
+  )
+  const [query, setQuery] = useState('')
+  const [isOpen, setIsOpen] = useState(false)
+
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setQuery('')
+      return
+    }
+
+    const document = selectedCustomer.numeroDocumento ? ` · ${selectedCustomer.numeroDocumento}` : ''
+    setQuery(`${getCustomerDisplayName(selectedCustomer)}${document}`)
+  }, [selectedCustomer])
+
+  const filteredCustomers = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    const source = normalized
+      ? customers.filter((customer) => getCustomerSearchTokens(customer).includes(normalized))
+      : customers
+    return source.slice(0, 12)
+  }, [customers, query])
+
+  return (
+    <div className="relative">
+      <Input
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value)
+          setIsOpen(true)
+        }}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        placeholder={placeholder}
+      />
+      {isOpen ? (
+        <Card className="absolute z-50 mt-1 w-full overflow-hidden p-1 shadow-lg">
+          <div className="max-h-72 overflow-y-auto">
+            {filteredCustomers.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
+            ) : (
+              filteredCustomers.map((customer) => {
+                const name = getCustomerDisplayName(customer)
+                const document = customer.numeroDocumento ? ` · ${customer.numeroDocumento}` : ''
+
+                return (
+                  <button
+                    key={customer.id}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted/60"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      onValueChange(customer.id)
+                      setIsOpen(false)
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {name}
+                      <span className="text-muted-foreground">{document}</span>
+                    </span>
+                    <Badge variant={getCustomerStatusVariant(customer.activo)}>
+                      {customer.activo ? 'ACTIVO' : 'INACTIVO'}
+                    </Badge>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </Card>
+      ) : null}
+    </div>
+  )
+}
+
 function toPayload(values: CustomerFormValues): CreateCustomerPayload {
   const rawCreditLimit = Number.isFinite(values.limiteCredito) ? values.limiteCredito : 0
   const limiteCredito = values.permitirCredito ? Math.max(0, rawCreditLimit) : 0
@@ -199,6 +328,14 @@ export function ClientesPage() {
     'padron',
   )
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  const [customerSales, setCustomerSales] = useState<CustomerSalesResponse['sales']>([])
+  const [customerSalesLoading, setCustomerSalesLoading] = useState(false)
+  const [customerSalesError, setCustomerSalesError] = useState<string | null>(null)
+
+  const [accountStatement, setAccountStatement] =
+    useState<CustomerAccountStatementResponse | null>(null)
+  const [accountStatementLoading, setAccountStatementLoading] = useState(false)
+  const [accountStatementError, setAccountStatementError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'todos' | CustomerStatusFilter>('todos')
   const [dashboard, setDashboard] = useState<CustomersDashboardResponse>(defaultDashboard)
@@ -232,12 +369,14 @@ export function ClientesPage() {
       return null
     }
 
-    const creditLimit = selectedCustomer.limiteCredito
-    const outstanding = selectedCustomer.saldoPendiente
-    const available = Math.max(0, Number((creditLimit - outstanding).toFixed(2)))
+    const creditLimit = accountStatement?.summary.creditLimit ?? selectedCustomer.limiteCredito
+    const outstanding = accountStatement?.summary.outstandingAmount ?? selectedCustomer.saldoPendiente
+    const available =
+      accountStatement?.summary.availableCredit ??
+      Math.max(0, Number((creditLimit - outstanding).toFixed(2)))
 
     return { creditLimit, outstanding, available }
-  }, [selectedCustomer])
+  }, [accountStatement, selectedCustomer])
 
   const handleUnauthorized = useCallback(async () => {
     toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
@@ -274,6 +413,96 @@ export function ClientesPage() {
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
+
+  const loadCustomerSales = useCallback(
+    async (customerId: string) => {
+      if (!accessToken) {
+        return
+      }
+
+      setCustomerSalesLoading(true)
+      setCustomerSalesError(null)
+
+      try {
+        const response = await customersService.getSales(accessToken, customerId)
+        setCustomerSales(response.sales)
+      } catch (nextError) {
+        if (nextError instanceof ApiError && nextError.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+
+        setCustomerSales([])
+        setCustomerSalesError(getApiErrorMessage(nextError))
+      } finally {
+        setCustomerSalesLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+
+  const loadAccountStatement = useCallback(
+    async (customerId: string) => {
+      if (!accessToken) {
+        return
+      }
+
+      setAccountStatementLoading(true)
+      setAccountStatementError(null)
+
+      try {
+        const response = await customersService.getAccountStatement(accessToken, customerId)
+        setAccountStatement(response)
+      } catch (nextError) {
+        if (nextError instanceof ApiError && nextError.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+
+        setAccountStatement(null)
+        setAccountStatementError(getApiErrorMessage(nextError))
+      } finally {
+        setAccountStatementLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+
+  useEffect(() => {
+    if (!selectedCustomerId) {
+      setCustomerSales([])
+      setAccountStatement(null)
+      return
+    }
+
+    if (activeTab === 'historial-compras') {
+      void loadCustomerSales(selectedCustomerId)
+      return
+    }
+
+    if (activeTab === 'estado-cuenta') {
+      void loadAccountStatement(selectedCustomerId)
+    }
+  }, [activeTab, loadAccountStatement, loadCustomerSales, selectedCustomerId])
+
+  useEffect(() => {
+    if (!selectedCustomerId) {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      if (activeTab === 'historial-compras') {
+        void loadCustomerSales(selectedCustomerId)
+        return
+      }
+
+      if (activeTab === 'estado-cuenta') {
+        void loadAccountStatement(selectedCustomerId)
+      }
+    }, 15000)
+
+    return () => window.clearInterval(interval)
+  }, [activeTab, loadAccountStatement, loadCustomerSales, selectedCustomerId])
 
   function openCreateDialog() {
     setEditingCustomer(null)
@@ -665,18 +894,14 @@ export function ClientesPage() {
                   Visualiza todas las ventas emitidas a nombre del cliente.
                 </p>
               </div>
-              <Select value={selectedCustomer?.id ?? ''} onValueChange={setSelectedCustomerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona un cliente" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dashboard.customers.map((customer) => (
-                    <SelectItem key={customer.id} value={customer.id}>
-                      {customer.nombreCompleto ?? customer.razonSocial ?? 'Cliente'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CustomerAutocomplete
+                customers={dashboard.customers}
+                value={selectedCustomerId}
+                onValueChange={(value) => {
+                  setSelectedCustomerId(value)
+                }}
+                placeholder="Buscar cliente por nombre o documento"
+              />
             </div>
           </Card>
 
@@ -695,6 +920,23 @@ export function ClientesPage() {
                 Ir al padrón
               </Button>
             </div>
+          ) : customerSalesLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader className="h-7 w-7" />
+            </div>
+          ) : customerSalesError ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+              {customerSalesError}
+            </div>
+          ) : customerSales.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-8 text-center">
+              <p className="text-sm font-medium text-foreground">
+                Este cliente aún no registra compras.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cuando se emitan ventas a su nombre aparecerán aquí.
+              </p>
+            </div>
           ) : (
             <Card>
               <CardContent className="p-0">
@@ -711,12 +953,38 @@ export function ClientesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow>
-                      <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
-                        Aún no existen compras registradas.
-                      </TableCell>
-                      <TableCell className="py-10" />
-                    </TableRow>
+                    {customerSales.map((sale) => (
+                      <TableRow key={sale.id}>
+                        <TableCell className="text-muted-foreground">
+                          {formatDateTime(sale.createdAt)}
+                        </TableCell>
+                        <TableCell className="font-medium text-foreground">{sale.document}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {formatCurrency(sale.totalAmount)}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {formatCurrency(sale.paidAmount)}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {formatCurrency(sale.outstandingAmount)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getSaleStatusVariant(sale.status)}>
+                            {getSaleStatusLabel(sale.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" size="sm" disabled>
+                              Ver
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" disabled>
+                              PDF
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -733,18 +1001,14 @@ export function ClientesPage() {
                   Resumen del crédito del cliente y movimientos futuros.
                 </p>
               </div>
-              <Select value={selectedCustomer?.id ?? ''} onValueChange={setSelectedCustomerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona un cliente" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dashboard.customers.map((customer) => (
-                    <SelectItem key={customer.id} value={customer.id}>
-                      {customer.nombreCompleto ?? customer.razonSocial ?? 'Cliente'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CustomerAutocomplete
+                customers={dashboard.customers}
+                value={selectedCustomerId}
+                onValueChange={(value) => {
+                  setSelectedCustomerId(value)
+                }}
+                placeholder="Buscar cliente por nombre o documento"
+              />
             </div>
           </Card>
 
@@ -762,6 +1026,14 @@ export function ClientesPage() {
               >
                 Ir al padrón
               </Button>
+            </div>
+          ) : accountStatementLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader className="h-7 w-7" />
+            </div>
+          ) : accountStatementError ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+              {accountStatementError}
             </div>
           ) : (
             <>
@@ -800,11 +1072,34 @@ export function ClientesPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                          No existen movimientos para este cliente.
-                        </TableCell>
-                      </TableRow>
+                      {accountStatement?.movements.length ? (
+                        accountStatement.movements.map((movement) => (
+                          <TableRow key={movement.id}>
+                            <TableCell className="text-muted-foreground">
+                              {formatDateTime(movement.createdAt)}
+                            </TableCell>
+                            <TableCell className="font-medium text-foreground">
+                              {movement.movement}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">{movement.document}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {movement.chargeAmount > 0 ? formatCurrency(movement.chargeAmount) : '—'}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {movement.paymentAmount > 0 ? formatCurrency(movement.paymentAmount) : '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-medium text-foreground">
+                              {formatCurrency(movement.balanceAmount)}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                            No existen movimientos para este cliente.
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </CardContent>

@@ -2,6 +2,8 @@ import { apiRequest } from '@/services/apiClient'
 import type {
   CreateCustomerPayload,
   CustomerStatusFilter,
+  CustomerAccountStatementResponse,
+  CustomerSalesResponse,
   CustomersDashboardResponse,
   UpdateCustomerPayload,
 } from '@/types/customers'
@@ -64,5 +66,17 @@ export const customersService = {
       accessToken,
     })
   },
-}
 
+  getSales(accessToken: string, customerId: string) {
+    return apiRequest<CustomerSalesResponse>(`/api/customers/${customerId}/sales`, {
+      accessToken,
+    })
+  },
+
+  getAccountStatement(accessToken: string, customerId: string) {
+    return apiRequest<CustomerAccountStatementResponse>(
+      `/api/customers/${customerId}/account-statement`,
+      { accessToken },
+    )
+  },
+}

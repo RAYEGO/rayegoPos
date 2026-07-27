@@ -61,7 +61,6 @@ import type {
 import { toast } from 'sonner'
 
 const createPurchaseSchema = z.object({
-  sucursalId: z.string().uuid({ message: 'Selecciona una sucursal.' }),
   proveedorId: z.string().uuid({ message: 'Selecciona un proveedor.' }),
   fechaEmision: z.string().min(1, 'Ingresa la fecha de emisión.'),
   fechaRecepcion: z.string().optional(),
@@ -137,7 +136,6 @@ type OrderReceiptDraft = {
 const today = new Date().toISOString().slice(0, 10)
 
 const defaultFormValues: CreatePurchaseFormValues = {
-  sucursalId: '',
   proveedorId: '',
   fechaEmision: today,
   fechaRecepcion: '',
@@ -257,6 +255,7 @@ function getReceiptStatusVariant(status: PurchaseReceiptStatus) {
 export function ComprasPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const activeBranchName = session?.user.branchName ?? ''
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODAS' | PurchaseOrderStatus>('TODAS')
   const [branchFilter, setBranchFilter] = useState('TODAS')
@@ -501,7 +500,6 @@ export function ComprasPage() {
     }
 
     const payload: CreatePurchaseOrderPayload = {
-      sucursalId: values.sucursalId,
       proveedorId: values.proveedorId,
       fechaEmision: values.fechaEmision,
       fechaRecepcion: values.fechaRecepcion?.trim() || undefined,
@@ -1593,7 +1591,13 @@ export function ComprasPage() {
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">Registrar orden de compra</p>
                 <p className="text-sm text-muted-foreground">
-                  Alta inicial de la orden con proveedor, sucursal, costos e impuestos por línea.
+                  Alta inicial de la orden con proveedor, costos e impuestos por línea.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Esta orden de compra será registrada para la sucursal:{' '}
+                  <span className="font-medium text-foreground">
+                    {activeBranchName || 'Sucursal activa'}
+                  </span>
                 </p>
               </div>
               <SidePanelClose asChild>
@@ -1607,29 +1611,6 @@ export function ComprasPage() {
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="grid gap-6">
                 <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Sucursal</label>
-                <Controller
-                  control={form.control}
-                  name="sucursalId"
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona sucursal" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {options.branches.map((branch) => (
-                          <SelectItem key={branch.id} value={branch.id}>
-                            {branch.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={form.formState.errors.sucursalId?.message} />
-              </div>
-
               <div className="space-y-2">
                 <label className="text-sm font-medium">Proveedor</label>
                 <Controller

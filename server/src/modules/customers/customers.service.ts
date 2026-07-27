@@ -1,6 +1,7 @@
-import { Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
+import { EstadoVenta, Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
+import { getAuthContext } from '../../lib/auth.js'
 
 type AuthTokenPayload = {
   sub: string
@@ -424,4 +425,157 @@ export async function deleteCustomer(customerId: string, request: FastifyRequest
   })
 
   return { success: true }
+}
+
+function formatDocumentNumber(sale: { id: string; serie: string | null; numero: string | null }) {
+  if (sale.serie && sale.numero) {
+    return `${sale.serie}-${sale.numero}`
+  }
+
+  return `VNT-${sale.id.slice(0, 6).toUpperCase()}`
+}
+
+function toMoney(value: Prisma.Decimal | number) {
+  return Number(decimalToNumber(value).toFixed(2))
+}
+
+export async function getCustomerSales(customerId: string, request: FastifyRequest) {
+  await getAuthContext(request)
+
+  const sales = await prisma.venta.findMany({
+    where: {
+      deletedAt: null,
+      clienteId: customerId,
+    },
+    select: {
+      id: true,
+      tipoComprobante: true,
+      serie: true,
+      numero: true,
+      fechaEmision: true,
+      estado: true,
+      total: true,
+      saldoPendiente: true,
+    },
+    orderBy: [{ fechaEmision: 'desc' }, { createdAt: 'desc' }],
+  })
+
+  return {
+    sales: sales.map((sale) => {
+      const totalAmount = toMoney(sale.total)
+      const outstandingAmount = toMoney(sale.saldoPendiente)
+      const paidAmount = toMoney(Math.max(0, totalAmount - outstandingAmount))
+
+      return {
+        id: sale.id,
+        createdAt: sale.fechaEmision.toISOString(),
+        document: formatDocumentNumber(sale),
+        tipoComprobante: sale.tipoComprobante,
+        totalAmount,
+        paidAmount,
+        outstandingAmount,
+        status: sale.estado,
+      }
+    }),
+  }
+}
+
+export async function getCustomerAccountStatement(customerId: string, request: FastifyRequest) {
+  await getAuthContext(request)
+
+  const customer = await prisma.cliente.findFirst({
+    where: { id: customerId, deletedAt: null },
+    select: {
+      id: true,
+      permitirCredito: true,
+      limiteCredito: true,
+      saldoPendiente: true,
+    },
+  })
+
+  if (!customer) {
+    throw createHttpError(404, 'El cliente no fue encontrado.')
+  }
+
+  const creditLimit = toMoney(customer.limiteCredito)
+  const outstandingAmount = toMoney(customer.saldoPendiente)
+  const availableCredit = toMoney(Math.max(0, creditLimit - outstandingAmount))
+
+  const creditSales = await prisma.venta.findMany({
+    where: {
+      deletedAt: null,
+      clienteId: customerId,
+      saldoPendiente: {
+        gt: 0,
+      },
+      estado: {
+        in: [EstadoVenta.EMITIDA, EstadoVenta.COBRADA, EstadoVenta.BORRADOR, EstadoVenta.ANULADA],
+      },
+    },
+    select: {
+      id: true,
+      serie: true,
+      numero: true,
+      fechaEmision: true,
+      updatedAt: true,
+      estado: true,
+      saldoPendiente: true,
+    },
+    orderBy: [{ fechaEmision: 'asc' }, { createdAt: 'asc' }],
+  })
+
+  const movements: Array<{
+    id: string
+    createdAt: string
+    movement: string
+    document: string
+    chargeAmount: number
+    paymentAmount: number
+    balanceAmount: number
+    saleId: string
+  }> = []
+
+  for (const sale of creditSales) {
+    const chargeAmount = toMoney(sale.saldoPendiente)
+    movements.push({
+      id: `sale-${sale.id}`,
+      createdAt: sale.fechaEmision.toISOString(),
+      movement: 'Venta a crédito',
+      document: formatDocumentNumber(sale),
+      chargeAmount,
+      paymentAmount: 0,
+      balanceAmount: 0,
+      saleId: sale.id,
+    })
+
+    if (sale.estado === EstadoVenta.ANULADA) {
+      movements.push({
+        id: `cancel-${sale.id}`,
+        createdAt: sale.updatedAt.toISOString(),
+        movement: 'Anulación de venta',
+        document: formatDocumentNumber(sale),
+        chargeAmount: 0,
+        paymentAmount: chargeAmount,
+        balanceAmount: 0,
+        saleId: sale.id,
+      })
+    }
+  }
+
+  let runningBalance = 0
+  const mappedMovements = movements
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((item) => {
+      runningBalance = toMoney(runningBalance + item.chargeAmount - item.paymentAmount)
+      return { ...item, balanceAmount: runningBalance }
+    })
+
+  return {
+    summary: {
+      creditLimit,
+      outstandingAmount,
+      availableCredit,
+    },
+    movements: mappedMovements,
+  }
 }

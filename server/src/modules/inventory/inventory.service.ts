@@ -723,6 +723,13 @@ export async function createInventoryLot(
   request: FastifyRequest,
 ) {
   const { userId, branchId } = await getAuthContext(request)
+  const isManualLotEnabled = false
+  if (!isManualLotEnabled) {
+    throw createHttpError(
+      409,
+      'En Rayego POS v1.0 los lotes se crean únicamente desde Compras o desde la Carga Inicial de Inventario.',
+    )
+  }
   const targetBranchId = payload.sucursalId ?? branchId
 
   if (payload.sucursalId && payload.sucursalId !== branchId) {

@@ -60,3 +60,34 @@ export type CreateCustomerPayload = {
 export type UpdateCustomerPayload = Partial<CreateCustomerPayload> & {
   activo?: boolean
 }
+
+export type CustomerSalesResponse = {
+  sales: Array<{
+    id: string
+    createdAt: string
+    document: string
+    tipoComprobante: string
+    totalAmount: number
+    paidAmount: number
+    outstandingAmount: number
+    status: string
+  }>
+}
+
+export type CustomerAccountStatementResponse = {
+  summary: {
+    creditLimit: number
+    outstandingAmount: number
+    availableCredit: number
+  }
+  movements: Array<{
+    id: string
+    createdAt: string
+    movement: string
+    document: string
+    chargeAmount: number
+    paymentAmount: number
+    balanceAmount: number
+    saleId: string
+  }>
+}

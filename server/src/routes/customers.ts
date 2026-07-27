@@ -4,6 +4,8 @@ import { TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
 import {
   createCustomer,
   deleteCustomer,
+  getCustomerAccountStatement,
+  getCustomerSales,
   getCustomersDashboard,
   updateCustomer,
 } from '../modules/customers/customers.service.js'
@@ -38,6 +40,16 @@ export default async function customersRoutes(app: FastifyInstance) {
   app.get('/', async (request) => {
     const query = getCustomersQuerySchema.parse(request.query)
     return getCustomersDashboard(query, request)
+  })
+
+  app.get('/:id/sales', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    return getCustomerSales(params.id, request)
+  })
+
+  app.get('/:id/account-statement', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    return getCustomerAccountStatement(params.id, request)
   })
 
   app.post('/', async (request) => {

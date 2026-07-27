@@ -14,6 +14,7 @@ import suppliersRoutes from './routes/suppliers.js'
 import customersRoutes from './routes/customers.js'
 import dashboardRoutes from './routes/dashboard.js'
 import reportsRoutes from './routes/reports.js'
+import { implementationRoutes } from './routes/implementation.js'
 
 export function createApp() {
   const app = Fastify({
@@ -128,6 +129,10 @@ export function createApp() {
 
     instance.register(dashboardRoutes, {
       prefix: '/api/dashboard',
+    })
+
+    instance.register(implementationRoutes, {
+      prefix: '/api/implementation',
     })
 
     instance.register(reportsRoutes, {

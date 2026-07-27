@@ -232,7 +232,8 @@ function getLotStatusVariant(status: InventoryLotStatus) {
   return 'outline'
 }
 
-function getMovementVariant(type: InventoryMovementType) {
+function getMovementVariant(type: InventoryMovementType | 'INVENTARIO_INICIAL') {
+  if (type === 'INVENTARIO_INICIAL') return 'success'
   if (type === 'ENTRADA') return 'success'
   if (type === 'RESERVA') return 'warning'
   if (type === 'AJUSTE') return 'destructive'
@@ -348,6 +349,8 @@ export function InventarioPage() {
   const [showSummary, setShowSummary] = useState(false)
   const [lotsPage, setLotsPage] = useState(1)
   const lotsPageSize = 8
+  const isTransferEnabled = useMemo(() => false, [])
+  const isManualLotEnabled = useMemo(() => false, [])
 
   const createForm = useForm<CreateLotFormValues>({
     resolver: zodResolver(createLotSchema),
@@ -425,7 +428,7 @@ export function InventarioPage() {
     )
   }, [dashboard.options.branches, selectedTransferLot])
 
-  const canTransferLots = dashboard.options.branches.length > 1
+  const canTransferLots = isTransferEnabled && dashboard.options.branches.length > 1
 
   const sortedLots = useMemo(() => {
     return [...dashboard.lots].sort(
@@ -685,7 +688,7 @@ export function InventarioPage() {
                   Stock por lote
                 </CardTitle>
                 <CardDescription>
-                  Ingreso, ajuste y transferencia por lote con trazabilidad real.
+                  Control y ajuste de stock por lote con trazabilidad real.
                 </CardDescription>
               </div>
 
@@ -700,28 +703,32 @@ export function InventarioPage() {
                   <SlidersHorizontal className="h-4 w-4" />
                   Ajustar lote
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openTransferDialog()}
-                  disabled={dashboard.lots.length === 0 || !canTransferLots}
-                >
-                  <ArrowRightLeft className="h-4 w-4" />
-                  Transferir stock
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => setIsCreateDialogOpen(true)}
-                  disabled={
-                    dashboard.options.branches.length === 0 ||
-                    dashboard.options.products.length === 0
-                  }
-                >
-                  <PackagePlus className="h-4 w-4" />
-                  Registrar lote
-                </Button>
+                {isTransferEnabled ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openTransferDialog()}
+                    disabled={dashboard.lots.length === 0 || !canTransferLots}
+                  >
+                    <ArrowRightLeft className="h-4 w-4" />
+                    Transferir stock
+                  </Button>
+                ) : null}
+                {isManualLotEnabled ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setIsCreateDialogOpen(true)}
+                    disabled={
+                      dashboard.options.branches.length === 0 ||
+                      dashboard.options.products.length === 0
+                    }
+                  >
+                    <PackagePlus className="h-4 w-4" />
+                    Registrar lote
+                  </Button>
+                ) : null}
               </div>
             </CardHeader>
 
@@ -731,7 +738,7 @@ export function InventarioPage() {
                 <div className="flex items-start gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
-                    Aún faltan maestros de sucursal o productos para registrar lotes. Verifica el seed y vuelve a cargar la pantalla.
+                    Aún faltan maestros de sucursal o productos para visualizar inventario. Verifica el seed y vuelve a cargar la pantalla.
                   </div>
                 </div>
               ) : null}
@@ -794,12 +801,12 @@ export function InventarioPage() {
                     Aún no hay lotes registrados con los filtros actuales.
                   </p>
                   <p className="mt-1 text-small text-muted-foreground">
-                    Registra el primer lote para empezar el control real del inventario.
+                    Registra una compra o realiza la carga inicial para empezar el control real del inventario.
                   </p>
                 </div>
               ) : (
                 <>
-                  {!canTransferLots ? (
+                  {isTransferEnabled && !canTransferLots ? (
                     <div className="rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
                       Agrega al menos una segunda sucursal para habilitar transferencias entre locales.
                     </div>
@@ -815,12 +822,15 @@ export function InventarioPage() {
                           <TableHead>Stock</TableHead>
                           <TableHead>Costo / vencimiento</TableHead>
                           <TableHead>Estado</TableHead>
-                          <TableHead className="text-right">Acciones</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {visibleLots.map((lot) => (
-                          <TableRow key={lot.id}>
+                          <TableRow
+                            key={lot.id}
+                            className="cursor-pointer"
+                            onClick={() => openAdjustDialog(lot)}
+                          >
                             <TableCell>
                               <div className="space-y-1">
                                 <p className="font-medium text-foreground">{lot.productName}</p>
@@ -876,27 +886,6 @@ export function InventarioPage() {
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell>
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => openAdjustDialog(lot)}
-                                >
-                                  Ajustar
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => openTransferDialog(lot)}
-                                  disabled={lot.availableUnits <= 0 || !canTransferLots}
-                                >
-                                  Transferir
-                                </Button>
-                              </div>
-                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -949,7 +938,7 @@ export function InventarioPage() {
                 Kardex operativo
               </CardTitle>
               <CardDescription>
-                Entradas, reservas, liberaciones, ajustes y transferencias por lote.
+                Entradas, reservas, liberaciones y ajustes por lote.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -975,40 +964,47 @@ export function InventarioPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {dashboard.movements.map((movement) => (
-                      <TableRow key={movement.id}>
-                        <TableCell className="text-muted-foreground">
-                          {formatDateTime(movement.createdAt)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getMovementVariant(movement.type)}>
-                            {movement.type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-foreground">{movement.productName}</p>
-                            <p className="text-small text-muted-foreground">
-                              {movement.branchName} · {movement.warehouseName}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {movement.lotCode}
-                        </TableCell>
-                        <TableCell className="font-medium text-foreground">
-                          {movement.quantity > 0
-                            ? `+${formatQuantity(movement.quantity)}`
-                            : formatQuantity(movement.quantity)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatQuantity(movement.stockAfter)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {movement.actorName}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {dashboard.movements.map((movement) => {
+                      const movementTypeLabel =
+                        movement.origin === 'INVENTARIO_INICIAL'
+                          ? 'INVENTARIO_INICIAL'
+                          : movement.type
+
+                      return (
+                        <TableRow key={movement.id}>
+                          <TableCell className="text-muted-foreground">
+                            {formatDateTime(movement.createdAt)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getMovementVariant(movementTypeLabel)}>
+                              {movementTypeLabel}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-foreground">{movement.productName}</p>
+                              <p className="text-small text-muted-foreground">
+                                {movement.branchName} · {movement.warehouseName}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {movement.lotCode}
+                          </TableCell>
+                          <TableCell className="font-medium text-foreground">
+                            {movement.quantity > 0
+                              ? `+${formatQuantity(movement.quantity)}`
+                              : formatQuantity(movement.quantity)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatQuantity(movement.stockAfter)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {movement.actorName}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -1096,17 +1092,21 @@ export function InventarioPage() {
         </TabsContent>
       </Tabs>
 
-      <SidePanel
-        open={isCreateDialogOpen}
-        onOpenChange={(open) => {
-          setIsCreateDialogOpen(open)
-          if (!open) {
-            createForm.reset(defaultCreateFormValues)
-          }
-        }}
-      >
-        <SidePanelContent className="p-0">
-          <form className="flex h-full flex-col" onSubmit={createForm.handleSubmit(handleCreateLot)}>
+      {isManualLotEnabled ? (
+        <SidePanel
+          open={isCreateDialogOpen}
+          onOpenChange={(open) => {
+            setIsCreateDialogOpen(open)
+            if (!open) {
+              createForm.reset(defaultCreateFormValues)
+            }
+          }}
+        >
+          <SidePanelContent className="p-0">
+            <form
+              className="flex h-full flex-col"
+              onSubmit={createForm.handleSubmit(handleCreateLot)}
+            >
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">Registrar lote</p>
@@ -1310,9 +1310,10 @@ export function InventarioPage() {
                 </Button>
               </div>
             </div>
-          </form>
-        </SidePanelContent>
-      </SidePanel>
+            </form>
+          </SidePanelContent>
+        </SidePanel>
+      ) : null}
 
       <SidePanel
         open={isAdjustDialogOpen}
@@ -1484,17 +1485,21 @@ export function InventarioPage() {
         </SidePanelContent>
       </SidePanel>
 
-      <SidePanel
-        open={isTransferDialogOpen}
-        onOpenChange={(open) => {
-          setIsTransferDialogOpen(open)
-          if (!open) {
-            transferForm.reset(defaultTransferFormValues)
-          }
-        }}
-      >
-        <SidePanelContent className="p-0">
-          <form className="flex h-full flex-col" onSubmit={transferForm.handleSubmit(handleTransferLot)}>
+      {isTransferEnabled ? (
+        <SidePanel
+          open={isTransferDialogOpen}
+          onOpenChange={(open) => {
+            setIsTransferDialogOpen(open)
+            if (!open) {
+              transferForm.reset(defaultTransferFormValues)
+            }
+          }}
+        >
+          <SidePanelContent className="p-0">
+            <form
+              className="flex h-full flex-col"
+              onSubmit={transferForm.handleSubmit(handleTransferLot)}
+            >
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">
@@ -1653,8 +1658,9 @@ export function InventarioPage() {
               </div>
             </div>
           </form>
-        </SidePanelContent>
-      </SidePanel>
+          </SidePanelContent>
+        </SidePanel>
+      ) : null}
     </div>
   )
 }

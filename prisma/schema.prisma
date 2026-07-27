@@ -109,6 +109,7 @@ enum OrigenMovimientoInventario {
   DEVOLUCION_VENTA
   TRANSFERENCIA
   REGULARIZACION
+  INVENTARIO_INICIAL
   APERTURA
 }
 
@@ -138,6 +139,12 @@ enum EstadoCaja {
 enum EstadoAperturaCaja {
   ABIERTA
   CERRADA
+  ANULADA
+}
+
+enum EstadoCargaInventarioInicial {
+  COMPLETADA
+  FALLIDA
   ANULADA
 }
 
@@ -227,6 +234,8 @@ model Sucursal {
   seriesDocumentos     SerieDocumento[]
   configuraciones      Configuracion[]
   MovimientoInventario MovimientoInventario[]
+  cargasInventarioInicial        CargaInventarioInicial[]
+  cargasInventarioInicialDetalle CargaInventarioInicialDetalle[]
 
   @@unique([empresaId, codigo])
   @@index([empresaId, nombre])
@@ -347,6 +356,10 @@ model Usuario {
   egresosActualizados                  Egreso[]                     @relation("EgresoUpdatedBy")
   configuracionesCreadas               Configuracion[]              @relation("ConfiguracionCreatedBy")
   configuracionesActualizadas          Configuracion[]              @relation("ConfiguracionUpdatedBy")
+  cargasInventarioInicialCreadas       CargaInventarioInicial[]        @relation("CargaInventarioInicialCreatedBy")
+  cargasInventarioInicialActualizadas  CargaInventarioInicial[]        @relation("CargaInventarioInicialUpdatedBy")
+  cargasInventarioInicialDetallesCreados      CargaInventarioInicialDetalle[] @relation("CargaInventarioInicialDetalleCreatedBy")
+  cargasInventarioInicialDetallesActualizados CargaInventarioInicialDetalle[] @relation("CargaInventarioInicialDetalleUpdatedBy")
   seriesCreadas                        SerieDocumento[]             @relation("SerieDocumentoCreatedBy")
   seriesActualizadas                   SerieDocumento[]             @relation("SerieDocumentoUpdatedBy")
   impuestosCreados                     Impuesto[]                   @relation("ImpuestoCreatedBy")
@@ -624,6 +637,7 @@ model Producto {
   detalleCompras       DetalleCompra[]
   detalleVentas        DetalleVenta[]
   MovimientoInventario MovimientoInventario[]
+  cargasInventarioInicialDetalle CargaInventarioInicialDetalle[]
 
   @@index([categoriaId, estado])
   @@index([laboratorioId])
@@ -736,6 +750,7 @@ model Lote {
   updatedBy             Usuario?               @relation("LoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   movimientosInventario MovimientoInventario[]
   detalleVentaLotes     DetalleVentaLote[]
+  cargasInventarioInicialDetalle CargaInventarioInicialDetalle[]
 
   @@unique([sucursalId, productoId, numeroLote])
   @@index([productoId, fechaVencimiento])
@@ -807,6 +822,58 @@ model MovimientoInventario {
   @@index([tipo, origen])
   @@index([deletedAt])
   @@map("movimientos_inventario")
+}
+
+model CargaInventarioInicial {
+  id                String                       @id @default(uuid()) @db.Uuid
+  sucursalId        String                       @map("sucursal_id") @db.Uuid
+  estado            EstadoCargaInventarioInicial @default(COMPLETADA)
+  productosCargados Int                          @default(0) @map("productos_cargados")
+  lotesCreados      Int                          @default(0) @map("lotes_creados")
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  deletedAt         DateTime?                    @map("deleted_at")
+  createdById       String?                      @map("created_by") @db.Uuid
+  updatedById       String?                      @map("updated_by") @db.Uuid
+
+  sucursal  Sucursal  @relation(fields: [sucursalId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy Usuario?  @relation("CargaInventarioInicialCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario?  @relation("CargaInventarioInicialUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  detalles  CargaInventarioInicialDetalle[]
+
+  @@index([sucursalId, createdAt])
+  @@index([estado])
+  @@index([deletedAt])
+  @@map("cargas_inventario_inicial")
+}
+
+model CargaInventarioInicialDetalle {
+  id              String    @id @default(uuid()) @db.Uuid
+  cargaId         String    @map("carga_id") @db.Uuid
+  sucursalId      String    @map("sucursal_id") @db.Uuid
+  productoId      String    @map("producto_id") @db.Uuid
+  loteId          String    @map("lote_id") @db.Uuid
+  numeroLote      String    @map("numero_lote") @db.VarChar(80)
+  fechaVencimiento DateTime @map("fecha_vencimiento") @db.Date
+  costoUnitario   Decimal   @map("costo_unitario") @db.Decimal(14, 6)
+  cantidad        Int
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+  createdById     String?   @map("created_by") @db.Uuid
+  updatedById     String?   @map("updated_by") @db.Uuid
+
+  carga     CargaInventarioInicial @relation(fields: [cargaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sucursal  Sucursal               @relation(fields: [sucursalId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  producto  Producto               @relation(fields: [productoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  lote      Lote                   @relation(fields: [loteId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy Usuario?               @relation("CargaInventarioInicialDetalleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario?               @relation("CargaInventarioInicialDetalleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([cargaId])
+  @@index([sucursalId, productoId])
+  @@index([deletedAt])
+  @@map("cargas_inventario_inicial_detalle")
 }
 
 /// Módulo: Compras

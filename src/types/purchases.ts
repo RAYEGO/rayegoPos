@@ -127,7 +127,7 @@ export type PurchasesDashboardResponse = {
 }
 
 export type CreatePurchaseOrderPayload = {
-  sucursalId: string
+  sucursalId?: string
   proveedorId: string
   fechaEmision?: string
   fechaRecepcion?: string
