@@ -17,7 +17,7 @@ import { implementationService } from '@/services/implementationService'
 import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
-import type { ProductCatalogItem } from '@/types/products'
+import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
@@ -320,12 +320,20 @@ export function ConfiguracionPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const [isCatalogDrawerOpen, setIsCatalogDrawerOpen] = useState(false)
+  const [isCatalogImporting, setIsCatalogImporting] = useState(false)
+  const [catalogImportSummary, setCatalogImportSummary] = useState<{
+    created: number
+    updated: number
+    skipped: number
+  } | null>(null)
   const [company, setCompany] = useState<CompanyProfile | null>(null)
   const [companyError, setCompanyError] = useState<string | null>(null)
   const [isCompanyLoading, setIsCompanyLoading] = useState(false)
   const [isCompanySubmitting, setIsCompanySubmitting] = useState(false)
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
+  const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
 
   const initialInventoryForm = useForm<InitialInventoryFormValues>({
     resolver: zodResolver(initialInventorySchema),
@@ -625,6 +633,477 @@ export function ConfiguracionPage() {
       setIsImporting(false)
       if (csvInputRef.current) {
         csvInputRef.current.value = ''
+      }
+    }
+  }
+
+  function buildProductCatalogCsvTemplate() {
+    return [
+      [
+        'sku',
+        'codigoInterno',
+        'codigoBarras',
+        'nombre',
+        'categoria',
+        'laboratorio',
+        'presentacion',
+        'unidadCodigo',
+        'unidadNombre',
+        'unidadSimbolo',
+        'precioVenta',
+        'costoReferencia',
+        'requiereReceta',
+        'esControlado',
+        'modoEmpaque',
+        'unidadesPorBlister',
+        'blistersPorCaja',
+        'precioVentaBlister',
+        'descripcion',
+        'concentracion',
+        'registroSanitario',
+        'observaciones',
+      ].join(','),
+      [
+        'PARA-500-CAJA',
+        'PARA500',
+        '',
+        'Paracetamol 500mg',
+        'ANALGÉSICOS',
+        'ACME',
+        'Tabletas',
+        'UND',
+        'Unidad',
+        'und',
+        '0.50',
+        '0.10',
+        'NO',
+        'NO',
+        'BLISTER',
+        '10',
+        '10',
+        '0.20',
+        'Analgésico',
+        '500mg',
+        '',
+        '',
+      ].join(','),
+      [
+        'VITC-1G-UND',
+        '',
+        '',
+        'Vitamina C 1g',
+        'VITAMINAS',
+        '',
+        'Tabletas',
+        'UND',
+        'Unidad',
+        'und',
+        '1.50',
+        '0.30',
+        'NO',
+        'NO',
+        'SIMPLE',
+        '',
+        '',
+        '',
+        '',
+        '1g',
+        '',
+        '',
+      ].join(','),
+      '',
+    ].join('\n')
+  }
+
+  function downloadProductCatalogTemplate() {
+    const content = buildProductCatalogCsvTemplate()
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'rayego-importar-catalogo-productos-template.csv'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function normalizeBoolean(value: string) {
+    const normalized = value.trim().toUpperCase()
+    const withoutAccent = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    if (!withoutAccent) return false
+    if (['1', 'SI', 'S', 'TRUE', 'VERDADERO', 'YES'].includes(withoutAccent)) return true
+    return false
+  }
+
+  function normalizePackagingMode(value: string): 'SIMPLE' | 'BLISTER' | null {
+    const normalized = value.trim().toUpperCase()
+    const withoutAccent = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    if (!withoutAccent) return null
+    if (withoutAccent === 'SIMPLE') return 'SIMPLE'
+    if (withoutAccent === 'BLISTER') return 'BLISTER'
+    return null
+  }
+
+  function normalizeMasterKey(value: string) {
+    return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  }
+
+  function generateCategoryCode(name: string, attempt: number) {
+    const base = name
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toUpperCase()
+    const fallback = base || 'CAT'
+    const suffix = attempt > 0 ? `-${attempt + 1}` : ''
+    return `${fallback}${suffix}`.slice(0, 30)
+  }
+
+  function parseProductCatalogCsv(content: string) {
+    const lines = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    if (!lines.length) {
+      throw new Error('El archivo CSV está vacío.')
+    }
+
+    const delimiter = lines[0]?.includes(';') ? ';' : ','
+    const headers = lines[0].split(delimiter).map((header) => header.trim())
+    const normalizedHeaders = headers.map((header) => header.toLowerCase())
+
+    const expectedHeaders = [
+      'sku',
+      'nombre',
+      'categoria',
+      'unidadcodigo',
+      'unidadnombre',
+      'unidadsimbolo',
+      'precioventa',
+      'costoreferencia',
+      'requiereReceta'.toLowerCase(),
+      'escontrolado',
+      'modoempaque',
+    ].map((header) => header.toLowerCase())
+
+    const missing = expectedHeaders.filter((header) => !normalizedHeaders.includes(header))
+    if (missing.length) {
+      throw new Error(`Faltan columnas en el CSV: ${missing.join(', ')}`)
+    }
+
+    const headerIndex = Object.fromEntries(
+      normalizedHeaders.map((header, index) => [header, index]),
+    ) as Record<string, number>
+
+    const get = (columns: string[], key: string) => columns[headerIndex[key]] ?? ''
+
+    return lines.slice(1).map((line, rowIndex) => {
+      const columns = line.split(delimiter).map((col) => col.trim())
+      const value = (key: string) => get(columns, key)
+      return {
+        row: rowIndex + 2,
+        sku: value('sku'),
+        codigoInterno: value('codigointerno'),
+        codigoBarras: value('codigobarras'),
+        nombre: value('nombre'),
+        categoria: value('categoria'),
+        laboratorio: value('laboratorio'),
+        presentacion: value('presentacion'),
+        unidadCodigo: value('unidadcodigo'),
+        unidadNombre: value('unidadnombre'),
+        unidadSimbolo: value('unidadsimbolo'),
+        precioVenta: value('precioventa'),
+        costoReferencia: value('costoreferencia'),
+        requiereReceta: value('requierereceta'),
+        esControlado: value('escontrolado'),
+        modoEmpaque: value('modoempaque'),
+        unidadesPorBlister: value('unidadesporblister'),
+        blistersPorCaja: value('blistersporcaja'),
+        precioVentaBlister: value('precioventablister'),
+        descripcion: value('descripcion'),
+        concentracion: value('concentracion'),
+        registroSanitario: value('registrosanitario'),
+        observaciones: value('observaciones'),
+      }
+    })
+  }
+
+  async function handleProductCatalogImport(file: File) {
+    if (!accessToken) return
+    setIsCatalogImporting(true)
+    setCatalogImportSummary(null)
+
+    try {
+      const [categoriesResponse, laboratoriesResponse, presentationsResponse, unitsResponse] =
+        await Promise.all([
+          productsService.listMasterCategories(accessToken),
+          productsService.listMasterLaboratories(accessToken),
+          productsService.listMasterPresentations(accessToken),
+          productsService.listMasterUnits(accessToken),
+        ])
+
+      const categoriesByName = new Map(
+        categoriesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+      )
+      const labsByName = new Map(
+        laboratoriesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+      )
+      const presentationsByName = new Map(
+        presentationsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+      )
+      const unitsByCode = new Map(unitsResponse.rows.map((row) => [row.codigo.toLowerCase(), row]))
+      const unitsByName = new Map(
+        unitsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+      )
+
+      const text = await file.text()
+      const rows = parseProductCatalogCsv(text)
+
+      let created = 0
+      let updated = 0
+      let skipped = 0
+
+      for (const row of rows) {
+        const sku = row.sku.trim()
+        if (!sku) {
+          skipped += 1
+          continue
+        }
+
+        const categoryName = row.categoria.trim()
+        if (!categoryName) {
+          throw new Error(`Fila ${row.row}: Categoría requerida.`)
+        }
+
+        const categoryKey = normalizeMasterKey(categoryName)
+        let category = categoriesByName.get(categoryKey) ?? null
+        if (!category) {
+          let createdCategoryId: string | null = null
+          for (let attempt = 0; attempt < 10; attempt += 1) {
+            try {
+              const result = await productsService.createMasterCategory(accessToken, {
+                codigo: generateCategoryCode(categoryName, attempt),
+                nombre: categoryName,
+              })
+              createdCategoryId = result.id
+              break
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 409) {
+                continue
+              }
+              throw err
+            }
+          }
+
+          const refreshed = await productsService.listMasterCategories(accessToken)
+          refreshed.rows.forEach((entry) =>
+            categoriesByName.set(normalizeMasterKey(entry.nombre), entry),
+          )
+          category = categoriesByName.get(categoryKey) ?? null
+          if (!category) {
+            if (!createdCategoryId) {
+              throw new Error(`Fila ${row.row}: No se pudo crear la categoría.`)
+            }
+            category = refreshed.rows.find((entry) => entry.id === createdCategoryId) ?? null
+          }
+        }
+
+        if (!category) {
+          throw new Error(`Fila ${row.row}: No se pudo resolver la categoría.`)
+        }
+
+        const unitCode = row.unidadCodigo.trim().toUpperCase()
+        const unitName = row.unidadNombre.trim()
+        const unitSymbol = row.unidadSimbolo.trim()
+        if (!unitCode || !unitName || !unitSymbol) {
+          throw new Error(`Fila ${row.row}: Unidad de medida incompleta.`)
+        }
+
+        let unit = unitsByCode.get(unitCode.toLowerCase()) ?? unitsByName.get(normalizeMasterKey(unitName)) ?? null
+        if (!unit) {
+          try {
+            const result = await productsService.createMasterUnit(accessToken, {
+              codigo: unitCode,
+              nombre: unitName,
+              simbolo: unitSymbol,
+            })
+            const refreshed = await productsService.listMasterUnits(accessToken)
+            refreshed.rows.forEach((entry) => {
+              unitsByCode.set(entry.codigo.toLowerCase(), entry)
+              unitsByName.set(normalizeMasterKey(entry.nombre), entry)
+            })
+            unit =
+              refreshed.rows.find((entry) => entry.id === result.id) ??
+              unitsByCode.get(unitCode.toLowerCase()) ??
+              null
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 409) {
+              const refreshed = await productsService.listMasterUnits(accessToken)
+              refreshed.rows.forEach((entry) => {
+                unitsByCode.set(entry.codigo.toLowerCase(), entry)
+                unitsByName.set(normalizeMasterKey(entry.nombre), entry)
+              })
+              unit =
+                unitsByCode.get(unitCode.toLowerCase()) ??
+                unitsByName.get(normalizeMasterKey(unitName)) ??
+                null
+            } else {
+              throw err
+            }
+          }
+        }
+
+        if (!unit) {
+          throw new Error(`Fila ${row.row}: No se pudo resolver la unidad de medida.`)
+        }
+
+        const laboratoryName = row.laboratorio.trim()
+        let labId: string | undefined
+        if (laboratoryName) {
+          const labKey = normalizeMasterKey(laboratoryName)
+          let lab = labsByName.get(labKey) ?? null
+          if (!lab) {
+            try {
+              const result = await productsService.createMasterLaboratory(accessToken, {
+                nombre: laboratoryName,
+              })
+              const refreshed = await productsService.listMasterLaboratories(accessToken)
+              refreshed.rows.forEach((entry) =>
+                labsByName.set(normalizeMasterKey(entry.nombre), entry),
+              )
+              lab = refreshed.rows.find((entry) => entry.id === result.id) ?? null
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 409) {
+                const refreshed = await productsService.listMasterLaboratories(accessToken)
+                refreshed.rows.forEach((entry) =>
+                  labsByName.set(normalizeMasterKey(entry.nombre), entry),
+                )
+                lab = labsByName.get(labKey) ?? null
+              } else {
+                throw err
+              }
+            }
+          }
+          if (lab) {
+            labId = lab.id
+          }
+        }
+
+        const presentationName = row.presentacion.trim()
+        let presentationId: string | undefined
+        if (presentationName) {
+          const presentationKey = normalizeMasterKey(presentationName)
+          let presentation = presentationsByName.get(presentationKey) ?? null
+          if (!presentation) {
+            try {
+              const result = await productsService.createMasterPresentation(accessToken, {
+                nombre: presentationName,
+              })
+              const refreshed = await productsService.listMasterPresentations(accessToken)
+              refreshed.rows.forEach((entry) =>
+                presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
+              )
+              presentation =
+                refreshed.rows.find((entry) => entry.id === result.id) ??
+                presentationsByName.get(presentationKey) ??
+                null
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 409) {
+                const refreshed = await productsService.listMasterPresentations(accessToken)
+                refreshed.rows.forEach((entry) =>
+                  presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
+                )
+                presentation = presentationsByName.get(presentationKey) ?? null
+              } else {
+                throw err
+              }
+            }
+          }
+          if (presentation) {
+            presentationId = presentation.id
+          }
+        }
+
+        const price = Number(row.precioVenta)
+        const refCost = Number(row.costoReferencia)
+        if (!Number.isFinite(price) || price < 0) {
+          throw new Error(`Fila ${row.row}: Precio de venta inválido.`)
+        }
+        if (!Number.isFinite(refCost) || refCost < 0) {
+          throw new Error(`Fila ${row.row}: Costo referencial inválido.`)
+        }
+
+        const mode = normalizePackagingMode(row.modoEmpaque)
+        if (!mode) {
+          throw new Error(`Fila ${row.row}: Modo de empaque inválido (SIMPLE o BLISTER).`)
+        }
+
+        const unitsPerBlister = row.unidadesPorBlister ? Number(row.unidadesPorBlister) : null
+        const blistersPerBox = row.blistersPorCaja ? Number(row.blistersPorCaja) : null
+        const blisterPrice = row.precioVentaBlister ? Number(row.precioVentaBlister) : null
+
+        const payload: CreateProductPayload = {
+          categoriaId: category.id,
+          laboratorioId: labId,
+          presentacionId: presentationId,
+          unidadMedidaId: unit.id,
+          modoEmpaque: mode,
+          ...(mode === 'BLISTER' && unitsPerBlister && unitsPerBlister > 0
+            ? { unidadesPorBlister: Math.floor(unitsPerBlister) }
+            : {}),
+          ...(mode === 'BLISTER' && blistersPerBox && blistersPerBox > 0
+            ? { blistersPorCaja: Math.floor(blistersPerBox) }
+            : {}),
+          ...(mode === 'BLISTER' && blisterPrice !== null && Number.isFinite(blisterPrice) && blisterPrice >= 0
+            ? { precioVentaBlister: blisterPrice }
+            : {}),
+          sku,
+          ...(row.codigoInterno?.trim() ? { codigoInterno: row.codigoInterno.trim() } : {}),
+          ...(row.codigoBarras?.trim() ? { codigoBarras: row.codigoBarras.trim() } : {}),
+          nombre: row.nombre.trim(),
+          ...(row.descripcion?.trim() ? { descripcion: row.descripcion.trim() } : {}),
+          ...(row.concentracion?.trim() ? { concentracion: row.concentracion.trim() } : {}),
+          ...(row.registroSanitario?.trim() ? { registroSanitario: row.registroSanitario.trim() } : {}),
+          requiereReceta: normalizeBoolean(row.requiereReceta),
+          esControlado: normalizeBoolean(row.esControlado),
+          precioVenta: price,
+          costoReferencia: refCost,
+          ...(row.observaciones?.trim() ? { observaciones: row.observaciones.trim() } : {}),
+        }
+
+        const existing = await productsService.list(accessToken, {
+          search: sku,
+          page: 1,
+          pageSize: 10,
+        })
+        const existingProduct =
+          existing.items.find((item) => item.sku.toLowerCase() === sku.toLowerCase()) ?? null
+
+        if (existingProduct) {
+          await productsService.update(accessToken, existingProduct.id, payload)
+          updated += 1
+        } else {
+          await productsService.create(accessToken, payload)
+          created += 1
+        }
+      }
+
+      setCatalogImportSummary({ created, updated, skipped })
+      toast.success(`Catálogo importado: ${created} creados, ${updated} actualizados.`)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(err instanceof Error ? err.message : 'No se pudo importar el catálogo.')
+    } finally {
+      setIsCatalogImporting(false)
+      if (catalogCsvInputRef.current) {
+        catalogCsvInputRef.current.value = ''
       }
     }
   }
@@ -1026,6 +1505,126 @@ export function ConfiguracionPage() {
           <Card>
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-1">
+                <CardTitle>Importar Catálogo de Productos</CardTitle>
+                <CardDescription>
+                  Crea masivamente el maestro de productos y sus catálogos relacionados. No genera stock, lotes ni
+                  movimientos de inventario.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => downloadProductCatalogTemplate()}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Descargar plantilla CSV
+                </Button>
+                <Button type="button" onClick={() => setIsCatalogDrawerOpen(true)}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar catálogo
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-xl border p-4">
+                  <p className="text-xs font-medium text-muted-foreground">Stock</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">No se crea stock</p>
+                </div>
+                <div className="rounded-xl border p-4">
+                  <p className="text-xs font-medium text-muted-foreground">Lotes</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">No se crean lotes</p>
+                </div>
+                <div className="rounded-xl border p-4">
+                  <p className="text-xs font-medium text-muted-foreground">Inventario</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">Sin movimientos</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <SidePanel open={isCatalogDrawerOpen} onOpenChange={setIsCatalogDrawerOpen}>
+            <SidePanelContent>
+              <div className="flex flex-col border-b bg-background/95 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">Importar catálogo de productos</p>
+                    <p className="text-xs text-muted-foreground">
+                      Esta operación solo crea el catálogo. La carga inicial de inventario se realiza por separado.
+                    </p>
+                  </div>
+                  <SidePanelClose asChild>
+                    <Button type="button" variant="ghost" size="icon">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </SidePanelClose>
+                </div>
+              </div>
+
+              <div className="flex h-full flex-col">
+                <div className="flex-1 space-y-4 overflow-y-auto p-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Plantilla e importación</CardTitle>
+                      <CardDescription>
+                        La plantilla incluye configuración de empaque (Caja/Blíster/Unidad) y crea categorías,
+                        laboratorios, presentaciones y unidades si no existen.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button type="button" variant="outline" onClick={() => downloadProductCatalogTemplate()}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Descargar plantilla CSV
+                        </Button>
+
+                        <input
+                          ref={catalogCsvInputRef}
+                          type="file"
+                          accept=".csv,text/csv"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (!file) return
+                            void handleProductCatalogImport(file)
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          disabled={isCatalogImporting}
+                          onClick={() => catalogCsvInputRef.current?.click()}
+                        >
+                          {isCatalogImporting ? <Loader className="mr-2 h-4 w-4" /> : <Upload className="mr-2 h-4 w-4" />}
+                          Importar CSV
+                        </Button>
+                      </div>
+
+                      {catalogImportSummary ? (
+                        <div className="rounded-xl border bg-muted/30 p-4">
+                          <p className="text-sm font-medium text-foreground">Resumen</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {catalogImportSummary.created} creados · {catalogImportSummary.updated} actualizados ·{' '}
+                            {catalogImportSummary.skipped} omitidos
+                          </p>
+                        </div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="sticky bottom-0 border-t bg-background/95 p-4">
+                  <div className="flex justify-end">
+                    <SidePanelClose asChild>
+                      <Button type="button" variant="outline" disabled={isCatalogImporting}>
+                        Cerrar
+                      </Button>
+                    </SidePanelClose>
+                  </div>
+                </div>
+              </div>
+            </SidePanelContent>
+          </SidePanel>
+
+          <Card>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
                 <CardTitle>Carga Inicial de Inventario</CardTitle>
                 <CardDescription>
                   Permite registrar el stock existente de la botica antes de iniciar operaciones con Rayego
@@ -1087,6 +1686,21 @@ export function ConfiguracionPage() {
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Verificar implementación</CardTitle>
+              <CardDescription>Disponible en futuras versiones.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">No disponible en la versión 1.0</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  En futuras versiones se incluirán validaciones automáticas para asegurar que la implementación esté lista para operar.
+                </p>
+              </div>
             </CardContent>
           </Card>
 
