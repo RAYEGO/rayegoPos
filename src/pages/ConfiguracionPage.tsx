@@ -1,23 +1,27 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useMemo, useState } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
+import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Plus, RefreshCcw, X } from 'lucide-react'
+import { ImageUp, Plus, RefreshCcw, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { implementationService } from '@/services/implementationService'
+import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { ProductCatalogItem } from '@/types/products'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
+import type { CompanyProfile, UpdateCompanyProfilePayload } from '@/types/company'
 
 function formatDateTime(value: string) {
   const date = new Date(value)
@@ -167,6 +171,32 @@ const initialInventorySchema = z.object({
 
 type InitialInventoryFormValues = z.infer<typeof initialInventorySchema>
 
+const nullableText = (schema: z.ZodTypeAny) =>
+  z.preprocess((value) => {
+    if (typeof value === 'string' && value.trim() === '') {
+      return null
+    }
+    return value
+  }, schema)
+
+const companyProfileSchema = z.object({
+  logoUrl: nullableText(z.string().max(500).nullable().optional()),
+  razonSocial: z.string().min(3, 'Ingresa la razón social.').max(200),
+  nombreComercial: nullableText(z.string().max(200).nullable().optional()),
+  ruc: z.string().regex(/^\d{11}$/, 'El RUC debe tener 11 dígitos.'),
+  direccionFiscal: nullableText(z.string().max(255).nullable().optional()),
+  telefono: nullableText(z.string().max(30).nullable().optional()),
+  email: nullableText(z.string().email('Ingresa un correo válido.').max(150).nullable().optional()),
+  moneda: z.enum(['PEN', 'USD']),
+  igvPorDefecto: z
+    .number()
+    .min(0, 'El IGV debe estar entre 0 y 100.')
+    .max(100, 'El IGV debe estar entre 0 y 100.'),
+  activo: z.boolean(),
+})
+
+type CompanyProfileFormValues = z.infer<typeof companyProfileSchema>
+
 function FieldError({ message }: { message?: string }) {
   if (!message) return null
   return <p className="text-xs text-destructive">{message}</p>
@@ -177,12 +207,18 @@ export function ConfiguracionPage() {
   const accessToken = session?.accessToken ?? ''
   const branchName = session?.user.branchName ?? ''
 
-  const [activeTab, setActiveTab] = useState<'general' | 'implementacion'>('implementacion')
+  const [activeTab, setActiveTab] = useState<
+    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'catalogos'
+  >('empresa')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loads, setLoads] = useState<InitialInventoryLoadRow[]>([])
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [company, setCompany] = useState<CompanyProfile | null>(null)
+  const [companyError, setCompanyError] = useState<string | null>(null)
+  const [isCompanyLoading, setIsCompanyLoading] = useState(false)
+  const [isCompanySubmitting, setIsCompanySubmitting] = useState(false)
 
   const initialInventoryForm = useForm<InitialInventoryFormValues>({
     resolver: zodResolver(initialInventorySchema),
@@ -196,6 +232,22 @@ export function ConfiguracionPage() {
           cantidad: 1,
         },
       ],
+    },
+  })
+
+  const companyForm = useForm<CompanyProfileFormValues>({
+    resolver: zodResolver(companyProfileSchema),
+    defaultValues: {
+      logoUrl: null,
+      razonSocial: '',
+      nombreComercial: '',
+      ruc: '',
+      direccionFiscal: '',
+      telefono: '',
+      email: '',
+      moneda: 'PEN',
+      igvPorDefecto: 18,
+      activo: true,
     },
   })
 
@@ -231,8 +283,47 @@ export function ConfiguracionPage() {
     }
   }
 
+  function mapCompanyToFormValues(value: CompanyProfile): CompanyProfileFormValues {
+    return {
+      logoUrl: value.logoUrl,
+      razonSocial: value.razonSocial,
+      nombreComercial: value.nombreComercial ?? '',
+      ruc: value.ruc,
+      direccionFiscal: value.direccionFiscal ?? '',
+      telefono: value.telefono ?? '',
+      email: value.email ?? '',
+      moneda: (value.moneda as 'PEN' | 'USD') ?? 'PEN',
+      igvPorDefecto: value.igvPorDefecto ?? 18,
+      activo: value.activo ?? true,
+    }
+  }
+
+  async function loadCompanyProfile() {
+    if (!accessToken) {
+      return
+    }
+
+    setIsCompanyLoading(true)
+    setCompanyError(null)
+
+    try {
+      const response = await companyService.getProfile(accessToken)
+      setCompany(response.company)
+      companyForm.reset(mapCompanyToFormValues(response.company))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setCompanyError(getApiErrorMessage(err))
+    } finally {
+      setIsCompanyLoading(false)
+    }
+  }
+
   useEffect(() => {
     void loadInitialInventoryLoads()
+    void loadCompanyProfile()
   }, [accessToken])
 
   const totals = useMemo(() => {
@@ -265,6 +356,32 @@ export function ConfiguracionPage() {
     }
   }
 
+  async function handleUpdateCompany(values: CompanyProfileFormValues) {
+    if (!accessToken) return
+    setIsCompanySubmitting(true)
+
+    try {
+      const response = await companyService.updateProfile(
+        accessToken,
+        values as UpdateCompanyProfilePayload,
+      )
+      setCompany(response.company)
+      companyForm.reset(mapCompanyToFormValues(response.company))
+      toast.success('Empresa actualizada correctamente.')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsCompanySubmitting(false)
+    }
+  }
+
+  const companyLogoValue = companyForm.watch('logoUrl')
+  const companyLogoUrl = typeof companyLogoValue === 'string' ? companyLogoValue : null
+
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-col gap-1">
@@ -276,21 +393,320 @@ export function ConfiguracionPage() {
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)}>
         <TabsList>
-          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="empresa">Empresa</TabsTrigger>
+          <TabsTrigger value="sucursales" disabled>
+            Sucursales
+          </TabsTrigger>
+          <TabsTrigger value="comprobantes" disabled>
+            Comprobantes
+          </TabsTrigger>
           <TabsTrigger value="implementacion">Implementación</TabsTrigger>
+          <TabsTrigger value="catalogos" disabled>
+            Catálogos
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="general" className="pt-4">
+        <TabsContent value="empresa" className="space-y-4 pt-4">
+          {companyError ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+              {companyError}
+            </div>
+          ) : isCompanyLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader className="h-7 w-7" />
+            </div>
+          ) : (
+            <form
+              onSubmit={companyForm.handleSubmit(handleUpdateCompany)}
+              className="space-y-4"
+            >
+              <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-softSm sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">Empresa</p>
+                  <p className="text-xs text-muted-foreground">
+                    Edita los datos de la empresa asociada a tu sesión. No es posible crear, eliminar o cambiar de empresa.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!companyForm.formState.isDirty || isCompanySubmitting}
+                    onClick={() => {
+                      if (company) {
+                        companyForm.reset(mapCompanyToFormValues(company))
+                      }
+                    }}
+                  >
+                    Descartar cambios
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!companyForm.formState.isDirty || isCompanySubmitting}
+                  >
+                    {isCompanySubmitting ? <Loader className="h-4 w-4" /> : null}
+                    Guardar cambios
+                  </Button>
+                </div>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Información general</CardTitle>
+                  <CardDescription>Datos legales y comerciales de la empresa.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <p className="text-sm font-medium text-foreground">Logo</p>
+                    <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="h-16 w-16 overflow-hidden rounded-2xl border bg-muted">
+                          {companyLogoUrl ? (
+                            <img
+                              src={companyLogoUrl}
+                              alt="Logo de la empresa"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                              <ImageUp className="h-6 w-6" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-foreground">
+                            Logo corporativo
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Se mostrará en comprobantes y pantallas administrativas.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <label className="inline-flex">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0]
+                              if (!file) return
+                              const reader = new FileReader()
+                              reader.onload = () => {
+                                const result = typeof reader.result === 'string' ? reader.result : null
+                                companyForm.setValue('logoUrl', result, { shouldDirty: true })
+                              }
+                              reader.readAsDataURL(file)
+                            }}
+                          />
+                          <Button type="button" variant="outline">
+                            Subir logo
+                          </Button>
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={!companyLogoUrl}
+                          onClick={() => companyForm.setValue('logoUrl', null, { shouldDirty: true })}
+                        >
+                          Quitar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="razonSocial">
+                      Razón social
+                    </label>
+                    <Input id="razonSocial" {...companyForm.register('razonSocial')} />
+                    <FieldError message={companyForm.formState.errors.razonSocial?.message} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="nombreComercial">
+                      Nombre comercial
+                    </label>
+                    <Input id="nombreComercial" {...companyForm.register('nombreComercial')} />
+                    <FieldError message={companyForm.formState.errors.nombreComercial?.message as string | undefined} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="ruc">
+                      RUC
+                    </label>
+                    <Input id="ruc" inputMode="numeric" {...companyForm.register('ruc')} />
+                    <FieldError message={companyForm.formState.errors.ruc?.message} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Información de contacto</CardTitle>
+                  <CardDescription>Datos para comunicación y facturación.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="direccionFiscal">
+                      Dirección fiscal
+                    </label>
+                    <Input id="direccionFiscal" {...companyForm.register('direccionFiscal')} />
+                    <FieldError message={companyForm.formState.errors.direccionFiscal?.message as string | undefined} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="telefono">
+                      Teléfono
+                    </label>
+                    <Input id="telefono" {...companyForm.register('telefono')} />
+                    <FieldError message={companyForm.formState.errors.telefono?.message as string | undefined} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="email">
+                      Correo electrónico
+                    </label>
+                    <Input id="email" type="email" {...companyForm.register('email')} />
+                    <FieldError message={companyForm.formState.errors.email?.message as string | undefined} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Configuración</CardTitle>
+                  <CardDescription>Parámetros base para la operación.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">Moneda</label>
+                    <Controller
+                      control={companyForm.control}
+                      name="moneda"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona una moneda" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="PEN">PEN · Soles</SelectItem>
+                            <SelectItem value="USD">USD · Dólares</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground" htmlFor="igvPorDefecto">
+                      IGV por defecto (%)
+                    </label>
+                    <Input
+                      id="igvPorDefecto"
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      {...companyForm.register('igvPorDefecto', { valueAsNumber: true })}
+                    />
+                    <FieldError message={companyForm.formState.errors.igvPorDefecto?.message} />
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-xl border p-4 md:col-span-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Empresa activa</p>
+                      <p className="text-xs text-muted-foreground">
+                        Si se desactiva, se bloquea el uso operativo en esta empresa.
+                      </p>
+                    </div>
+                    <Controller
+                      control={companyForm.control}
+                      name="activo"
+                      render={({ field }) => (
+                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Preparado para SaaS</CardTitle>
+                  <CardDescription>Información informativa de solo lectura.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border p-4">
+                    <p className="text-xs font-medium text-muted-foreground">Fecha de creación</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {company?.createdAt ? formatDateTime(company.createdAt) : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border p-4">
+                    <p className="text-xs font-medium text-muted-foreground">Última actualización</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {company?.updatedAt ? formatDateTime(company.updatedAt) : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-dashed p-4 md:col-span-2">
+                    <p className="text-sm font-medium text-foreground">Plan contratado</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Próximamente</p>
+                  </div>
+                  <div className="rounded-xl border border-dashed p-4 md:col-span-2">
+                    <p className="text-sm font-medium text-foreground">Estado de suscripción</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Próximamente</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </form>
+          )}
+        </TabsContent>
+
+        <TabsContent value="sucursales" className="pt-4">
           <Card>
             <CardHeader>
-              <CardTitle>General</CardTitle>
-              <CardDescription>Configuraciones generales del sistema (próximamente).</CardDescription>
+              <CardTitle>Sucursales</CardTitle>
+              <CardDescription>Disponible próximamente.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="rounded-xl border border-dashed p-8 text-center">
                 <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Esta sección se habilitará conforme se agreguen opciones globales del sistema.
+                  Esta sección se habilitará luego de cerrar Empresa.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="comprobantes" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Comprobantes</CardTitle>
+              <CardDescription>Disponible próximamente.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Esta sección se habilitará luego de cerrar Empresa y Sucursales.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="catalogos" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Catálogos</CardTitle>
+              <CardDescription>Disponible próximamente.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Esta sección se habilitará en una fase posterior.
                 </p>
               </div>
             </CardContent>

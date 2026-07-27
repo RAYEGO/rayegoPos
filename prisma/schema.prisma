@@ -175,6 +175,7 @@ enum AmbitoConfiguracion {
 /// Módulo: Configuración / Empresa
 model Empresa {
   id              String                 @id @default(uuid()) @db.Uuid
+  logoUrl         String?                @map("logo_url") @db.VarChar(500)
   razonSocial     String                 @map("razon_social") @db.VarChar(200)
   nombreComercial String?                @map("nombre_comercial") @db.VarChar(200)
   tipoDocumento   TipoDocumentoIdentidad @default(RUC) @map("tipo_documento")
@@ -184,6 +185,7 @@ model Empresa {
   direccion       String?                @db.VarChar(255)
   ubigeo          String?                @db.VarChar(6)
   monedaBase      String                 @default("PEN") @map("moneda_base") @db.VarChar(3)
+  igvPorDefecto   Decimal                @default(18) @map("igv_por_defecto") @db.Decimal(7, 4)
   zonaHoraria     String                 @default("America/Lima") @map("zona_horaria") @db.VarChar(60)
   activo          Boolean                @default(true)
   createdAt       DateTime               @default(now()) @map("created_at")
