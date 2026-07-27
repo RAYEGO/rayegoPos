@@ -28,6 +28,7 @@ import { ReportesPage } from '@/pages/ReportesPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { UsuariosPage } from '@/pages/UsuariosPage'
 import { VentasPage } from '@/pages/VentasPage'
+import { RegisterPage } from '@/public/register/RegisterPage'
 import { paths } from '@/routes/paths'
 import type { RouteAccess } from '@/routes/access-control'
 
@@ -43,6 +44,11 @@ export type AppRouteDefinition = {
 }
 
 export const authRoutes: AppRouteDefinition[] = [
+  {
+    path: paths.register,
+    component: RegisterPage,
+    access: { publicOnly: true },
+  },
   {
     path: paths.login,
     component: LoginPage,
