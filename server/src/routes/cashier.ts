@@ -16,6 +16,10 @@ const cashierDashboardQuerySchema = z.object({
   branchId: z.string().uuid().optional(),
 })
 
+const activeCashDrawerQuerySchema = z.object({
+  paymentMethodId: z.string().uuid().optional(),
+})
+
 const openCashDrawerSchema = z.object({
   branchId: z.string().uuid().optional(),
   openingAmount: z.number().nonnegative(),
@@ -69,7 +73,10 @@ export async function cashierRoutes(app: FastifyInstance) {
   })
 
   app.get('/active', async (request) => {
-    return getActiveCashDrawer(request)
+    const query = activeCashDrawerQuerySchema.parse(request.query)
+    return getActiveCashDrawer(request, {
+      paymentMethodId: query.paymentMethodId,
+    })
   })
 
   app.post('/open', async (request) => {

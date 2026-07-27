@@ -333,6 +333,7 @@ export function ConfiguracionPage() {
   const [companyError, setCompanyError] = useState<string | null>(null)
   const [isCompanyLoading, setIsCompanyLoading] = useState(false)
   const [isCompanySubmitting, setIsCompanySubmitting] = useState(false)
+  const [isCompanyLogoUploading, setIsCompanyLogoUploading] = useState(false)
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
@@ -1077,7 +1078,7 @@ export function ConfiguracionPage() {
 
           const mode = normalizePackagingMode(row.modoEmpaque)
           if (!mode) {
-            pushError(row.row, IMPLEMENTATION_MESSAGES.PACKAGE_TYPE_NOT_FOUND)
+            pushError(row.row, IMPLEMENTATION_MESSAGES.PACKAGING_MODE_NOT_FOUND)
             continue
           }
 
@@ -1199,6 +1200,78 @@ export function ConfiguracionPage() {
     }
   }
 
+  async function handleUploadCompanyLogo(file: File) {
+    if (!accessToken) return
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'] as const
+    if (!allowedTypes.includes(file.type as (typeof allowedTypes)[number])) {
+      toast.error('Formato de imagen no permitido. Use PNG, JPG, JPEG o WEBP.')
+      return
+    }
+
+    const maxBytes = 2 * 1024 * 1024
+    if (file.size > maxBytes) {
+      toast.error('El archivo excede el tamaño máximo permitido (2 MB).')
+      return
+    }
+
+    setIsCompanyLogoUploading(true)
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result)
+            return
+          }
+          reject(new Error('No se pudo leer el archivo.'))
+        }
+        reader.onerror = () => reject(new Error('No se pudo leer el archivo.'))
+        reader.readAsDataURL(file)
+      })
+
+      const response = await companyService.uploadLogo(accessToken, {
+        fileName: file.name,
+        mimeType: file.type,
+        base64,
+      })
+
+      setCompany(response.company)
+      companyForm.reset(mapCompanyToFormValues(response.company))
+      toast.success('Logo actualizado correctamente.')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsCompanyLogoUploading(false)
+    }
+  }
+
+  async function handleDeleteCompanyLogo() {
+    if (!accessToken) return
+    const currentLogoUrl = companyForm.getValues('logoUrl')
+    if (!currentLogoUrl) return
+
+    setIsCompanyLogoUploading(true)
+    try {
+      const response = await companyService.deleteLogo(accessToken)
+      setCompany(response.company)
+      companyForm.reset(mapCompanyToFormValues(response.company))
+      toast.success('Logo eliminado correctamente.')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsCompanyLogoUploading(false)
+    }
+  }
+
   const companyLogoValue = companyForm.watch('logoUrl')
   const companyLogoUrl = typeof companyLogoValue === 'string' ? companyLogoValue : null
 
@@ -1308,28 +1381,29 @@ export function ConfiguracionPage() {
                         <label className="inline-flex">
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/png,image/jpeg,image/jpg,image/webp"
                             className="hidden"
                             onChange={(event) => {
                               const file = event.target.files?.[0]
+                              event.target.value = ''
                               if (!file) return
-                              const reader = new FileReader()
-                              reader.onload = () => {
-                                const result = typeof reader.result === 'string' ? reader.result : null
-                                companyForm.setValue('logoUrl', result, { shouldDirty: true })
-                              }
-                              reader.readAsDataURL(file)
+                              void handleUploadCompanyLogo(file)
                             }}
                           />
-                          <Button type="button" variant="outline">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isCompanyLogoUploading || isCompanySubmitting}
+                          >
+                            {isCompanyLogoUploading ? <Loader className="h-4 w-4" /> : null}
                             Subir logo
                           </Button>
                         </label>
                         <Button
                           type="button"
                           variant="ghost"
-                          disabled={!companyLogoUrl}
-                          onClick={() => companyForm.setValue('logoUrl', null, { shouldDirty: true })}
+                          disabled={!companyLogoUrl || isCompanyLogoUploading || isCompanySubmitting}
+                          onClick={() => void handleDeleteCompanyLogo()}
                         >
                           Quitar
                         </Button>

@@ -40,6 +40,10 @@ export const IMPLEMENTATION_MESSAGES = {
     'La presentación indicada no existe.',
     'Registre o importe previamente la presentación antes de continuar.',
   ].join('\n\n'),
+  PACKAGING_MODE_NOT_FOUND: [
+    'El modo de empaque indicado no es válido.',
+    'Utilice únicamente: SIMPLE o BLISTER.',
+  ].join('\n\n'),
   PACKAGE_TYPE_NOT_FOUND: [
     'El tipo de empaque indicado no existe o no es válido.',
     'Verifique el valor antes de continuar.',

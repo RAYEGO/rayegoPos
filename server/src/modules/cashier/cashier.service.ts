@@ -83,7 +83,12 @@ async function getDefaultCashDrawerForBranch(branchId: string) {
   })
 }
 
-export async function getActiveCashDrawer(request: FastifyRequest) {
+export async function getActiveCashDrawer(
+  request: FastifyRequest,
+  params?: {
+    paymentMethodId?: string
+  },
+) {
   const { branchId, userId } = await getAuthContext(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
@@ -113,11 +118,42 @@ export async function getActiveCashDrawer(request: FastifyRequest) {
     )
   }
 
+  const selectedPaymentMethodId = params?.paymentMethodId
+  const selectedPaymentMethod = selectedPaymentMethodId
+    ? await prisma.formaPago.findFirst({
+        where: {
+          id: selectedPaymentMethodId,
+          deletedAt: null,
+          activo: true,
+        },
+        select: {
+          id: true,
+          codigo: true,
+        },
+      })
+    : null
+
+  if (selectedPaymentMethodId && !selectedPaymentMethod) {
+    throw createHttpError(404, 'La forma de pago seleccionada no está disponible.')
+  }
+
+  const isCashScope =
+    !selectedPaymentMethod ||
+    selectedPaymentMethod.codigo === CodigoFormaPago.EFECTIVO
+
+  const cashScopeOr = [{ formaPagoId: null }, { formaPago: { codigo: CodigoFormaPago.EFECTIVO } }]
+  const movementScope = selectedPaymentMethod
+    ? selectedPaymentMethod.codigo === CodigoFormaPago.EFECTIVO
+      ? { OR: cashScopeOr }
+      : { formaPagoId: selectedPaymentMethod.id }
+    : { OR: cashScopeOr }
+
   const [incomeAggregate, expenseAggregate] = await Promise.all([
     prisma.movimientoCaja.aggregate({
       where: {
         deletedAt: null,
         aperturaCajaId: opening.id,
+        ...movementScope,
         tipo: {
           notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
         },
@@ -131,6 +167,7 @@ export async function getActiveCashDrawer(request: FastifyRequest) {
       where: {
         deletedAt: null,
         aperturaCajaId: opening.id,
+        ...movementScope,
         tipo: {
           notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
         },
@@ -142,12 +179,12 @@ export async function getActiveCashDrawer(request: FastifyRequest) {
     }),
   ])
 
-  const openingAmount = decimalToNumber(opening.montoAperturaEfectivo)
+  const openingAmount = isCashScope ? decimalToNumber(opening.montoAperturaEfectivo) : 0
   const expectedAmount = Number(
     (
       openingAmount +
-      decimalToNumber(incomeAggregate._sum.monto) -
-      decimalToNumber(expenseAggregate._sum.monto)
+      decimalToNumber(incomeAggregate._sum?.monto) -
+      decimalToNumber(expenseAggregate._sum?.monto)
     ).toFixed(2),
   )
 
@@ -305,6 +342,12 @@ export async function getCashierDashboard(
     for (const movement of movementsForDrawer) {
       if (movement.tipo === TipoMovimientoCaja.APERTURA) continue
       if (movement.tipo === TipoMovimientoCaja.CIERRE) continue
+      if (
+        movement.formaPagoId !== null &&
+        movement.formaPago?.codigo !== CodigoFormaPago.EFECTIVO
+      ) {
+        continue
+      }
       if (movement.operacion === 'INGRESO') {
         expectedAmount += decimalToNumber(movement.monto)
       } else {

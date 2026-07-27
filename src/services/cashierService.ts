@@ -38,8 +38,13 @@ export const cashierService = {
     )
   },
 
-  getActiveDrawer(accessToken: string) {
-    return apiRequest<ActiveCashDrawerResponse>('/api/cashier/active', {
+  getActiveDrawer(accessToken: string, paymentMethodId?: string) {
+    const searchParams = new URLSearchParams()
+    if (paymentMethodId) {
+      searchParams.set('paymentMethodId', paymentMethodId)
+    }
+    const query = searchParams.toString()
+    return apiRequest<ActiveCashDrawerResponse>(`/api/cashier/active${query ? `?${query}` : ''}`, {
       accessToken,
     })
   },

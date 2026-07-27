@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { getCompanyProfile, updateCompanyProfile } from '../modules/settings/company.service.js'
+import {
+  deleteCompanyLogo,
+  getCompanyProfile,
+  updateCompanyProfile,
+  uploadCompanyLogo,
+} from '../modules/settings/company.service.js'
 
 const updateCompanyProfileSchema = z.object({
   logoUrl: z.string().max(500).nullable().optional(),
@@ -15,6 +20,12 @@ const updateCompanyProfileSchema = z.object({
   activo: z.boolean(),
 })
 
+const uploadCompanyLogoSchema = z.object({
+  fileName: z.string().min(1).max(120),
+  mimeType: z.string().min(3).max(100),
+  base64: z.string().min(1),
+})
+
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/company', async (request) => getCompanyProfile(request))
 
@@ -22,5 +33,11 @@ export async function settingsRoutes(app: FastifyInstance) {
     const body = updateCompanyProfileSchema.parse(request.body)
     return updateCompanyProfile(body, request)
   })
-}
 
+  app.post('/company/logo', async (request) => {
+    const body = uploadCompanyLogoSchema.parse(request.body)
+    return uploadCompanyLogo(body, request)
+  })
+
+  app.delete('/company/logo', async (request) => deleteCompanyLogo(request))
+}

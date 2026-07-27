@@ -804,7 +804,7 @@ export async function getPurchaseDashboard(
     prisma.compra.findMany({
       where: purchaseWhere,
       include: purchaseInclude,
-      orderBy: [{ fechaEmision: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }],
     }),
     prisma.sucursal.findMany({
       where: {
@@ -1396,6 +1396,22 @@ export async function registerPurchasePayment(
     ? new Date(`${payload.fechaPago}T00:00:00`)
     : new Date()
 
+  //#region debug-point purchase-payment-partial.register-payment.start
+  void fetch('http://localhost:4311/log', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      event: 'purchase.payment.start',
+      purchaseId: payload.compraId,
+      formPaymentId: payload.formaPagoId,
+      amount,
+      userId,
+      branchId,
+      paymentDate: paymentDate.toISOString(),
+    }),
+  }).catch(() => null)
+  //#endregion debug-point purchase-payment-partial.register-payment.start
+
   if (!Number.isFinite(amount) || amount <= 0) {
     throw createHttpError(400, 'El monto del pago debe ser mayor a 0.')
   }
@@ -1404,31 +1420,45 @@ export async function registerPurchasePayment(
     throw createHttpError(400, 'La fecha del pago no es válida.')
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    await ensureDefaultPaymentMethods(tx, userId)
+  let result: {
+    id: string
+    purchaseId: string
+    supplierName: string
+    formPaymentId: string
+    formPaymentCode: string
+    formPaymentName: string
+    amount: number
+    paidAt: string | null
+    reference: string | null
+    observations: string | null
+    outstandingAmount: number
+  }
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      await ensureDefaultPaymentMethods(tx, userId)
 
-    const [purchase, paymentMethod] = await Promise.all([
-      tx.compra.findFirst({
-        where: {
-          id: payload.compraId,
-          deletedAt: null,
-        },
-        include: {
-          proveedor: {
-            select: {
-              razonSocial: true,
+      const [purchase, paymentMethod] = await Promise.all([
+        tx.compra.findFirst({
+          where: {
+            id: payload.compraId,
+            deletedAt: null,
+          },
+          include: {
+            proveedor: {
+              select: {
+                razonSocial: true,
+              },
             },
           },
-        },
-      }),
-      tx.formaPago.findFirst({
-        where: {
-          id: payload.formaPagoId,
-          deletedAt: null,
-          activo: true,
-        },
-      }),
-    ])
+        }),
+        tx.formaPago.findFirst({
+          where: {
+            id: payload.formaPagoId,
+            deletedAt: null,
+            activo: true,
+          },
+        }),
+      ])
 
     if (!purchase) {
       throw createHttpError(404, 'La compra seleccionada no está disponible.')
@@ -1489,11 +1519,16 @@ export async function registerPurchasePayment(
       Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id} FOR UPDATE`,
     )
 
+    const isCashPayment = paymentMethod.codigo === CodigoFormaPago.EFECTIVO
+    const cashScopeOr = [{ formaPagoId: null }, { formaPago: { codigo: CodigoFormaPago.EFECTIVO } }]
+    const movementCashScope = isCashPayment ? { OR: cashScopeOr } : { formaPagoId: paymentMethod.id }
+
     const [incomeAggregate, expenseAggregate] = await Promise.all([
       tx.movimientoCaja.aggregate({
         where: {
           deletedAt: null,
           aperturaCajaId: opening.id,
+          ...movementCashScope,
           tipo: {
             notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
           },
@@ -1507,6 +1542,7 @@ export async function registerPurchasePayment(
         where: {
           deletedAt: null,
           aperturaCajaId: opening.id,
+          ...movementCashScope,
           tipo: {
             notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
           },
@@ -1520,9 +1556,9 @@ export async function registerPurchasePayment(
 
     const availableCash = Number(
       (
-        decimalToNumber(opening.montoAperturaEfectivo) +
-        decimalToNumber(incomeAggregate._sum.monto) -
-        decimalToNumber(expenseAggregate._sum.monto)
+        (isCashPayment ? decimalToNumber(opening.montoAperturaEfectivo) : 0) +
+        decimalToNumber(incomeAggregate._sum?.monto) -
+        decimalToNumber(expenseAggregate._sum?.monto)
       ).toFixed(2),
     )
 
@@ -1633,7 +1669,7 @@ export async function registerPurchasePayment(
         monto: toDecimal(amount, 2),
         referencia: toOptionalString(payment.id),
         observaciones: toOptionalString(
-          `Pago a proveedor · ${purchase.proveedor.razonSocial}`,
+          `Pago a proveedor · ${purchase.proveedor.razonSocial} · ${paymentMethod.nombre}`,
         ),
         createdById: userId,
         updatedById: userId,
@@ -1651,24 +1687,56 @@ export async function registerPurchasePayment(
       },
     })
 
-    return {
-      id: payment.id,
-      purchaseId: purchase.id,
-      supplierName: purchase.proveedor.razonSocial,
-      formPaymentId: paymentMethod.id,
-      formPaymentCode: paymentMethod.codigo,
-      formPaymentName: paymentMethod.nombre,
-      amount,
-      paidAt: formatDateTime(payment.fechaPago),
-      reference: payment.referenciaExterna,
-      observations: payment.observaciones,
-      outstandingAmount: nextOutstandingAmount,
-    }
-  })
+      return {
+        id: payment.id,
+        purchaseId: purchase.id,
+        supplierName: purchase.proveedor.razonSocial,
+        formPaymentId: paymentMethod.id,
+        formPaymentCode: paymentMethod.codigo,
+        formPaymentName: paymentMethod.nombre,
+        amount,
+        paidAt: formatDateTime(payment.fechaPago),
+        reference: payment.referenciaExterna,
+        observations: payment.observaciones,
+        outstandingAmount: nextOutstandingAmount,
+      }
+    })
 
-  return {
-    item: result,
+    //#region debug-point purchase-payment-partial.register-payment.success
+    void fetch('http://localhost:4311/log', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        event: 'purchase.payment.success',
+        purchaseId: payload.compraId,
+        amount,
+        result,
+      }),
+    }).catch(() => null)
+    //#endregion debug-point purchase-payment-partial.register-payment.success
+  } catch (err) {
+    //#region debug-point purchase-payment-partial.register-payment.error
+    void fetch('http://localhost:4311/log', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        event: 'purchase.payment.error',
+        purchaseId: payload.compraId,
+        amount,
+        error: {
+          name: (err as any)?.name ?? null,
+          message: (err as any)?.message ?? null,
+          stack: (err as any)?.stack ?? null,
+          prismaCode: (err as any)?.code ?? null,
+          prismaMeta: (err as any)?.meta ?? null,
+        },
+      }),
+    }).catch(() => null)
+    //#endregion debug-point purchase-payment-partial.register-payment.error
+    throw err
   }
+
+  return { item: result }
 }
 
 async function receivePurchaseItemInTransaction(

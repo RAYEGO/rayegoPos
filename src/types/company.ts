@@ -27,3 +27,16 @@ export type UpdateCompanyProfilePayload = {
   activo: boolean
 }
 
+export type UploadCompanyLogoPayload = {
+  fileName: string
+  mimeType: string
+  base64: string
+}
+
+export type UploadCompanyLogoResponse = {
+  company: CompanyProfile
+}
+
+export type DeleteCompanyLogoResponse = {
+  company: CompanyProfile
+}

@@ -311,7 +311,6 @@ export function ComprasPage() {
   const [logisticsStatusFilter, setLogisticsStatusFilter] = useState<
     'TODAS' | PurchaseLogisticsStatus
   >('TODAS')
-  const [branchFilter, setBranchFilter] = useState('TODAS')
   const [dashboard, setDashboard] = useState<PurchasesDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -415,7 +414,6 @@ export function ComprasPage() {
       const response = await purchasesService.getDashboard(accessToken, {
         search,
         logisticsStatus: logisticsStatusFilter === 'TODAS' ? undefined : logisticsStatusFilter,
-        branchId: branchFilter === 'TODAS' ? undefined : branchFilter,
       })
 
       setDashboard(response)
@@ -424,7 +422,7 @@ export function ComprasPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, branchFilter, search, logisticsStatusFilter])
+  }, [accessToken, search, logisticsStatusFilter])
 
   useEffect(() => {
     void loadDashboard()
@@ -462,7 +460,7 @@ export function ComprasPage() {
 
   useEffect(() => {
     setOrdersPage(1)
-  }, [branchFilter, search, logisticsStatusFilter])
+  }, [search, logisticsStatusFilter])
 
   const purchaseMetrics = {
     totalOrders: dashboard?.summary?.totalOrders ?? 0,
@@ -776,7 +774,7 @@ export function ComprasPage() {
     const requiredAmount = Number(values.monto)
 
     try {
-      const activeDrawer = await cashierService.getActiveDrawer(accessToken)
+      const activeDrawer = await cashierService.getActiveDrawer(accessToken, values.formaPagoId)
 
       if (activeDrawer.expectedAmount + 0.0001 < requiredAmount) {
         const available = activeDrawer.expectedAmount
@@ -845,7 +843,7 @@ export function ComprasPage() {
 
       if (nextError instanceof ApiError && nextError.status === 409) {
         try {
-          const activeDrawer = await cashierService.getActiveDrawer(accessToken)
+          const activeDrawer = await cashierService.getActiveDrawer(accessToken, values.formaPagoId)
           const available = activeDrawer.expectedAmount
           const missing = Number(Math.max(0, requiredAmount - available).toFixed(2))
 
@@ -1183,20 +1181,6 @@ export function ComprasPage() {
                     <SelectItem value="RECEPCION_PARCIAL">Recepción parcial</SelectItem>
                     <SelectItem value="RECEPCION_COMPLETA">Recepción completa</SelectItem>
                     <SelectItem value="CANCELADA">Cancelada</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={branchFilter} onValueChange={setBranchFilter}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sucursal" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="TODAS">Todas las sucursales</SelectItem>
-                    {options.branches.map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name}
-                      </SelectItem>
-                    ))}
                   </SelectContent>
                 </Select>
               </div>

@@ -157,6 +157,50 @@ export function createApp() {
   })
 
   app.setErrorHandler((error, _request, reply) => {
+    //#region debug-point purchase-payment-partial.error-handler
+    try {
+      const request = _request as {
+        id?: string
+        method?: string
+        url?: string
+        headers?: Record<string, unknown>
+      }
+      const statusCode =
+        error instanceof ZodError
+          ? 400
+          : typeof error === 'object' &&
+              error !== null &&
+              'statusCode' in error &&
+              typeof (error as { statusCode?: unknown }).statusCode === 'number'
+            ? (error as { statusCode: number }).statusCode
+            : 500
+      void fetch('http://localhost:4311/log', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          event: 'api.error',
+          statusCode,
+          requestId: request.id ?? null,
+          method: request.method ?? null,
+          url: request.url ?? null,
+          error: {
+            name: (error as { name?: unknown })?.name ?? null,
+            message: (error as { message?: unknown })?.message ?? null,
+            stack: (error as { stack?: unknown })?.stack ?? null,
+            prismaCode:
+              typeof error === 'object' && error !== null && 'code' in error
+                ? (error as { code?: unknown }).code
+                : null,
+            prismaMeta:
+              typeof error === 'object' && error !== null && 'meta' in error
+                ? (error as { meta?: unknown }).meta
+                : null,
+          },
+        }),
+      }).catch(() => null)
+    } catch {}
+    //#endregion debug-point purchase-payment-partial.error-handler
+
     if (error instanceof ZodError) {
       return reply.code(400).send({
         message: 'La solicitud contiene datos inválidos.',
@@ -180,8 +224,19 @@ export function createApp() {
       })
     }
 
+    const isDev = (process.env.NODE_ENV ?? 'development') !== 'production'
+    const debugMessage =
+      typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+        ? error.message
+        : 'Ocurrió un error inesperado en la API.'
+    const debugStack =
+      typeof error === 'object' && error !== null && 'stack' in error && typeof error.stack === 'string'
+        ? error.stack
+        : null
+
     return reply.code(500).send({
-      message: 'Ocurrió un error inesperado en la API.',
+      message: isDev ? debugMessage : 'Ocurrió un error inesperado en la API.',
+      ...(isDev && debugStack ? { stack: debugStack } : {}),
     })
   })
 

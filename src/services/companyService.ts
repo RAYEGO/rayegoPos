@@ -1,5 +1,11 @@
 import { apiRequest } from '@/services/apiClient'
-import type { CompanyProfile, UpdateCompanyProfilePayload } from '@/types/company'
+import type {
+  CompanyProfile,
+  DeleteCompanyLogoResponse,
+  UpdateCompanyProfilePayload,
+  UploadCompanyLogoPayload,
+  UploadCompanyLogoResponse,
+} from '@/types/company'
 
 export const companyService = {
   getProfile(accessToken: string) {
@@ -15,5 +21,19 @@ export const companyService = {
       body: payload,
     })
   },
-}
 
+  uploadLogo(accessToken: string, payload: UploadCompanyLogoPayload) {
+    return apiRequest<UploadCompanyLogoResponse>('/api/settings/company/logo', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  deleteLogo(accessToken: string) {
+    return apiRequest<DeleteCompanyLogoResponse>('/api/settings/company/logo', {
+      method: 'DELETE',
+      accessToken,
+    })
+  },
+}
