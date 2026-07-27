@@ -177,7 +177,7 @@ export function createApp() {
             : 500
 
       if (debugServerUrl) {
-        void fetch(`${debugServerUrl.replace(/\\/+$/, '')}/log`, {
+        void fetch(`${debugServerUrl.replace(/\/+$/, '')}/log`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
