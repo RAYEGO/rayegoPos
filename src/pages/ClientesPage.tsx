@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
@@ -195,6 +195,10 @@ export function ClientesPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
+  const [activeTab, setActiveTab] = useState<'padron' | 'historial-compras' | 'estado-cuenta'>(
+    'padron',
+  )
+  const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'todos' | CustomerStatusFilter>('todos')
   const [dashboard, setDashboard] = useState<CustomersDashboardResponse>(defaultDashboard)
@@ -214,6 +218,26 @@ export function ClientesPage() {
 
   const formTipoPersona = form.watch('tipoPersona')
   const formPermitirCredito = form.watch('permitirCredito')
+
+  const selectedCustomer = useMemo(() => {
+    if (!selectedCustomerId) {
+      return null
+    }
+
+    return dashboard.customers.find((customer) => customer.id === selectedCustomerId) ?? null
+  }, [dashboard.customers, selectedCustomerId])
+
+  const accountSummary = useMemo(() => {
+    if (!selectedCustomer) {
+      return null
+    }
+
+    const creditLimit = selectedCustomer.limiteCredito
+    const outstanding = selectedCustomer.saldoPendiente
+    const available = Math.max(0, Number((creditLimit - outstanding).toFixed(2)))
+
+    return { creditLimit, outstanding, available }
+  }, [selectedCustomer])
 
   const handleUnauthorized = useCallback(async () => {
     toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
@@ -381,12 +405,18 @@ export function ClientesPage() {
         <h1 className="text-xl font-bold text-foreground">Clientes</h1>
       </div>
 
-      <Tabs defaultValue="padron" className="w-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) =>
+          setActiveTab(value as 'padron' | 'historial-compras' | 'estado-cuenta')
+        }
+        className="w-full"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="padron">Padrón</TabsTrigger>
-            <TabsTrigger value="historial">Historial</TabsTrigger>
-            <TabsTrigger value="seguimiento">Seguimiento</TabsTrigger>
+            <TabsTrigger value="historial-compras">Historial de compras</TabsTrigger>
+            <TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
           </TabsList>
           <Button type="button" size="sm" onClick={openCreateDialog}>
             <Plus className="h-4 w-4 mr-1" />
@@ -465,6 +495,22 @@ export function ClientesPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedCustomerId(customer.id)
+                              setActiveTab('historial-compras')
+                            }}
+                          >
+                            Historial de compras
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setSelectedCustomerId(customer.id)
+                              setActiveTab('estado-cuenta')
+                            }}
+                          >
+                            Estado de cuenta
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openEditDialog(customer)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar
@@ -565,6 +611,22 @@ export function ClientesPage() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedCustomerId(customer.id)
+                                      setActiveTab('historial-compras')
+                                    }}
+                                  >
+                                    Historial de compras
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedCustomerId(customer.id)
+                                      setActiveTab('estado-cuenta')
+                                    }}
+                                  >
+                                    Estado de cuenta
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => openEditDialog(customer)}>
                                     <Edit className="mr-2 h-4 w-4" />
                                     Editar
@@ -594,20 +656,161 @@ export function ClientesPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="historial" className="space-y-4 pt-4">
+        <TabsContent value="historial-compras" className="space-y-4 pt-4">
           <Card className="p-4">
-            <p className="text-sm text-muted-foreground">
-              Vista referencial. El siguiente paso será conectar el historial de compras del cliente desde Ventas.
-            </p>
+            <div className="grid gap-3 md:grid-cols-[1fr_260px]">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">Historial de compras</p>
+                <p className="text-xs text-muted-foreground">
+                  Visualiza todas las ventas emitidas a nombre del cliente.
+                </p>
+              </div>
+              <Select value={selectedCustomer?.id ?? ''} onValueChange={setSelectedCustomerId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona un cliente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dashboard.customers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.nombreCompleto ?? customer.razonSocial ?? 'Cliente'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </Card>
+
+          {!selectedCustomer ? (
+            <div className="rounded-xl border border-dashed p-8 text-center">
+              <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Usa el selector superior o el padrón para ver su historial de compras.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4"
+                onClick={() => setActiveTab('padron')}
+              >
+                Ir al padrón
+              </Button>
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Comprobante</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Pagado</TableHead>
+                      <TableHead className="text-right">Saldo pendiente</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="w-[160px] text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                        Aún no existen compras registradas.
+                      </TableCell>
+                      <TableCell className="py-10" />
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
-        <TabsContent value="seguimiento" className="space-y-4 pt-4">
+        <TabsContent value="estado-cuenta" className="space-y-4 pt-4">
           <Card className="p-4">
-            <p className="text-sm text-muted-foreground">
-              Vista referencial. Luego integraremos seguimiento comercial (recordatorios, campañas, frecuencia de compra).
-            </p>
+            <div className="grid gap-3 md:grid-cols-[1fr_260px]">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">Estado de cuenta</p>
+                <p className="text-xs text-muted-foreground">
+                  Resumen del crédito del cliente y movimientos futuros.
+                </p>
+              </div>
+              <Select value={selectedCustomer?.id ?? ''} onValueChange={setSelectedCustomerId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona un cliente" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dashboard.customers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.nombreCompleto ?? customer.razonSocial ?? 'Cliente'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </Card>
+
+          {!selectedCustomer || !accountSummary ? (
+            <div className="rounded-xl border border-dashed p-8 text-center">
+              <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                El estado de cuenta se muestra por cliente.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4"
+                onClick={() => setActiveTab('padron')}
+              >
+                Ir al padrón
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Card className="p-4">
+                  <p className="text-xs text-muted-foreground">Límite de crédito</p>
+                  <p className="mt-2 text-lg font-semibold text-foreground">
+                    {formatCurrency(accountSummary.creditLimit)}
+                  </p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-xs text-muted-foreground">Saldo pendiente</p>
+                  <p className="mt-2 text-lg font-semibold text-foreground">
+                    {formatCurrency(accountSummary.outstanding)}
+                  </p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-xs text-muted-foreground">Crédito disponible</p>
+                  <p className="mt-2 text-lg font-semibold text-foreground">
+                    {formatCurrency(accountSummary.available)}
+                  </p>
+                </Card>
+              </div>
+
+              <Card>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Tipo de movimiento</TableHead>
+                        <TableHead>Documento</TableHead>
+                        <TableHead className="text-right">Cargo</TableHead>
+                        <TableHead className="text-right">Abono</TableHead>
+                        <TableHead className="text-right">Saldo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                          No existen movimientos para este cliente.
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
 
@@ -641,17 +844,10 @@ export function ClientesPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
-              <Tabs defaultValue="perfil" className="w-full">
-                <TabsList>
-                  <TabsTrigger value="perfil">Perfil</TabsTrigger>
-                  <TabsTrigger value="compras">Compras</TabsTrigger>
-                  <TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="perfil" className="space-y-4 pt-4">
-                  <Card className="p-4">
-                    <p className="font-medium text-foreground">Información personal</p>
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="space-y-4">
+                <Card className="p-4">
+                  <p className="font-medium text-foreground">Información personal</p>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Tipo de persona</label>
                         <Controller
@@ -838,20 +1034,7 @@ export function ClientesPage() {
                       />
                     </div>
                   </Card>
-                </TabsContent>
-
-                <TabsContent value="compras" className="pt-4">
-                  <Card className="p-4">
-                    <p className="text-sm text-muted-foreground">Disponible próximamente.</p>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="estado-cuenta" className="pt-4">
-                  <Card className="p-4">
-                    <p className="text-sm text-muted-foreground">Disponible próximamente.</p>
-                  </Card>
-                </TabsContent>
-              </Tabs>
+              </div>
             </div>
 
             <div className="border-t bg-popover px-6 py-4">
