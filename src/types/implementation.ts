@@ -18,6 +18,7 @@ export type CreateInitialInventoryLoadPayload = {
     numeroLote: string
     fechaVencimiento: string
     costoUnitario: number
+    empaque: 'UNIDAD' | 'BLISTER' | 'CAJA'
     cantidad: number
   }>
 }
@@ -25,4 +26,3 @@ export type CreateInitialInventoryLoadPayload = {
 export type CreateInitialInventoryLoadResponse = {
   item: InitialInventoryLoadRow
 }
-

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { EmpaqueProducto } from '@prisma/client'
 import {
   createInitialInventoryLoad,
   getInitialInventoryLoads,
@@ -13,6 +14,7 @@ const createInitialInventoryLoadSchema = z.object({
         numeroLote: z.string().min(2).max(80),
         fechaVencimiento: z.string().min(1),
         costoUnitario: z.number().nonnegative(),
+        empaque: z.nativeEnum(EmpaqueProducto),
         cantidad: z.number().int().positive(),
       }),
     )
@@ -29,4 +31,3 @@ export async function implementationRoutes(app: FastifyInstance) {
     return createInitialInventoryLoad(body, request)
   })
 }
-

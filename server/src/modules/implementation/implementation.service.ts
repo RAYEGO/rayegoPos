@@ -1,5 +1,7 @@
 import {
   EstadoLote,
+  EmpaqueProducto,
+  ModoEmpaqueProducto,
   Prisma,
   TipoMovimientoInventario,
   OrigenMovimientoInventario,
@@ -63,6 +65,7 @@ type ImplementationInventoryLoadItemInput = {
   numeroLote: string
   fechaVencimiento: string
   costoUnitario: number
+  empaque: EmpaqueProducto
   cantidad: number
 }
 
@@ -175,7 +178,7 @@ export async function createInitialInventoryLoad(
   payload: InventoryInitialLoadPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await getAuthContext(request)
   assertAdmin(request)
 
   if (!payload.items.length) {
@@ -227,9 +230,76 @@ export async function createInitialInventoryLoad(
       })
 
       for (const item of payload.items) {
-        const quantity = Math.floor(item.cantidad)
-        if (!Number.isFinite(quantity) || quantity <= 0) {
+        const requestedQuantity = Math.floor(item.cantidad)
+        if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
           throw createHttpError(400, 'La cantidad debe ser un entero mayor a 0.')
+        }
+
+        const product = await tx.producto.findFirst({
+          where: {
+            id: item.productoId,
+            empresaId: companyId,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+            modoEmpaque: true,
+            unidadesPorBlister: true,
+            blistersPorCaja: true,
+          },
+        })
+
+        if (!product) {
+          throw createHttpError(404, 'El producto seleccionado no está disponible.')
+        }
+
+        const packType = item.empaque
+        const unitsPerBlister = product.unidadesPorBlister ?? null
+        const blistersPerBox = product.blistersPorCaja ?? null
+
+        if (product.modoEmpaque === ModoEmpaqueProducto.SIMPLE) {
+          if (packType !== EmpaqueProducto.UNIDAD) {
+            throw createHttpError(
+              400,
+              'La presentación seleccionada no es válida para este producto.',
+            )
+          }
+        } else if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
+          if (
+            packType === EmpaqueProducto.BLISTER &&
+            (!unitsPerBlister || unitsPerBlister <= 0)
+          ) {
+            throw createHttpError(
+              400,
+              'El producto no tiene unidades por blíster configuradas.',
+            )
+          }
+
+          if (
+            packType === EmpaqueProducto.CAJA &&
+            (!unitsPerBlister || unitsPerBlister <= 0 || !blistersPerBox || blistersPerBox <= 0)
+          ) {
+            throw createHttpError(
+              400,
+              'El producto no tiene empaque de caja configurado (blísteres por caja y unidades por blíster).',
+            )
+          }
+        }
+
+        const factor =
+          product.modoEmpaque === ModoEmpaqueProducto.BLISTER
+            ? packType === EmpaqueProducto.UNIDAD
+              ? 1
+              : packType === EmpaqueProducto.BLISTER
+                ? Number(unitsPerBlister)
+                : packType === EmpaqueProducto.CAJA
+                  ? Number(unitsPerBlister) * Number(blistersPerBox)
+                  : 1
+            : 1
+
+        const quantity = requestedQuantity * Number(factor)
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw createHttpError(400, 'La cantidad convertida no es válida.')
         }
 
         const costoUnitario = Number(item.costoUnitario)

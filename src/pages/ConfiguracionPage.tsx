@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { ImageUp, Plus, RefreshCcw, X } from 'lucide-react'
+import { Download, ImageUp, Plus, RefreshCcw, Upload, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -61,11 +61,13 @@ function ProductAutocomplete({
   accessToken,
   value,
   onValueChange,
+  onProductSelected,
   placeholder,
 }: {
   accessToken: string
   value: string
   onValueChange: (value: string) => void
+  onProductSelected?: (product: ProductCatalogItem) => void
   placeholder: string
 }) {
   const [query, setQuery] = useState('')
@@ -134,6 +136,7 @@ function ProductAutocomplete({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     onValueChange(product.id)
+                    onProductSelected?.(product)
                     setQuery(`${product.name} · ${product.sku}`)
                     setIsOpen(false)
                   }}
@@ -161,6 +164,9 @@ const initialInventorySchema = z.object({
       z.object({
         productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
         numeroLote: z.string().min(2, 'Ingresa un lote.').max(80, 'Máximo 80 caracteres.'),
+        empaque: z.enum(['UNIDAD', 'BLISTER', 'CAJA'], {
+          message: 'Selecciona una presentación.',
+        }),
         fechaVencimiento: z.string().min(1, 'Ingresa una fecha de vencimiento.'),
         costoUnitario: z.number().min(0, 'El costo debe ser mayor o igual a 0.'),
         cantidad: z.number().int().min(1, 'La cantidad debe ser mayor a 0.'),
@@ -187,7 +193,7 @@ const companyProfileSchema = z.object({
   direccionFiscal: nullableText(z.string().max(255).nullable().optional()),
   telefono: nullableText(z.string().max(30).nullable().optional()),
   email: nullableText(z.string().email('Ingresa un correo válido.').max(150).nullable().optional()),
-  moneda: z.enum(['PEN', 'USD']),
+  moneda: z.string().min(3).max(3),
   igvPorDefecto: z
     .number()
     .min(0, 'El IGV debe estar entre 0 y 100.')
@@ -196,6 +202,103 @@ const companyProfileSchema = z.object({
 })
 
 type CompanyProfileFormValues = z.infer<typeof companyProfileSchema>
+
+const supportedCurrencies = [
+  { code: 'PEN', label: 'Soles' },
+  { code: 'USD', label: 'Dólares' },
+] as const
+
+const appSystemInfo = {
+  version: 'Rayego POS v1.0',
+  architecture: 'Multiempresa preparada',
+} as const
+
+type PackagingPresentation = 'UNIDAD' | 'BLISTER' | 'CAJA'
+
+const presentationLabels: Record<PackagingPresentation, string> = {
+  UNIDAD: 'Unidad',
+  BLISTER: 'Blíster',
+  CAJA: 'Caja',
+}
+
+function resolvePresentationOptions(product: ProductCatalogItem | null): PackagingPresentation[] {
+  if (!product) {
+    return ['UNIDAD']
+  }
+
+  if (product.packagingMode !== 'BLISTER') {
+    return ['UNIDAD']
+  }
+
+  const options: PackagingPresentation[] = ['UNIDAD']
+  const unitsPerBlister = product.unitsPerBlister ?? 0
+  const blistersPerBox = product.blistersPerBox ?? 0
+
+  if (unitsPerBlister > 0) {
+    options.push('BLISTER')
+  }
+
+  if (unitsPerBlister > 0 && blistersPerBox > 0) {
+    options.push('CAJA')
+  }
+
+  return options
+}
+
+function resolveConversionSummary(product: ProductCatalogItem | null) {
+  if (!product || product.packagingMode !== 'BLISTER') {
+    return null
+  }
+
+  const unitsPerBlister = product.unitsPerBlister ?? 0
+  const blistersPerBox = product.blistersPerBox ?? 0
+
+  const parts: string[] = []
+  if (unitsPerBlister > 0) {
+    parts.push(`1 Blíster = ${unitsPerBlister} Unidades`)
+  }
+  if (unitsPerBlister > 0 && blistersPerBox > 0) {
+    parts.push(
+      `1 Caja = ${blistersPerBox} Blísteres = ${unitsPerBlister * blistersPerBox} Unidades`,
+    )
+  }
+
+  return parts.length ? parts.join(' · ') : 'La configuración de empaque del producto está incompleta.'
+}
+
+function convertToBaseUnits(
+  product: ProductCatalogItem | null,
+  presentation: PackagingPresentation,
+  quantity: number,
+) {
+  const normalizedQuantity = Number(quantity)
+  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+    return null
+  }
+
+  if (!product || product.packagingMode !== 'BLISTER') {
+    return normalizedQuantity
+  }
+
+  const unitsPerBlister = product.unitsPerBlister ?? 0
+  const blistersPerBox = product.blistersPerBox ?? 0
+
+  if (presentation === 'UNIDAD') {
+    return normalizedQuantity
+  }
+
+  if (presentation === 'BLISTER') {
+    return unitsPerBlister > 0 ? normalizedQuantity * unitsPerBlister : null
+  }
+
+  if (presentation === 'CAJA') {
+    return unitsPerBlister > 0 && blistersPerBox > 0
+      ? normalizedQuantity * unitsPerBlister * blistersPerBox
+      : null
+  }
+
+  return normalizedQuantity
+}
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null
@@ -213,12 +316,16 @@ export function ConfiguracionPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loads, setLoads] = useState<InitialInventoryLoadRow[]>([])
+  const [productCache, setProductCache] = useState<Record<string, ProductCatalogItem>>({})
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const [company, setCompany] = useState<CompanyProfile | null>(null)
   const [companyError, setCompanyError] = useState<string | null>(null)
   const [isCompanyLoading, setIsCompanyLoading] = useState(false)
   const [isCompanySubmitting, setIsCompanySubmitting] = useState(false)
+
+  const csvInputRef = useRef<HTMLInputElement | null>(null)
 
   const initialInventoryForm = useForm<InitialInventoryFormValues>({
     resolver: zodResolver(initialInventorySchema),
@@ -227,6 +334,7 @@ export function ConfiguracionPage() {
         {
           productoId: '',
           numeroLote: '',
+          empaque: 'UNIDAD',
           fechaVencimiento: '',
           costoUnitario: 0,
           cantidad: 1,
@@ -292,7 +400,7 @@ export function ConfiguracionPage() {
       direccionFiscal: value.direccionFiscal ?? '',
       telefono: value.telefono ?? '',
       email: value.email ?? '',
-      moneda: (value.moneda as 'PEN' | 'USD') ?? 'PEN',
+      moneda: value.moneda ?? 'PEN',
       igvPorDefecto: value.igvPorDefecto ?? 18,
       activo: value.activo ?? true,
     }
@@ -353,6 +461,171 @@ export function ConfiguracionPage() {
       toast.error(getApiErrorMessage(err))
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  function normalizePresentation(value: string): PackagingPresentation | null {
+    const normalized = value.trim().toUpperCase()
+    const withoutAccent = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    if (!withoutAccent) return null
+    if (withoutAccent === 'UNIDAD' || withoutAccent === 'UNIDADES') return 'UNIDAD'
+    if (withoutAccent === 'BLISTER' || withoutAccent === 'BLISTERS') return 'BLISTER'
+    if (withoutAccent === 'CAJA' || withoutAccent === 'CAJAS') return 'CAJA'
+    return null
+  }
+
+  function buildInitialInventoryCsvTemplate() {
+    return [
+      'sku,numeroLote,fechaVencimiento,costoUnitario,cantidad,presentacion',
+      'PARA-500-CAJA,LOTE-001,2027-12-31,1.80,1,CAJA',
+      'PARA-500-CAJA,LOTE-002,2027-12-31,0.18,10,BLISTER',
+      'PARA-500-CAJA,LOTE-003,2027-12-31,0.02,100,UNIDAD',
+      '',
+    ].join('\n')
+  }
+
+  function downloadCsvTemplate() {
+    const content = buildInitialInventoryCsvTemplate()
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'rayego-carga-inicial-template.csv'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function parseCsv(content: string) {
+    const lines = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    if (!lines.length) {
+      throw new Error('El archivo CSV está vacío.')
+    }
+
+    const delimiter = lines[0]?.includes(';') ? ';' : ','
+    const headers = lines[0].split(delimiter).map((header) => header.trim())
+    const expectedHeaders = [
+      'sku',
+      'numerolote',
+      'fechavencimiento',
+      'costounitario',
+      'cantidad',
+      'presentacion',
+    ]
+
+    const normalizedHeaders = headers.map((header) => header.toLowerCase())
+    const missing = expectedHeaders.filter((header) => !normalizedHeaders.includes(header))
+    if (missing.length) {
+      throw new Error(`Faltan columnas en el CSV: ${missing.join(', ')}`)
+    }
+
+    const headerIndex = Object.fromEntries(
+      normalizedHeaders.map((header, index) => [header, index]),
+    ) as Record<string, number>
+
+    return lines.slice(1).map((line, rowIndex) => {
+      const columns = line.split(delimiter).map((col) => col.trim())
+      const get = (key: string) => columns[headerIndex[key]] ?? ''
+      return {
+        row: rowIndex + 2,
+        sku: get('sku'),
+        numeroLote: get('numerolote'),
+        fechaVencimiento: get('fechavencimiento'),
+        costoUnitario: get('costounitario'),
+        cantidad: get('cantidad'),
+        presentacion: get('presentacion'),
+      }
+    })
+  }
+
+  async function resolveProductBySku(sku: string, skuCache: Map<string, ProductCatalogItem>) {
+    const normalizedSku = sku.trim()
+    if (!normalizedSku) {
+      throw new Error('SKU vacío.')
+    }
+
+    const cached = skuCache.get(normalizedSku.toLowerCase())
+    if (cached) {
+      return cached
+    }
+
+    const response = await productsService.list(accessToken, {
+      search: normalizedSku,
+      page: 1,
+      pageSize: 30,
+      sortBy: 'name',
+      sortDir: 'asc',
+    })
+    const product =
+      response.items.find((item) => item.sku.toLowerCase() === normalizedSku.toLowerCase()) ?? null
+
+    if (!product) {
+      throw new Error(`No se encontró el producto con SKU: ${normalizedSku}`)
+    }
+
+    skuCache.set(normalizedSku.toLowerCase(), product)
+    setProductCache((prev) => ({ ...prev, [product.id]: product }))
+    return product
+  }
+
+  async function handleCsvImport(file: File) {
+    if (!accessToken) return
+    setIsImporting(true)
+
+    try {
+      const text = await file.text()
+      const rows = parseCsv(text)
+      const skuCache = new Map<string, ProductCatalogItem>()
+
+      const items: InitialInventoryFormValues['items'] = []
+
+      for (const row of rows) {
+        const product = await resolveProductBySku(row.sku, skuCache)
+        const presentation = normalizePresentation(row.presentacion)
+        if (!presentation) {
+          throw new Error(`Fila ${row.row}: Presentación inválida (CAJA, BLISTER o UNIDAD).`)
+        }
+
+        const allowed = resolvePresentationOptions(product)
+        if (!allowed.includes(presentation)) {
+          throw new Error(
+            `Fila ${row.row}: La presentación ${presentationLabels[presentation]} no es válida para el producto ${product.sku}.`,
+          )
+        }
+
+        const quantity = Number(row.cantidad)
+        const unitCost = Number(row.costoUnitario)
+        if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) {
+          throw new Error(`Fila ${row.row}: La cantidad debe ser un entero mayor a 0.`)
+        }
+        if (!Number.isFinite(unitCost) || unitCost < 0) {
+          throw new Error(`Fila ${row.row}: El costo unitario debe ser mayor o igual a 0.`)
+        }
+
+        items.push({
+          productoId: product.id,
+          numeroLote: row.numeroLote,
+          empaque: presentation,
+          fechaVencimiento: row.fechaVencimiento,
+          costoUnitario: unitCost,
+          cantidad: quantity,
+        })
+      }
+
+      initialInventoryForm.reset({ items })
+      toast.success(`Se importaron ${items.length} filas. Revisa y registra la carga.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo importar el archivo.')
+    } finally {
+      setIsImporting(false)
+      if (csvInputRef.current) {
+        csvInputRef.current.value = ''
+      }
     }
   }
 
@@ -590,8 +863,11 @@ export function ConfiguracionPage() {
                             <SelectValue placeholder="Selecciona una moneda" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="PEN">PEN · Soles</SelectItem>
-                            <SelectItem value="USD">USD · Dólares</SelectItem>
+                            {supportedCurrencies.map((currency) => (
+                              <SelectItem key={currency.code} value={currency.code}>
+                                {currency.code} · {currency.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       )}
@@ -607,6 +883,8 @@ export function ConfiguracionPage() {
                       type="number"
                       step="0.01"
                       inputMode="decimal"
+                      min={0}
+                      max={100}
                       {...companyForm.register('igvPorDefecto', { valueAsNumber: true })}
                     />
                     <FieldError message={companyForm.formState.errors.igvPorDefecto?.message} />
@@ -616,7 +894,7 @@ export function ConfiguracionPage() {
                     <div>
                       <p className="text-sm font-medium text-foreground">Empresa activa</p>
                       <p className="text-xs text-muted-foreground">
-                        Si se desactiva, se bloquea el uso operativo en esta empresa.
+                        Al desactivar la empresa, ningún usuario podrá iniciar sesión hasta que vuelva a activarse.
                       </p>
                     </div>
                     <Controller
@@ -650,11 +928,42 @@ export function ConfiguracionPage() {
                   </div>
                   <div className="rounded-xl border border-dashed p-4 md:col-span-2">
                     <p className="text-sm font-medium text-foreground">Plan contratado</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Próximamente</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Disponible cuando Rayego POS opere como SaaS.
+                    </p>
                   </div>
                   <div className="rounded-xl border border-dashed p-4 md:col-span-2">
                     <p className="text-sm font-medium text-foreground">Estado de suscripción</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Próximamente</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Disponible en futuras versiones SaaS.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Información del sistema</CardTitle>
+                  <CardDescription>Datos informativos para soporte técnico.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border p-4">
+                    <p className="text-xs font-medium text-muted-foreground">Empresa ID</p>
+                    <p className="mt-1 break-all text-sm font-medium text-foreground">
+                      {company?.id ?? '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border p-4">
+                    <p className="text-xs font-medium text-muted-foreground">Versión instalada</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {appSystemInfo.version}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border p-4 md:col-span-2">
+                    <p className="text-xs font-medium text-muted-foreground">Arquitectura</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {appSystemInfo.architecture}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -811,10 +1120,55 @@ export function ConfiguracionPage() {
                         Esta operación no genera compras, proveedores ni documentos. Registra lotes y kardex como
                         inventario inicial.
                       </CardDescription>
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => downloadCsvTemplate()}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Descargar plantilla CSV
+                        </Button>
+                        <input
+                          ref={csvInputRef}
+                          type="file"
+                          accept=".csv,text/csv"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (!file) return
+                            void handleCsvImport(file)
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={isImporting}
+                          onClick={() => csvInputRef.current?.click()}
+                        >
+                          {isImporting ? <Loader className="mr-2 h-4 w-4" /> : <Upload className="mr-2 h-4 w-4" />}
+                          Importar CSV
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {itemFields.map((field, index) => {
                         const itemError = initialInventoryForm.formState.errors.items?.[index]
+                        const productId = initialInventoryForm.watch(`items.${index}.productoId`)
+                        const selectedProduct = productId ? productCache[productId] ?? null : null
+                        const presentationOptions = resolvePresentationOptions(selectedProduct)
+                        const conversionSummary = resolveConversionSummary(selectedProduct)
+                        const selectedPresentation = initialInventoryForm.watch(
+                          `items.${index}.empaque`,
+                        ) as PackagingPresentation
+                        const selectedQuantity = initialInventoryForm.watch(
+                          `items.${index}.cantidad`,
+                        ) as number
+                        const baseUnits = convertToBaseUnits(
+                          selectedProduct,
+                          selectedPresentation,
+                          selectedQuantity,
+                        )
                         return (
                           <div key={field.id} className="rounded-xl border p-4">
                             <div className="flex items-start justify-between gap-3">
@@ -835,16 +1189,85 @@ export function ConfiguracionPage() {
                                 <p className="text-xs font-medium text-muted-foreground">Producto</p>
                                 <ProductAutocomplete
                                   accessToken={accessToken}
-                                  value={initialInventoryForm.watch(`items.${index}.productoId`)}
+                                  value={productId}
                                   onValueChange={(value) =>
                                     initialInventoryForm.setValue(`items.${index}.productoId`, value, {
                                       shouldValidate: true,
                                       shouldDirty: true,
                                     })
                                   }
+                                  onProductSelected={(product) => {
+                                    setProductCache((prev) => ({ ...prev, [product.id]: product }))
+                                    const defaultPresentation =
+                                      product.packagingMode === 'BLISTER'
+                                        ? resolvePresentationOptions(product).includes('CAJA')
+                                          ? 'CAJA'
+                                          : resolvePresentationOptions(product).includes('BLISTER')
+                                            ? 'BLISTER'
+                                            : 'UNIDAD'
+                                        : 'UNIDAD'
+                                    initialInventoryForm.setValue(
+                                      `items.${index}.empaque`,
+                                      defaultPresentation,
+                                      { shouldValidate: true, shouldDirty: true },
+                                    )
+                                  }}
                                   placeholder="Buscar por nombre o SKU"
                                 />
                                 <FieldError message={itemError?.productoId?.message} />
+                              </div>
+
+                              <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">Presentación</p>
+                                <Controller
+                                  control={initialInventoryForm.control}
+                                  name={`items.${index}.empaque` as const}
+                                  render={({ field }) => (
+                                    <Select
+                                      value={field.value}
+                                      onValueChange={(value) =>
+                                        field.onChange(value as PackagingPresentation)
+                                      }
+                                      disabled={!selectedProduct}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Selecciona" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {presentationOptions.map((option) => (
+                                          <SelectItem key={option} value={option}>
+                                            {presentationLabels[option]}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                />
+                                <FieldError message={itemError?.empaque?.message as string | undefined} />
+                                {conversionSummary ? (
+                                  <p className="text-xs text-muted-foreground">{conversionSummary}</p>
+                                ) : null}
+                              </div>
+
+                              <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">Cantidad</p>
+                                <Input
+                                  type="number"
+                                  inputMode="numeric"
+                                  {...initialInventoryForm.register(`items.${index}.cantidad` as const, {
+                                    valueAsNumber: true,
+                                  })}
+                                />
+                                <FieldError message={itemError?.cantidad?.message} />
+                                {baseUnits ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    Se registrarán {baseUnits} unidades base.
+                                  </p>
+                                ) : selectedProduct && selectedProduct.packagingMode === 'BLISTER' ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    No se puede convertir con la configuración de empaque actual.
+                                  </p>
+                                ) : null}
                               </div>
 
                               <div className="space-y-2">
@@ -876,18 +1299,6 @@ export function ConfiguracionPage() {
                                 />
                                 <FieldError message={itemError?.costoUnitario?.message} />
                               </div>
-
-                              <div className="space-y-2">
-                                <p className="text-xs font-medium text-muted-foreground">Cantidad</p>
-                                <Input
-                                  type="number"
-                                  inputMode="numeric"
-                                  {...initialInventoryForm.register(`items.${index}.cantidad` as const, {
-                                    valueAsNumber: true,
-                                  })}
-                                />
-                                <FieldError message={itemError?.cantidad?.message} />
-                              </div>
                             </div>
                           </div>
                         )
@@ -900,6 +1311,7 @@ export function ConfiguracionPage() {
                           appendItem({
                             productoId: '',
                             numeroLote: '',
+                            empaque: 'UNIDAD',
                             fechaVencimiento: '',
                             costoUnitario: 0,
                             cantidad: 1,
