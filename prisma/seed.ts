@@ -9,6 +9,19 @@ import {
 
 const prisma = new PrismaClient()
 
+function normalizeMasterCode(value: string, maxLength = 30) {
+  const normalized = value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+  return (normalized || 'MASTER').slice(0, maxLength)
+}
+
 const permissionCatalog = [
   ['dashboard.read', 'General', 'Ver dashboard'],
   ['ventas.read', 'Ventas', 'Ver ventas'],
@@ -500,6 +513,7 @@ async function main() {
   }
 
   for (const laboratory of productCatalog.laboratories) {
+    const codigo = normalizeMasterCode(laboratory.name)
     await prisma.laboratorio.upsert({
       where: {
         empresaId_nombre: {
@@ -508,12 +522,14 @@ async function main() {
         },
       },
       update: {
+        codigo,
         pais: laboratory.country,
         activo: true,
         updatedById: adminUserId,
       },
       create: {
         empresaId: company.id,
+        codigo,
         nombre: laboratory.name,
         pais: laboratory.country,
         activo: true,
@@ -524,6 +540,7 @@ async function main() {
   }
 
   for (const presentationName of productCatalog.presentations) {
+    const codigo = normalizeMasterCode(presentationName)
     await prisma.presentacion.upsert({
       where: {
         empresaId_nombre: {
@@ -532,11 +549,13 @@ async function main() {
         },
       },
       update: {
+        codigo,
         activo: true,
         updatedById: adminUserId,
       },
       create: {
         empresaId: company.id,
+        codigo,
         nombre: presentationName,
         activo: true,
         createdById: adminUserId,

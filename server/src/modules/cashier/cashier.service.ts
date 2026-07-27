@@ -83,6 +83,82 @@ async function getDefaultCashDrawerForBranch(branchId: string) {
   })
 }
 
+export async function getActiveCashDrawer(request: FastifyRequest) {
+  const { branchId, userId } = await getAuthContext(request)
+
+  const opening = await prisma.aperturaCaja.findFirst({
+    where: {
+      deletedAt: null,
+      estado: EstadoAperturaCaja.ABIERTA,
+      usuarioId: userId,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+      },
+    },
+    select: {
+      id: true,
+      fechaApertura: true,
+      montoAperturaEfectivo: true,
+    },
+  })
+
+  if (!opening) {
+    throw createHttpError(
+      404,
+      [
+        'No existe una caja activa para la sesión.',
+        'Abra la Caja para registrar ingresos, egresos o pagos.',
+      ].join('\n\n'),
+    )
+  }
+
+  const [incomeAggregate, expenseAggregate] = await Promise.all([
+    prisma.movimientoCaja.aggregate({
+      where: {
+        deletedAt: null,
+        aperturaCajaId: opening.id,
+        tipo: {
+          notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+        },
+        operacion: OperacionCaja.INGRESO,
+      },
+      _sum: {
+        monto: true,
+      },
+    }),
+    prisma.movimientoCaja.aggregate({
+      where: {
+        deletedAt: null,
+        aperturaCajaId: opening.id,
+        tipo: {
+          notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+        },
+        operacion: OperacionCaja.EGRESO,
+      },
+      _sum: {
+        monto: true,
+      },
+    }),
+  ])
+
+  const openingAmount = decimalToNumber(opening.montoAperturaEfectivo)
+  const expectedAmount = Number(
+    (
+      openingAmount +
+      decimalToNumber(incomeAggregate._sum.monto) -
+      decimalToNumber(expenseAggregate._sum.monto)
+    ).toFixed(2),
+  )
+
+  return {
+    openingId: opening.id,
+    openedAt: formatDateTime(opening.fechaApertura),
+    openingAmount,
+    expectedAmount,
+  }
+}
+
 export async function getCashierDashboard(
   filters: CashierDashboardFilters,
   request: FastifyRequest,

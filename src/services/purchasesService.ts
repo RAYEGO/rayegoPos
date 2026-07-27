@@ -1,6 +1,9 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
+  CreatePurchaseReceptionPayload,
   CreatePurchaseOrderPayload,
+  PurchaseFinancialStatus,
+  PurchaseLogisticsStatus,
   PurchaseOrderStatus,
   PurchasesDashboardResponse,
   RegisterPurchasePaymentPayload,
@@ -11,6 +14,8 @@ import type {
 type PurchaseDashboardFilters = {
   search?: string
   status?: PurchaseOrderStatus
+  logisticsStatus?: PurchaseLogisticsStatus
+  financialStatus?: PurchaseFinancialStatus
   branchId?: string
   supplierId?: string
 }
@@ -24,6 +29,14 @@ function buildQuery(filters: PurchaseDashboardFilters) {
 
   if (filters.status) {
     searchParams.set('status', filters.status)
+  }
+
+  if (filters.logisticsStatus) {
+    searchParams.set('logisticsStatus', filters.logisticsStatus)
+  }
+
+  if (filters.financialStatus) {
+    searchParams.set('financialStatus', filters.financialStatus)
   }
 
   if (filters.branchId) {
@@ -68,6 +81,16 @@ export const purchasesService = {
         body: payload,
       },
     )
+  },
+
+  createReception(accessToken: string, payload: CreatePurchaseReceptionPayload) {
+    return apiRequest<{
+      item: { purchaseId: string; receptionId: string; receivedCount: number }
+    }>('/api/purchases/receptions', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
   },
 
   returnItem(accessToken: string, payload: ReturnPurchaseItemPayload) {

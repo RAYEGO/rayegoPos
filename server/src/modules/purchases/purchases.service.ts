@@ -2,11 +2,16 @@ import {
   CodigoFormaPago,
   EmpaqueProducto,
   EstadoCompra,
+  EstadoCompraFinanciero,
+  EstadoCompraLogistico,
+  EstadoAperturaCaja,
   EstadoLote,
   ModoEmpaqueProducto,
   OrigenMovimientoInventario,
+  OperacionCaja,
   Prisma,
   TipoComprobante,
+  TipoMovimientoCaja,
   TipoMovimientoInventario,
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
@@ -87,6 +92,8 @@ type PurchaseWithRelations = Prisma.CompraGetPayload<{
 type PurchaseDashboardFilters = {
   search?: string
   status?: EstadoCompra
+  logisticsStatus?: EstadoCompraLogistico
+  financialStatus?: EstadoCompraFinanciero
   branchId?: string
   supplierId?: string
 }
@@ -120,6 +127,12 @@ type ReceivePurchaseItemPayload = {
   stockBloqueado?: number
   almacen?: string
   observaciones?: string
+}
+
+type CreatePurchaseReceptionPayload = {
+  compraId: string
+  observaciones?: string
+  items: ReceivePurchaseItemPayload[]
 }
 
 type ReturnPurchaseItemPayload = {
@@ -429,6 +442,35 @@ function calculatePurchaseOutstandingAmount({
   return Number(Math.max(0, totalAmount - returnedAmount - paidAmount).toFixed(2))
 }
 
+async function createPurchaseReceptionRecord(
+  tx: Prisma.TransactionClient,
+  purchaseId: string,
+  userId: string,
+  observaciones?: string,
+) {
+  const { _max } = await tx.compraRecepcion.aggregate({
+    where: {
+      compraId: purchaseId,
+      deletedAt: null,
+    },
+    _max: {
+      numero: true,
+    },
+  })
+
+  const numero = (_max.numero ?? 0) + 1
+
+  return tx.compraRecepcion.create({
+    data: {
+      compraId: purchaseId,
+      numero,
+      observaciones: toOptionalString(observaciones),
+      createdById: userId,
+      updatedById: userId,
+    },
+  })
+}
+
 async function ensureDefaultPaymentMethods(
   db: Prisma.TransactionClient | typeof prisma,
   userId?: string,
@@ -589,18 +631,18 @@ async function updatePurchaseReceiptStatus(
       (item) => item.receivedUnits + 0.0001 >= item.orderedUnits,
     )
 
-  const nextStatus = isFullyReceived
-    ? EstadoCompra.PAGADA
+  const nextLogisticsStatus = isFullyReceived
+    ? EstadoCompraLogistico.RECEPCION_COMPLETA
     : hasAnyReceipt
-      ? EstadoCompra.PARCIAL
-      : EstadoCompra.REGISTRADA
+      ? EstadoCompraLogistico.RECEPCION_PARCIAL
+      : EstadoCompraLogistico.REGISTRADA
 
   await tx.compra.update({
     where: {
       id: purchaseId,
     },
     data: {
-      estado: nextStatus,
+      estadoLogistico: nextLogisticsStatus,
       updatedById: userId,
     },
   })
@@ -624,6 +666,24 @@ function mapPurchaseOrder(
     returnedAmount,
     paidAmount,
   })
+  const receivedUnits = purchase.detalles.reduce(
+    (sum, detail) =>
+      sum +
+      detail.lotes.reduce((detailSum, lot) => detailSum + decimalToNumber(lot.stockInicial), 0),
+    0,
+  )
+  const receivedAmount = Number(
+    purchase.detalles
+      .reduce((sum, detail) => {
+        const unitCost = decimalToNumber(detail.costoUnitario)
+        const lineAmount = detail.lotes.reduce(
+          (detailSum, lot) => detailSum + decimalToNumber(lot.stockInicial) * unitCost,
+          0,
+        )
+        return sum + lineAmount
+      }, 0)
+      .toFixed(2),
+  )
 
   return {
     id: purchase.id,
@@ -648,6 +708,10 @@ function mapPurchaseOrder(
     paidAmount,
     paymentCount,
     status: purchase.estado,
+    logisticsStatus: purchase.estadoLogistico,
+    financialStatus: purchase.estadoFinanciero,
+    receivedUnits,
+    receivedAmount,
     observations: purchase.observaciones,
     itemNames: purchase.detalles.map((detail) => detail.producto.nombre),
   }
@@ -729,6 +793,8 @@ export async function getPurchaseDashboard(
   const purchaseWhere: Prisma.CompraWhereInput = {
     deletedAt: null,
     ...(filters.status ? { estado: filters.status } : {}),
+    ...(filters.logisticsStatus ? { estadoLogistico: filters.logisticsStatus } : {}),
+    ...(filters.financialStatus ? { estadoFinanciero: filters.financialStatus } : {}),
     sucursalId: branchId,
     ...(filters.supplierId ? { proveedorId: filters.supplierId } : {}),
   }
@@ -845,18 +911,22 @@ export async function getPurchaseDashboard(
       }
     })
 
+  const isCancelledOrder = (order: typeof filteredOrders[number]) =>
+    order.status === EstadoCompra.ANULADA || order.logisticsStatus === EstadoCompraLogistico.CANCELADA
+
+  const isOrderClosed = (order: typeof filteredOrders[number]) =>
+    order.logisticsStatus === EstadoCompraLogistico.RECEPCION_COMPLETA &&
+    order.financialStatus === EstadoCompraFinanciero.PAGADA
+
   const supplierSummary = suppliers
     .map((supplier) => {
       const supplierPurchases = filteredOrders.filter((order) => order.supplierId === supplier.id)
       const supplierSource = purchases.filter((purchase) => purchase.proveedorId === supplier.id)
       const completedPurchases = supplierPurchases.filter(
-        (order) => order.status === EstadoCompra.PAGADA,
+        (order) => order.logisticsStatus === EstadoCompraLogistico.RECEPCION_COMPLETA,
       )
       const activeOrders = supplierPurchases.filter(
-        (order) =>
-          order.status === EstadoCompra.BORRADOR ||
-          order.status === EstadoCompra.REGISTRADA ||
-          order.status === EstadoCompra.PARCIAL,
+        (order) => !isCancelledOrder(order) && !isOrderClosed(order),
       ).length
 
       const leadTimeValues = supplierSource
@@ -879,7 +949,7 @@ export async function getPurchaseDashboard(
       ).size
 
       const nonCancelled = supplierPurchases.filter(
-        (order) => order.status !== EstadoCompra.ANULADA,
+        (order) => !isCancelledOrder(order),
       ).length
 
       return {
@@ -913,10 +983,7 @@ export async function getPurchaseDashboard(
     summary: {
       totalOrders: filteredOrders.length,
       activeOrders: filteredOrders.filter(
-        (order) =>
-          order.status === EstadoCompra.BORRADOR ||
-          order.status === EstadoCompra.REGISTRADA ||
-          order.status === EstadoCompra.PARCIAL,
+        (order) => !isCancelledOrder(order) && !isOrderClosed(order),
       ).length,
       scheduledReceipts: filteredReceipts.filter((receipt) => receipt.status === 'PROGRAMADA')
         .length,
@@ -924,31 +991,31 @@ export async function getPurchaseDashboard(
         .length,
       activeSpend: Number(
         filteredOrders
-          .filter((order) => order.status !== EstadoCompra.ANULADA)
+          .filter((order) => !isCancelledOrder(order))
           .reduce((sum, order) => sum + order.totalAmount, 0)
           .toFixed(2),
       ),
       returnedAmount: Number(
         filteredOrders
-          .filter((order) => order.status !== EstadoCompra.ANULADA)
+          .filter((order) => !isCancelledOrder(order))
           .reduce((sum, order) => sum + order.returnedAmount, 0)
           .toFixed(2),
       ),
       netSpend: Number(
         filteredOrders
-          .filter((order) => order.status !== EstadoCompra.ANULADA)
+          .filter((order) => !isCancelledOrder(order))
           .reduce((sum, order) => sum + order.netAmount, 0)
           .toFixed(2),
       ),
       totalPaid: Number(
         filteredOrders
-          .filter((order) => order.status !== EstadoCompra.ANULADA)
+          .filter((order) => !isCancelledOrder(order))
           .reduce((sum, order) => sum + order.paidAmount, 0)
           .toFixed(2),
       ),
       pendingPayables: Number(
         filteredOrders
-          .filter((order) => order.status !== EstadoCompra.ANULADA)
+          .filter((order) => !isCancelledOrder(order))
           .reduce((sum, order) => sum + order.adjustedPendingAmount, 0)
           .toFixed(2),
       ),
@@ -1229,6 +1296,9 @@ export async function createPurchaseOrder(
         serieComprobante: toOptionalString(payload.serieComprobante),
         numeroComprobante: toOptionalString(payload.numeroComprobante),
         estado: payload.estado,
+        estadoLogistico: EstadoCompraLogistico.REGISTRADA,
+        estadoFinanciero:
+          total <= 0 ? EstadoCompraFinanciero.PAGADA : EstadoCompraFinanciero.SIN_PAGAR,
         subtotal: toDecimal(subtotal, 2),
         descuentoTotal: toDecimal(0, 2),
         impuestoTotal: toDecimal(impuestoTotal, 2),
@@ -1320,7 +1390,7 @@ export async function registerPurchasePayment(
   payload: RegisterPurchasePaymentPayload,
   request: FastifyRequest,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  const { userId, branchId } = await getAuthContext(request)
   const amount = Number(payload.monto)
   const paymentDate = payload.fechaPago
     ? new Date(`${payload.fechaPago}T00:00:00`)
@@ -1364,6 +1434,10 @@ export async function registerPurchasePayment(
       throw createHttpError(404, 'La compra seleccionada no está disponible.')
     }
 
+    if (purchase.sucursalId !== branchId) {
+      throw createHttpError(403, 'No tienes permisos para registrar pagos en compras de otra sucursal.')
+    }
+
     if (
       purchase.estado === EstadoCompra.BORRADOR ||
       purchase.estado === EstadoCompra.ANULADA
@@ -1384,6 +1458,73 @@ export async function registerPurchasePayment(
         'La forma de pago seleccionada requiere una referencia externa.',
       )
     }
+
+    const opening = await tx.aperturaCaja.findFirst({
+      where: {
+        deletedAt: null,
+        estado: EstadoAperturaCaja.ABIERTA,
+        usuarioId: userId,
+        caja: {
+          deletedAt: null,
+          sucursalId: branchId,
+        },
+      },
+      select: {
+        id: true,
+        montoAperturaEfectivo: true,
+      },
+    })
+
+    if (!opening) {
+      throw createHttpError(
+        409,
+        [
+          'No existe una caja activa para registrar este pago.',
+          'Abra la Caja de la sesión y luego intente nuevamente.',
+        ].join('\n\n'),
+      )
+    }
+
+    await tx.$queryRaw(
+      Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id} FOR UPDATE`,
+    )
+
+    const [incomeAggregate, expenseAggregate] = await Promise.all([
+      tx.movimientoCaja.aggregate({
+        where: {
+          deletedAt: null,
+          aperturaCajaId: opening.id,
+          tipo: {
+            notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+          },
+          operacion: OperacionCaja.INGRESO,
+        },
+        _sum: {
+          monto: true,
+        },
+      }),
+      tx.movimientoCaja.aggregate({
+        where: {
+          deletedAt: null,
+          aperturaCajaId: opening.id,
+          tipo: {
+            notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+          },
+          operacion: OperacionCaja.EGRESO,
+        },
+        _sum: {
+          monto: true,
+        },
+      }),
+    ])
+
+    const availableCash = Number(
+      (
+        decimalToNumber(opening.montoAperturaEfectivo) +
+        decimalToNumber(incomeAggregate._sum.monto) -
+        decimalToNumber(expenseAggregate._sum.monto)
+      ).toFixed(2),
+    )
 
     const [paidAggregate, returnMovements] = await Promise.all([
       tx.compraPago.aggregate({
@@ -1436,6 +1577,20 @@ export async function registerPurchasePayment(
       )
     }
 
+    if (availableCash + 0.0001 < amount) {
+      const missingCash = Number(Math.max(0, amount - availableCash).toFixed(2))
+      throw createHttpError(
+        409,
+        [
+          'La caja activa no cuenta con saldo suficiente para registrar este pago.',
+          `Saldo disponible: S/${availableCash.toFixed(2)}`,
+          `Monto requerido: S/${amount.toFixed(2)}`,
+          `Faltante: S/${missingCash.toFixed(2)}`,
+          'Registra un ingreso de caja y luego completa el pago al proveedor.',
+        ].join('\n\n'),
+      )
+    }
+
     const payment = await tx.compraPago.create({
       data: {
         compraId: purchase.id,
@@ -1450,6 +1605,13 @@ export async function registerPurchasePayment(
     })
 
     const nextOutstandingAmount = Number(Math.max(0, outstandingAmount - amount).toFixed(2))
+    const nextPaidAmount = Number((paidAmount + amount).toFixed(2))
+    const nextFinancialStatus =
+      nextOutstandingAmount <= 0
+        ? EstadoCompraFinanciero.PAGADA
+        : nextPaidAmount > 0
+          ? EstadoCompraFinanciero.PAGO_PARCIAL
+          : EstadoCompraFinanciero.SIN_PAGAR
 
     await tx.compra.update({
       where: {
@@ -1457,6 +1619,34 @@ export async function registerPurchasePayment(
       },
       data: {
         saldoPendiente: toDecimal(nextOutstandingAmount, 2),
+        estadoFinanciero: nextFinancialStatus,
+        updatedById: userId,
+      },
+    })
+
+    const cashMovement = await tx.movimientoCaja.create({
+      data: {
+        aperturaCajaId: opening.id,
+        formaPagoId: paymentMethod.id,
+        tipo: TipoMovimientoCaja.EGRESO,
+        operacion: OperacionCaja.EGRESO,
+        monto: toDecimal(amount, 2),
+        referencia: toOptionalString(payment.id),
+        observaciones: toOptionalString(
+          `Pago a proveedor · ${purchase.proveedor.razonSocial}`,
+        ),
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    await tx.egreso.create({
+      data: {
+        movimientoCajaId: cashMovement.id,
+        concepto: 'Pago a proveedor',
+        referencia: toOptionalString(payment.id),
+        observaciones: toOptionalString(payload.observaciones),
+        createdById: userId,
         updatedById: userId,
       },
     })
@@ -1481,26 +1671,297 @@ export async function registerPurchasePayment(
   }
 }
 
+async function receivePurchaseItemInTransaction(
+  tx: Prisma.TransactionClient,
+  prepared: {
+    detalleCompraId: string
+    numeroLote: string
+    manufacturedAt: Date | null
+    expiryDate: Date
+    receivedUnits: number
+    reservedUnits: number
+    blockedUnits: number
+    almacen?: string
+    observaciones?: string
+  },
+  context: {
+    userId: string
+    compraIdConstraint?: string
+    compraRecepcionId?: string
+    recepcionObservaciones?: string
+  },
+) {
+  const detail = await tx.detalleCompra.findFirst({
+    where: {
+      id: prepared.detalleCompraId,
+      deletedAt: null,
+    },
+    include: {
+      compra: {
+        select: {
+          id: true,
+          sucursalId: true,
+          proveedorId: true,
+          estado: true,
+        },
+      },
+      producto: {
+        select: {
+          id: true,
+          nombre: true,
+          sku: true,
+          unidadMedida: {
+            select: {
+              simbolo: true,
+            },
+          },
+        },
+      },
+      lotes: {
+        where: {
+          deletedAt: null,
+        },
+        select: {
+          stockInicial: true,
+        },
+      },
+    },
+  })
+
+  if (!detail || !detail.compra) {
+    throw createHttpError(404, 'La línea de compra seleccionada no está disponible.')
+  }
+
+  if (context.compraIdConstraint && detail.compra.id !== context.compraIdConstraint) {
+    throw createHttpError(400, 'La recepción pertenece a una orden diferente.')
+  }
+
+  if (
+    detail.compra.estado === EstadoCompra.BORRADOR ||
+    detail.compra.estado === EstadoCompra.ANULADA
+  ) {
+    throw createHttpError(
+      400,
+      'Solo puedes recepcionar órdenes registradas o parcialmente recibidas.',
+    )
+  }
+
+  const orderedUnits = decimalToNumber(detail.cantidad)
+  const currentReceivedUnits = detail.lotes.reduce(
+    (sum, lot) => sum + decimalToNumber(lot.stockInicial),
+    0,
+  )
+  const pendingUnits = orderedUnits - currentReceivedUnits
+
+  if (pendingUnits <= 0.0001) {
+    throw createHttpError(
+      400,
+      'La línea de compra seleccionada ya fue recibida completamente.',
+    )
+  }
+
+  const receivedInput = Number(prepared.receivedUnits)
+  const reservedInput = Number(prepared.reservedUnits)
+  const blockedInput = Number(prepared.blockedUnits)
+  const packFactor = detail.factorEmpaque ? Number(detail.factorEmpaque) : 1
+  const receivedUnits = detail.factorEmpaque ? receivedInput * packFactor : receivedInput
+  const reservedUnits = detail.factorEmpaque ? reservedInput * packFactor : reservedInput
+  const blockedUnits = detail.factorEmpaque ? blockedInput * packFactor : blockedInput
+  const availableUnits = receivedUnits - reservedUnits - blockedUnits
+
+  if (detail.factorEmpaque) {
+    if (!Number.isInteger(receivedInput)) {
+      throw createHttpError(400, 'La cantidad recibida debe ser un entero.')
+    }
+    if (!Number.isInteger(reservedInput) || !Number.isInteger(blockedInput)) {
+      throw createHttpError(400, 'El stock reservado y bloqueado debe ser un entero.')
+    }
+    if (!Number.isFinite(packFactor) || !Number.isInteger(packFactor) || packFactor <= 0) {
+      throw createHttpError(400, 'El factor de empaque configurado no es válido.')
+    }
+  }
+
+  if (!Number.isFinite(receivedUnits) || receivedUnits <= 0) {
+    throw createHttpError(400, 'La cantidad recibida debe ser mayor a 0.')
+  }
+
+  if (reservedUnits < 0 || blockedUnits < 0) {
+    throw createHttpError(400, 'El stock reservado y bloqueado no puede ser negativo.')
+  }
+
+  if (availableUnits < 0) {
+    throw createHttpError(
+      400,
+      'La suma de stock reservado y bloqueado no puede superar lo recibido.',
+    )
+  }
+
+  if (receivedUnits - pendingUnits > 0.0001) {
+    throw createHttpError(
+      400,
+      'La cantidad recibida no puede superar el saldo pendiente de la línea.',
+    )
+  }
+
+  const [openingReason, reserveReason, blockReason] = await Promise.all([
+    ensureMovementReason(tx, context.userId, {
+      code: 'RECEPCION_COMPRA',
+      name: 'Recepción de compra',
+      description: 'Ingreso de stock originado por la recepción física de una compra.',
+      type: TipoMovimientoInventario.ENTRADA,
+    }),
+    ensureMovementReason(tx, context.userId, {
+      code: 'RECEPCION_COMPRA_RESERVA',
+      name: 'Reserva en recepción',
+      description: 'Reserva operativa aplicada durante la recepción de una compra.',
+      type: TipoMovimientoInventario.RESERVA,
+    }),
+    ensureMovementReason(tx, context.userId, {
+      code: 'RECEPCION_COMPRA_BLOQUEO',
+      name: 'Bloqueo en recepción',
+      description: 'Bloqueo sanitario u operativo aplicado durante la recepción de una compra.',
+      type: TipoMovimientoInventario.AJUSTE,
+    }),
+  ])
+
+  const inventory = await tx.inventario.upsert({
+    where: {
+      sucursalId_productoId: {
+        sucursalId: detail.compra.sucursalId,
+        productoId: detail.productoId,
+      },
+    },
+    update: {
+      ubicacion: toOptionalString(prepared.almacen),
+      updatedById: context.userId,
+    },
+    create: {
+      sucursalId: detail.compra.sucursalId,
+      productoId: detail.productoId,
+      ubicacion: toOptionalString(prepared.almacen),
+      createdById: context.userId,
+      updatedById: context.userId,
+    },
+  })
+
+  const compraRecepcionId =
+    context.compraRecepcionId ??
+    (
+      await createPurchaseReceptionRecord(
+        tx,
+        detail.compra.id,
+        context.userId,
+        context.recepcionObservaciones,
+      )
+    ).id
+
+  const lot = await tx.lote.create({
+    data: {
+      sucursalId: detail.compra.sucursalId,
+      productoId: detail.productoId,
+      detalleCompraId: detail.id,
+      compraRecepcionId,
+      proveedorId: detail.compra.proveedorId,
+      numeroLote: prepared.numeroLote.trim().toUpperCase(),
+      fechaFabricacion: prepared.manufacturedAt ?? undefined,
+      fechaVencimiento: prepared.expiryDate,
+      costoUnitario: detail.costoUnitario,
+      stockInicial: receivedUnits,
+      stockDisponible: availableUnits,
+      stockReservado: reservedUnits,
+      stockBloqueado: blockedUnits,
+      estado: resolveLotStatus({
+        expiryDate: prepared.expiryDate,
+        availableUnits,
+        reservedUnits,
+        blockedUnits,
+      }),
+      observaciones: toOptionalString(prepared.observaciones),
+      createdById: context.userId,
+      updatedById: context.userId,
+    },
+  })
+
+  await tx.movimientoInventario.create({
+    data: {
+      sucursalId: detail.compra.sucursalId,
+      productoId: detail.productoId,
+      loteId: lot.id,
+      motivoId: openingReason.id,
+      detalleCompraId: detail.id,
+      tipo: TipoMovimientoInventario.ENTRADA,
+      origen: OrigenMovimientoInventario.COMPRA,
+      cantidad: receivedUnits,
+      costoUnitario: detail.costoUnitario,
+      stockResultante: receivedUnits,
+      referencia: `Recepción compra ${detail.compra.id.slice(0, 8).toUpperCase()} lote ${lot.numeroLote}`,
+      observaciones: toOptionalString(prepared.observaciones),
+      createdById: context.userId,
+      updatedById: context.userId,
+    },
+  })
+
+  if (reservedUnits > 0) {
+    await tx.movimientoInventario.create({
+      data: {
+        sucursalId: detail.compra.sucursalId,
+        productoId: detail.productoId,
+        loteId: lot.id,
+        motivoId: reserveReason.id,
+        detalleCompraId: detail.id,
+        tipo: TipoMovimientoInventario.RESERVA,
+        origen: OrigenMovimientoInventario.COMPRA,
+        cantidad: -reservedUnits,
+        costoUnitario: detail.costoUnitario,
+        stockResultante: receivedUnits - reservedUnits,
+        referencia: `Reserva en recepción lote ${lot.numeroLote}`,
+        observaciones: toOptionalString(prepared.observaciones),
+        createdById: context.userId,
+        updatedById: context.userId,
+      },
+    })
+  }
+
+  if (blockedUnits > 0) {
+    await tx.movimientoInventario.create({
+      data: {
+        sucursalId: detail.compra.sucursalId,
+        productoId: detail.productoId,
+        loteId: lot.id,
+        motivoId: blockReason.id,
+        detalleCompraId: detail.id,
+        tipo: TipoMovimientoInventario.AJUSTE,
+        origen: OrigenMovimientoInventario.COMPRA,
+        cantidad: -blockedUnits,
+        costoUnitario: detail.costoUnitario,
+        stockResultante: availableUnits,
+        referencia: `Bloqueo en recepción lote ${lot.numeroLote}`,
+        observaciones: toOptionalString(prepared.observaciones),
+        createdById: context.userId,
+        updatedById: context.userId,
+      },
+    })
+  }
+
+  await updatePurchaseReceiptStatus(tx, detail.compra.id, context.userId)
+
+  return {
+    purchaseId: detail.compra.id,
+    detailId: detail.id,
+    lotId: lot.id,
+    inventoryId: inventory.id,
+  }
+}
+
 export async function receivePurchaseItem(
   payload: ReceivePurchaseItemPayload,
   request: FastifyRequest,
 ) {
   const userId = await getAuthenticatedUserId(request)
-  const receivedInput = Number(payload.cantidadRecibida)
-  const reservedInput = Number(payload.stockReservado ?? 0)
-  const blockedInput = Number(payload.stockBloqueado ?? 0)
   const expiryDate = new Date(`${payload.fechaVencimiento}T00:00:00`)
   const manufacturedAt = payload.fechaFabricacion
     ? new Date(`${payload.fechaFabricacion}T00:00:00`)
     : null
-
-  if (!Number.isFinite(receivedInput) || receivedInput <= 0) {
-    throw createHttpError(400, 'La cantidad recibida debe ser mayor a 0.')
-  }
-
-  if (reservedInput < 0 || blockedInput < 0) {
-    throw createHttpError(400, 'El stock reservado y bloqueado no puede ser negativo.')
-  }
 
   if (Number.isNaN(expiryDate.getTime())) {
     throw createHttpError(400, 'La fecha de vencimiento no es válida.')
@@ -1511,270 +1972,115 @@ export async function receivePurchaseItem(
   }
 
   if (manufacturedAt && manufacturedAt > expiryDate) {
-    throw createHttpError(
-      400,
-      'La fecha de fabricación no puede ser posterior al vencimiento.',
-    )
+    throw createHttpError(400, 'La fecha de fabricación no puede ser posterior al vencimiento.')
   }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const detail = await tx.detalleCompra.findFirst({
-        where: {
-          id: payload.detalleCompraId,
-          deletedAt: null,
+      return receivePurchaseItemInTransaction(
+        tx,
+        {
+          detalleCompraId: payload.detalleCompraId,
+          numeroLote: payload.numeroLote,
+          manufacturedAt,
+          expiryDate,
+          receivedUnits: Number(payload.cantidadRecibida),
+          reservedUnits: Number(payload.stockReservado ?? 0),
+          blockedUnits: Number(payload.stockBloqueado ?? 0),
+          almacen: toOptionalString(payload.almacen),
+          observaciones: toOptionalString(payload.observaciones),
         },
-        include: {
-          compra: {
-            select: {
-              id: true,
-              estado: true,
-              proveedorId: true,
-              sucursalId: true,
-            },
-          },
-          producto: {
-            select: {
-              id: true,
-              nombre: true,
-              sku: true,
-              unidadMedida: {
-                select: {
-                  simbolo: true,
-                },
-              },
-            },
-          },
-          lotes: {
-            where: {
-              deletedAt: null,
-            },
-            select: {
-              stockInicial: true,
-            },
-          },
+        {
+          userId,
+          recepcionObservaciones: undefined,
         },
-      })
-
-      if (!detail) {
-        throw createHttpError(404, 'La línea de compra seleccionada no está disponible.')
-      }
-
-      if (
-        detail.compra.estado === EstadoCompra.BORRADOR ||
-        detail.compra.estado === EstadoCompra.ANULADA
-      ) {
-        throw createHttpError(
-          400,
-          'Solo puedes recepcionar órdenes registradas o parcialmente recibidas.',
-        )
-      }
-
-      const orderedUnits = decimalToNumber(detail.cantidad)
-      const currentReceivedUnits = detail.lotes.reduce(
-        (sum, lot) => sum + decimalToNumber(lot.stockInicial),
-        0,
       )
-      const pendingUnits = orderedUnits - currentReceivedUnits
+    })
 
-      if (pendingUnits <= 0.0001) {
-        throw createHttpError(
-          400,
-          'La línea de compra seleccionada ya fue recibida completamente.',
-        )
-      }
+    return { item: result }
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw createHttpError(
+        409,
+        'Ya existe un lote con ese número para el producto y sucursal seleccionados.',
+      )
+    }
 
-      const packFactor = detail.factorEmpaque ? Number(detail.factorEmpaque) : 1
-      const receivedUnits = detail.factorEmpaque ? receivedInput * packFactor : receivedInput
-      const reservedUnits = detail.factorEmpaque ? reservedInput * packFactor : reservedInput
-      const blockedUnits = detail.factorEmpaque ? blockedInput * packFactor : blockedInput
-      const availableUnits = receivedUnits - reservedUnits - blockedUnits
+    throw error
+  }
+}
 
-      if (detail.factorEmpaque) {
-        if (!Number.isInteger(receivedInput)) {
-          throw createHttpError(400, 'La cantidad recibida debe ser un entero.')
+export async function createPurchaseReception(
+  payload: CreatePurchaseReceptionPayload,
+  request: FastifyRequest,
+) {
+  const userId = await getAuthenticatedUserId(request)
+
+  if (payload.items.length === 0) {
+    throw createHttpError(400, 'Agrega al menos una línea para recepcionar.')
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const reception = await createPurchaseReceptionRecord(
+        tx,
+        payload.compraId,
+        userId,
+        payload.observaciones,
+      )
+
+      const receivedItems = []
+      for (const item of payload.items) {
+        const expiryDate = new Date(`${item.fechaVencimiento}T00:00:00`)
+        const manufacturedAt = item.fechaFabricacion
+          ? new Date(`${item.fechaFabricacion}T00:00:00`)
+          : null
+
+        if (Number.isNaN(expiryDate.getTime())) {
+          throw createHttpError(400, 'La fecha de vencimiento no es válida.')
         }
-        if (!Number.isInteger(reservedInput) || !Number.isInteger(blockedInput)) {
-          throw createHttpError(400, 'El stock reservado y bloqueado debe ser un entero.')
+
+        if (manufacturedAt && Number.isNaN(manufacturedAt.getTime())) {
+          throw createHttpError(400, 'La fecha de fabricación no es válida.')
         }
-        if (!Number.isFinite(packFactor) || !Number.isInteger(packFactor) || packFactor <= 0) {
-          throw createHttpError(400, 'El factor de empaque configurado no es válido.')
+
+        if (manufacturedAt && manufacturedAt > expiryDate) {
+          throw createHttpError(400, 'La fecha de fabricación no puede ser posterior al vencimiento.')
         }
-      }
 
-      if (availableUnits < 0) {
-        throw createHttpError(
-          400,
-          'La suma de stock reservado y bloqueado no puede superar lo recibido.',
-        )
-      }
-
-      if (receivedUnits - pendingUnits > 0.0001) {
-        throw createHttpError(
-          400,
-          'La cantidad recibida no puede superar el saldo pendiente de la línea.',
-        )
-      }
-
-      const [openingReason, reserveReason, blockReason] = await Promise.all([
-        ensureMovementReason(tx, userId, {
-          code: 'RECEPCION_COMPRA',
-          name: 'Recepción de compra',
-          description:
-            'Ingreso de stock originado por la recepción física de una compra.',
-          type: TipoMovimientoInventario.ENTRADA,
-        }),
-        ensureMovementReason(tx, userId, {
-          code: 'RECEPCION_COMPRA_RESERVA',
-          name: 'Reserva en recepción',
-          description:
-            'Reserva operativa aplicada durante la recepción de una compra.',
-          type: TipoMovimientoInventario.RESERVA,
-        }),
-        ensureMovementReason(tx, userId, {
-          code: 'RECEPCION_COMPRA_BLOQUEO',
-          name: 'Bloqueo en recepción',
-          description:
-            'Bloqueo sanitario u operativo aplicado durante la recepción de una compra.',
-          type: TipoMovimientoInventario.AJUSTE,
-        }),
-      ])
-
-      await tx.inventario.upsert({
-        where: {
-          sucursalId_productoId: {
-            sucursalId: detail.compra.sucursalId,
-            productoId: detail.productoId,
-          },
-        },
-        update: {
-          ubicacion: toOptionalString(payload.almacen),
-          updatedById: userId,
-        },
-        create: {
-          sucursalId: detail.compra.sucursalId,
-          productoId: detail.productoId,
-          ubicacion: toOptionalString(payload.almacen),
-          createdById: userId,
-          updatedById: userId,
-        },
-      })
-
-      const lot = await tx.lote.create({
-        data: {
-          sucursalId: detail.compra.sucursalId,
-          productoId: detail.productoId,
-          detalleCompraId: detail.id,
-          proveedorId: detail.compra.proveedorId,
-          numeroLote: payload.numeroLote.trim().toUpperCase(),
-          fechaFabricacion: manufacturedAt ?? undefined,
-          fechaVencimiento: expiryDate,
-          costoUnitario: detail.costoUnitario,
-          stockInicial: receivedUnits,
-          stockDisponible: availableUnits,
-          stockReservado: reservedUnits,
-          stockBloqueado: blockedUnits,
-          estado: resolveLotStatus({
+        const entry = await receivePurchaseItemInTransaction(
+          tx,
+          {
+            detalleCompraId: item.detalleCompraId,
+            numeroLote: item.numeroLote,
+            manufacturedAt,
             expiryDate,
-            availableUnits,
-            reservedUnits,
-            blockedUnits,
-          }),
-          observaciones: toOptionalString(payload.observaciones),
-          createdById: userId,
-          updatedById: userId,
-        },
-      })
-
-      const baseReference = `Recepción compra ${detail.compra.id.slice(0, 8).toUpperCase()} lote ${lot.numeroLote}`
-
-      await tx.movimientoInventario.create({
-        data: {
-          sucursalId: detail.compra.sucursalId,
-          productoId: detail.productoId,
-          loteId: lot.id,
-          motivoId: openingReason.id,
-          detalleCompraId: detail.id,
-          tipo: TipoMovimientoInventario.ENTRADA,
-          origen: OrigenMovimientoInventario.COMPRA,
-          cantidad: receivedUnits,
-          costoUnitario: detail.costoUnitario,
-          stockResultante: receivedUnits,
-          referencia: baseReference,
-          observaciones: toOptionalString(payload.observaciones),
-          createdById: userId,
-          updatedById: userId,
-        },
-      })
-
-      if (reservedUnits > 0) {
-        await tx.movimientoInventario.create({
-          data: {
-            sucursalId: detail.compra.sucursalId,
-            productoId: detail.productoId,
-            loteId: lot.id,
-            motivoId: reserveReason.id,
-            detalleCompraId: detail.id,
-            tipo: TipoMovimientoInventario.RESERVA,
-            origen: OrigenMovimientoInventario.COMPRA,
-            cantidad: -reservedUnits,
-            costoUnitario: detail.costoUnitario,
-            stockResultante: receivedUnits - reservedUnits,
-            referencia: `Reserva en recepción lote ${lot.numeroLote}`,
-            observaciones: toOptionalString(payload.observaciones),
-            createdById: userId,
-            updatedById: userId,
+            receivedUnits: Number(item.cantidadRecibida),
+            reservedUnits: Number(item.stockReservado ?? 0),
+            blockedUnits: Number(item.stockBloqueado ?? 0),
+            almacen: toOptionalString(item.almacen),
+            observaciones: toOptionalString(item.observaciones),
           },
-        })
-      }
-
-      if (blockedUnits > 0) {
-        await tx.movimientoInventario.create({
-          data: {
-            sucursalId: detail.compra.sucursalId,
-            productoId: detail.productoId,
-            loteId: lot.id,
-            motivoId: blockReason.id,
-            detalleCompraId: detail.id,
-            tipo: TipoMovimientoInventario.AJUSTE,
-            origen: OrigenMovimientoInventario.COMPRA,
-            cantidad: -blockedUnits,
-            costoUnitario: detail.costoUnitario,
-            stockResultante: availableUnits,
-            referencia: `Bloqueo en recepción lote ${lot.numeroLote}`,
-            observaciones: toOptionalString(payload.observaciones),
-            createdById: userId,
-            updatedById: userId,
+          {
+            userId,
+            compraIdConstraint: payload.compraId,
+            compraRecepcionId: reception.id,
           },
-        })
-      }
+        )
 
-      await updatePurchaseReceiptStatus(tx, detail.compra.id, userId)
+        receivedItems.push(entry)
+      }
 
       return {
-        id: lot.id,
-        detailId: detail.id,
-        purchaseId: detail.compra.id,
-        productName: detail.producto.nombre,
-        sku: detail.producto.sku,
-        unitSymbol: detail.producto.unidadMedida.simbolo,
-        lotCode: lot.numeroLote,
-        receivedUnits,
-        availableUnits,
-        reservedUnits,
-        blockedUnits,
-        expiryDate: formatDate(lot.fechaVencimiento),
+        purchaseId: payload.compraId,
+        receptionId: reception.id,
+        receivedCount: receivedItems.length,
       }
     })
 
-    return {
-      item: result,
-    }
+    return { item: result }
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw createHttpError(
         409,
         'Ya existe un lote con ese número para el producto y sucursal seleccionados.',
@@ -1962,6 +2268,12 @@ export async function returnPurchaseItem(
         returnedAmount,
         paidAmount,
       })
+      const nextFinancialStatus =
+        nextOutstandingAmount <= 0
+          ? EstadoCompraFinanciero.PAGADA
+          : paidAmount > 0
+            ? EstadoCompraFinanciero.PAGO_PARCIAL
+            : EstadoCompraFinanciero.SIN_PAGAR
 
       await tx.compra.update({
         where: {
@@ -1969,6 +2281,7 @@ export async function returnPurchaseItem(
         },
         data: {
           saldoPendiente: toDecimal(nextOutstandingAmount, 2),
+          estadoFinanciero: nextFinancialStatus,
           updatedById: userId,
         },
       })

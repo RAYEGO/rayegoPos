@@ -104,7 +104,6 @@ const createProductSchema = z.object({
   precioVentaBlister: z.number().nonnegative('El precio por blíster debe ser mayor o igual a 0.').optional(),
   principioActivoId: z.string().optional(),
   sku: z.string().min(3, 'Ingresa un SKU válido.').max(50),
-  codigoInterno: z.string().max(50).optional(),
   codigoBarras: z.string().max(50).optional(),
   nombre: z.string().min(3, 'Ingresa el nombre del producto.').max(180),
   descripcion: z.string().max(500).optional(),
@@ -137,7 +136,6 @@ const createProductSchema = z.object({
 })
 
 const masterCategorySchema = z.object({
-  codigo: z.string().min(1, 'El código es obligatorio.').max(30),
   nombre: z.string().min(2, 'El nombre es obligatorio.').max(120),
   descripcion: z.string().max(255).optional(),
   color: z.string().max(20).optional(),
@@ -159,7 +157,6 @@ const masterPresentationSchema = z.object({
 })
 
 const masterUnitSchema = z.object({
-  codigo: z.string().min(1, 'El código es obligatorio.').max(20),
   nombre: z.string().min(2, 'El nombre es obligatorio.').max(80),
   simbolo: z.string().min(1, 'El símbolo es obligatorio.').max(20),
   descripcion: z.string().max(255).optional(),
@@ -183,7 +180,6 @@ const defaultFormValues: CreateProductFormValues = {
   precioVentaBlister: undefined,
   principioActivoId: '',
   sku: '',
-  codigoInterno: '',
   codigoBarras: '',
   nombre: '',
   descripcion: '',
@@ -207,6 +203,11 @@ function formatCurrency(value: number) {
     currency: 'PEN',
     minimumFractionDigits: 2,
   }).format(value)
+}
+
+function buildSkuSuggestion() {
+  const stamp = Date.now().toString().slice(-6)
+  return `MED-${stamp}`.slice(0, 50)
 }
 
 function formatDate(value: string | null) {
@@ -347,7 +348,6 @@ export function ProductosPage() {
   const categoryForm = useForm<MasterCategoryFormValues>({
     resolver: zodResolver(masterCategorySchema),
     defaultValues: {
-      codigo: '',
       nombre: '',
       descripcion: '',
       color: '',
@@ -378,7 +378,6 @@ export function ProductosPage() {
   const unitForm = useForm<MasterUnitFormValues>({
     resolver: zodResolver(masterUnitSchema),
     defaultValues: {
-      codigo: '',
       nombre: '',
       simbolo: '',
       descripcion: '',
@@ -559,7 +558,6 @@ export function ProductosPage() {
       setEditingPresentation(null)
       setEditingUnit(null)
       categoryForm.reset({
-        codigo: '',
         nombre: '',
         descripcion: '',
         color: '',
@@ -578,7 +576,6 @@ export function ProductosPage() {
         activo: true,
       })
       unitForm.reset({
-        codigo: '',
         nombre: '',
         simbolo: '',
         descripcion: '',
@@ -597,7 +594,6 @@ export function ProductosPage() {
       }
 
       const payload: UpsertMasterCategoryPayload = {
-        codigo: values.codigo.trim().toUpperCase(),
         nombre: values.nombre.trim(),
         descripcion: values.descripcion?.trim() || undefined,
         color: values.color?.trim() || undefined,
@@ -751,7 +747,6 @@ export function ProductosPage() {
       }
 
       const payload: UpsertMasterUnitPayload = {
-        codigo: values.codigo.trim().toUpperCase(),
         nombre: values.nombre.trim(),
         simbolo: values.simbolo.trim(),
         descripcion: values.descripcion?.trim() || undefined,
@@ -807,7 +802,6 @@ export function ProductosPage() {
       precioVentaBlister: product.blisterPrice ?? undefined,
       principioActivoId: '',
       sku: product.sku,
-      codigoInterno: product.internalCode ?? '',
       codigoBarras: product.barcode ?? '',
       nombre: product.name,
       descripcion: product.description ?? '',
@@ -822,7 +816,7 @@ export function ProductosPage() {
 
   function openCreateDialog() {
     setEditingProduct(null)
-    form.reset(defaultFormValues)
+    form.reset({ ...defaultFormValues, sku: buildSkuSuggestion() })
     setIsCreateDialogOpen(true)
   }
 
@@ -837,7 +831,6 @@ export function ProductosPage() {
     const nextSku = nextSkuBase.length > 50 ? nextSkuBase.slice(0, 50) : nextSkuBase
     const nextValues = mapProductToFormValues(product)
     nextValues.sku = nextSku
-    nextValues.codigoInterno = ''
     nextValues.codigoBarras = ''
     setEditingProduct(null)
     form.reset(nextValues)
@@ -848,6 +841,34 @@ export function ProductosPage() {
     setSelectedProductDetail(product)
     setIsDetailDialogOpen(true)
   }
+
+  const handleSkuBlur = useCallback(
+    async (value: string) => {
+      const normalized = value.trim()
+      if (!accessToken) return
+      if (!normalized) return
+
+      try {
+        const response = await productsService.list(accessToken, {
+          search: normalized,
+          page: 1,
+          pageSize: 10,
+        })
+        const existing =
+          response.items.find((item) => item.sku.toLowerCase() === normalized.toLowerCase()) ??
+          null
+
+        if (existing && existing.id !== editingProduct?.id) {
+          form.setError('sku', { type: 'validate', message: 'Este SKU ya existe.' })
+        } else {
+          form.clearErrors('sku')
+        }
+      } catch {
+        form.clearErrors('sku')
+      }
+    },
+    [accessToken, editingProduct?.id, form],
+  )
 
   function requestConfirm(type: 'activate' | 'deactivate' | 'delete', product: ProductCatalogItem) {
     setConfirmAction({ type, product })
@@ -908,7 +929,6 @@ export function ProductosPage() {
       blistersPorCaja: packagingMode === 'BLISTER' ? values.blistersPorCaja : undefined,
       precioVentaBlister: packagingMode === 'BLISTER' ? values.precioVentaBlister : undefined,
       principioActivoId: values.principioActivoId || undefined,
-      codigoInterno: values.codigoInterno?.trim() || undefined,
       codigoBarras: values.codigoBarras?.trim() || undefined,
       descripcion: values.descripcion?.trim() || undefined,
       concentracion: values.concentracion?.trim() || undefined,
@@ -1408,14 +1428,16 @@ export function ProductosPage() {
                 <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium">SKU</label>
-                <Input {...form.register('sku')} placeholder="MED-0001" size={1} />
+                <Input
+                  {...form.register('sku', {
+                    onBlur: (event) => {
+                      void handleSkuBlur(event.target.value)
+                    },
+                  })}
+                  placeholder="MED-0001"
+                  size={1}
+                />
                 <FieldError message={form.formState.errors.sku?.message} />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium">Código interno</label>
-                <Input {...form.register('codigoInterno')} placeholder="INT-001" />
-                <FieldError message={form.formState.errors.codigoInterno?.message} />
               </div>
 
               <div className="space-y-1.5 md:col-span-2">
@@ -1982,11 +2004,6 @@ export function ProductosPage() {
             <form className="grid gap-4" onSubmit={categoryForm.handleSubmit(handleSaveMasterCategory)}>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Código</label>
-                  <Input {...categoryForm.register('codigo')} placeholder="ANALG" disabled={isMasterSubmitting} />
-                  <FieldError message={categoryForm.formState.errors.codigo?.message} />
-                </div>
-                <div className="space-y-1.5">
                   <label className="text-xs font-medium">Orden</label>
                   <Input
                     type="number"
@@ -1999,6 +2016,7 @@ export function ProductosPage() {
                   <label className="text-xs font-medium">Nombre</label>
                   <Input {...categoryForm.register('nombre')} placeholder="Analgésicos" disabled={isMasterSubmitting} />
                   <FieldError message={categoryForm.formState.errors.nombre?.message} />
+                  <p className="text-xs text-muted-foreground">Código generado automáticamente desde el nombre.</p>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <label className="text-xs font-medium">Descripción</label>
@@ -2160,11 +2178,6 @@ export function ProductosPage() {
             <form className="grid gap-4" onSubmit={unitForm.handleSubmit(handleSaveMasterUnit)}>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Código</label>
-                  <Input {...unitForm.register('codigo')} disabled={isMasterSubmitting} />
-                  <FieldError message={unitForm.formState.errors.codigo?.message} />
-                </div>
-                <div className="space-y-1.5">
                   <label className="text-xs font-medium">Símbolo</label>
                   <Input {...unitForm.register('simbolo')} disabled={isMasterSubmitting} />
                   <FieldError message={unitForm.formState.errors.simbolo?.message} />
@@ -2173,6 +2186,7 @@ export function ProductosPage() {
                   <label className="text-xs font-medium">Nombre</label>
                   <Input {...unitForm.register('nombre')} disabled={isMasterSubmitting} />
                   <FieldError message={unitForm.formState.errors.nombre?.message} />
+                  <p className="text-xs text-muted-foreground">Código generado automáticamente desde el nombre.</p>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <label className="text-xs font-medium">Descripción</label>

@@ -48,7 +48,6 @@ const createProductSchema = z.object({
   precioVentaBlister: z.number().nonnegative().optional(),
   principioActivoId: z.string().uuid().optional(),
   sku: z.string().min(1).max(50),
-  codigoInterno: z.string().max(50).optional(),
   codigoBarras: z.string().max(50).optional(),
   nombre: z.string().min(3).max(180),
   descripcion: z.string().max(500).optional(),
@@ -67,7 +66,7 @@ const updateProductStatusSchema = z.object({
 
 const masterCategorySchema = z.object({
   parentId: z.string().uuid().nullable().optional(),
-  codigo: z.string().min(1).max(30),
+  codigo: z.string().min(1).max(30).optional(),
   nombre: z.string().min(2).max(120),
   descripcion: z.string().max(255).optional(),
   color: z.string().max(20).optional(),
@@ -89,7 +88,7 @@ const masterPresentationSchema = z.object({
 })
 
 const masterUnitSchema = z.object({
-  codigo: z.string().min(1).max(20),
+  codigo: z.string().min(1).max(20).optional(),
   nombre: z.string().min(2).max(80),
   simbolo: z.string().min(1).max(20),
   descripcion: z.string().max(255).optional(),

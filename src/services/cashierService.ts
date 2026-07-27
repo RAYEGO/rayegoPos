@@ -1,5 +1,6 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
+  ActiveCashDrawerResponse,
   CashierDashboardResponse,
   OpenCashDrawerPayload,
   CloseCashDrawerPayload,
@@ -35,6 +36,12 @@ export const cashierService = {
         accessToken,
       }
     )
+  },
+
+  getActiveDrawer(accessToken: string) {
+    return apiRequest<ActiveCashDrawerResponse>('/api/cashier/active', {
+      accessToken,
+    })
   },
 
   openDrawer(accessToken: string, payload: OpenCashDrawerPayload) {

@@ -18,6 +18,7 @@ import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
+import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
@@ -324,8 +325,9 @@ export function ConfiguracionPage() {
   const [isCatalogImporting, setIsCatalogImporting] = useState(false)
   const [catalogImportSummary, setCatalogImportSummary] = useState<{
     created: number
-    updated: number
     skipped: number
+    errors: number
+    errorDetails: string[]
   } | null>(null)
   const [company, setCompany] = useState<CompanyProfile | null>(null)
   const [companyError, setCompanyError] = useState<string | null>(null)
@@ -512,7 +514,12 @@ export function ConfiguracionPage() {
       .filter(Boolean)
 
     if (!lines.length) {
-      throw new Error('El archivo CSV está vacío.')
+      throw new Error(
+        formatImplementationMessage(
+          'INVALID_FILE',
+          'El archivo CSV está vacío.',
+        ),
+      )
     }
 
     const delimiter = lines[0]?.includes(';') ? ';' : ','
@@ -529,7 +536,12 @@ export function ConfiguracionPage() {
     const normalizedHeaders = headers.map((header) => header.toLowerCase())
     const missing = expectedHeaders.filter((header) => !normalizedHeaders.includes(header))
     if (missing.length) {
-      throw new Error(`Faltan columnas en el CSV: ${missing.join(', ')}`)
+      throw new Error(
+        formatImplementationMessage(
+          'INVALID_FILE',
+          `Faltan columnas en el CSV: ${missing.join(', ')}`,
+        ),
+      )
     }
 
     const headerIndex = Object.fromEntries(
@@ -573,7 +585,11 @@ export function ConfiguracionPage() {
       response.items.find((item) => item.sku.toLowerCase() === normalizedSku.toLowerCase()) ?? null
 
     if (!product) {
-      throw new Error(`No se encontró el producto con SKU: ${normalizedSku}`)
+      throw new Error(IMPLEMENTATION_MESSAGES.SKU_NOT_FOUND)
+    }
+
+    if (product.status !== 'ACTIVO') {
+      throw new Error(IMPLEMENTATION_MESSAGES.PRODUCT_INACTIVE)
     }
 
     skuCache.set(normalizedSku.toLowerCase(), product)
@@ -593,17 +609,21 @@ export function ConfiguracionPage() {
       const items: InitialInventoryFormValues['items'] = []
 
       for (const row of rows) {
-        const product = await resolveProductBySku(row.sku, skuCache)
+        let product: ProductCatalogItem
+        try {
+          product = await resolveProductBySku(row.sku, skuCache)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Producto no encontrado.'
+          throw new Error(`Fila ${row.row}: ${message}`)
+        }
         const presentation = normalizePresentation(row.presentacion)
         if (!presentation) {
-          throw new Error(`Fila ${row.row}: Presentación inválida (CAJA, BLISTER o UNIDAD).`)
+          throw new Error(`Fila ${row.row}: ${IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION}`)
         }
 
         const allowed = resolvePresentationOptions(product)
         if (!allowed.includes(presentation)) {
-          throw new Error(
-            `Fila ${row.row}: La presentación ${presentationLabels[presentation]} no es válida para el producto ${product.sku}.`,
-          )
+          throw new Error(`Fila ${row.row}: ${IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION}`)
         }
 
         const quantity = Number(row.cantidad)
@@ -628,7 +648,8 @@ export function ConfiguracionPage() {
       initialInventoryForm.reset({ items })
       toast.success(`Se importaron ${items.length} filas. Revisa y registra la carga.`)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo importar el archivo.')
+      const detail = err instanceof Error ? err.message : 'No se pudo importar el archivo.'
+      toast.error(`${IMPLEMENTATION_MESSAGES.INVALID_FILE}\n\n${detail}`)
     } finally {
       setIsImporting(false)
       if (csvInputRef.current) {
@@ -641,13 +662,11 @@ export function ConfiguracionPage() {
     return [
       [
         'sku',
-        'codigoInterno',
         'codigoBarras',
         'nombre',
         'categoria',
         'laboratorio',
         'presentacion',
-        'unidadCodigo',
         'unidadNombre',
         'unidadSimbolo',
         'precioVenta',
@@ -665,13 +684,11 @@ export function ConfiguracionPage() {
       ].join(','),
       [
         'PARA-500-CAJA',
-        'PARA500',
         '',
         'Paracetamol 500mg',
         'ANALGÉSICOS',
         'ACME',
         'Tabletas',
-        'UND',
         'Unidad',
         'und',
         '0.50',
@@ -690,12 +707,10 @@ export function ConfiguracionPage() {
       [
         'VITC-1G-UND',
         '',
-        '',
         'Vitamina C 1g',
         'VITAMINAS',
         '',
         'Tabletas',
-        'UND',
         'Unidad',
         'und',
         '1.50',
@@ -749,19 +764,6 @@ export function ConfiguracionPage() {
     return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   }
 
-  function generateCategoryCode(name: string, attempt: number) {
-    const base = name
-      .trim()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .toUpperCase()
-    const fallback = base || 'CAT'
-    const suffix = attempt > 0 ? `-${attempt + 1}` : ''
-    return `${fallback}${suffix}`.slice(0, 30)
-  }
-
   function parseProductCatalogCsv(content: string) {
     const lines = content
       .split(/\r?\n/)
@@ -780,7 +782,6 @@ export function ConfiguracionPage() {
       'sku',
       'nombre',
       'categoria',
-      'unidadcodigo',
       'unidadnombre',
       'unidadsimbolo',
       'precioventa',
@@ -807,13 +808,11 @@ export function ConfiguracionPage() {
       return {
         row: rowIndex + 2,
         sku: value('sku'),
-        codigoInterno: value('codigointerno'),
         codigoBarras: value('codigobarras'),
         nombre: value('nombre'),
         categoria: value('categoria'),
         laboratorio: value('laboratorio'),
         presentacion: value('presentacion'),
-        unidadCodigo: value('unidadcodigo'),
         unidadNombre: value('unidadnombre'),
         unidadSimbolo: value('unidadsimbolo'),
         precioVenta: value('precioventa'),
@@ -855,7 +854,6 @@ export function ConfiguracionPage() {
       const presentationsByName = new Map(
         presentationsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
-      const unitsByCode = new Map(unitsResponse.rows.map((row) => [row.codigo.toLowerCase(), row]))
       const unitsByName = new Map(
         unitsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
@@ -864,242 +862,312 @@ export function ConfiguracionPage() {
       const rows = parseProductCatalogCsv(text)
 
       let created = 0
-      let updated = 0
       let skipped = 0
+      let errors = 0
+      const errorDetails: string[] = []
+      const skuInFile = new Set<string>()
+
+      const pushError = (row: number, message: string) => {
+        errors += 1
+        if (errorDetails.length < 20) {
+          errorDetails.push(`Fila ${row}: ${message}`)
+        }
+      }
 
       for (const row of rows) {
-        const sku = row.sku.trim()
-        if (!sku) {
-          skipped += 1
-          continue
-        }
-
-        const categoryName = row.categoria.trim()
-        if (!categoryName) {
-          throw new Error(`Fila ${row.row}: Categoría requerida.`)
-        }
-
-        const categoryKey = normalizeMasterKey(categoryName)
-        let category = categoriesByName.get(categoryKey) ?? null
-        if (!category) {
-          let createdCategoryId: string | null = null
-          for (let attempt = 0; attempt < 10; attempt += 1) {
-            try {
-              const result = await productsService.createMasterCategory(accessToken, {
-                codigo: generateCategoryCode(categoryName, attempt),
-                nombre: categoryName,
-              })
-              createdCategoryId = result.id
-              break
-            } catch (err) {
-              if (err instanceof ApiError && err.status === 409) {
-                continue
-              }
-              throw err
-            }
+        try {
+          const rawSku = row.sku.trim()
+          if (!rawSku) {
+            skipped += 1
+            continue
           }
 
-          const refreshed = await productsService.listMasterCategories(accessToken)
-          refreshed.rows.forEach((entry) =>
-            categoriesByName.set(normalizeMasterKey(entry.nombre), entry),
-          )
-          category = categoriesByName.get(categoryKey) ?? null
+          const sku = rawSku.toUpperCase()
+          if (skuInFile.has(sku)) {
+            pushError(
+              row.row,
+              formatImplementationMessage(
+                'INVALID_FILE',
+                'El SKU está duplicado en el archivo.',
+              ),
+            )
+            continue
+          }
+          skuInFile.add(sku)
+
+          const productName = row.nombre.trim()
+          if (!productName) {
+            pushError(
+              row.row,
+              formatImplementationMessage(
+                'INVALID_REQUIRED_FIELD',
+                'Campo: Nombre',
+              ),
+            )
+            continue
+          }
+
+          const categoryName = row.categoria.trim()
+          if (!categoryName) {
+            pushError(
+              row.row,
+              formatImplementationMessage(
+                'INVALID_REQUIRED_FIELD',
+                'Campo: Categoría',
+              ),
+            )
+            continue
+          }
+
+          const categoryKey = normalizeMasterKey(categoryName)
+          let category = categoriesByName.get(categoryKey) ?? null
           if (!category) {
-            if (!createdCategoryId) {
-              throw new Error(`Fila ${row.row}: No se pudo crear la categoría.`)
+            try {
+              await productsService.createMasterCategory(accessToken, { nombre: categoryName })
+            } catch (err) {
+              if (!(err instanceof ApiError && err.status === 409)) {
+                throw err
+              }
             }
-            category = refreshed.rows.find((entry) => entry.id === createdCategoryId) ?? null
+
+            const refreshed = await productsService.listMasterCategories(accessToken)
+            refreshed.rows.forEach((entry) =>
+              categoriesByName.set(normalizeMasterKey(entry.nombre), entry),
+            )
+            category = categoriesByName.get(categoryKey) ?? null
           }
-        }
 
-        if (!category) {
-          throw new Error(`Fila ${row.row}: No se pudo resolver la categoría.`)
-        }
+          if (!category) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.CATEGORY_NOT_FOUND)
+            continue
+          }
 
-        const unitCode = row.unidadCodigo.trim().toUpperCase()
-        const unitName = row.unidadNombre.trim()
-        const unitSymbol = row.unidadSimbolo.trim()
-        if (!unitCode || !unitName || !unitSymbol) {
-          throw new Error(`Fila ${row.row}: Unidad de medida incompleta.`)
-        }
+          const unitName = row.unidadNombre.trim()
+          const unitSymbol = row.unidadSimbolo.trim()
+          if (!unitName || !unitSymbol) {
+            pushError(
+              row.row,
+              formatImplementationMessage(
+                'INVALID_REQUIRED_FIELD',
+                'Campos: Unidad de medida (Nombre y símbolo)',
+              ),
+            )
+            continue
+          }
 
-        let unit = unitsByCode.get(unitCode.toLowerCase()) ?? unitsByName.get(normalizeMasterKey(unitName)) ?? null
-        if (!unit) {
-          try {
-            const result = await productsService.createMasterUnit(accessToken, {
-              codigo: unitCode,
-              nombre: unitName,
-              simbolo: unitSymbol,
-            })
-            const refreshed = await productsService.listMasterUnits(accessToken)
-            refreshed.rows.forEach((entry) => {
-              unitsByCode.set(entry.codigo.toLowerCase(), entry)
-              unitsByName.set(normalizeMasterKey(entry.nombre), entry)
-            })
-            unit =
-              refreshed.rows.find((entry) => entry.id === result.id) ??
-              unitsByCode.get(unitCode.toLowerCase()) ??
-              null
-          } catch (err) {
-            if (err instanceof ApiError && err.status === 409) {
+          let unit = unitsByName.get(normalizeMasterKey(unitName)) ?? null
+          if (!unit) {
+            try {
+              const result = await productsService.createMasterUnit(accessToken, {
+                nombre: unitName,
+                simbolo: unitSymbol,
+              })
               const refreshed = await productsService.listMasterUnits(accessToken)
               refreshed.rows.forEach((entry) => {
-                unitsByCode.set(entry.codigo.toLowerCase(), entry)
                 unitsByName.set(normalizeMasterKey(entry.nombre), entry)
               })
               unit =
-                unitsByCode.get(unitCode.toLowerCase()) ??
+                refreshed.rows.find((entry) => entry.id === result.id) ??
                 unitsByName.get(normalizeMasterKey(unitName)) ??
                 null
-            } else {
-              throw err
-            }
-          }
-        }
-
-        if (!unit) {
-          throw new Error(`Fila ${row.row}: No se pudo resolver la unidad de medida.`)
-        }
-
-        const laboratoryName = row.laboratorio.trim()
-        let labId: string | undefined
-        if (laboratoryName) {
-          const labKey = normalizeMasterKey(laboratoryName)
-          let lab = labsByName.get(labKey) ?? null
-          if (!lab) {
-            try {
-              const result = await productsService.createMasterLaboratory(accessToken, {
-                nombre: laboratoryName,
-              })
-              const refreshed = await productsService.listMasterLaboratories(accessToken)
-              refreshed.rows.forEach((entry) =>
-                labsByName.set(normalizeMasterKey(entry.nombre), entry),
-              )
-              lab = refreshed.rows.find((entry) => entry.id === result.id) ?? null
             } catch (err) {
               if (err instanceof ApiError && err.status === 409) {
+                const refreshed = await productsService.listMasterUnits(accessToken)
+                refreshed.rows.forEach((entry) => {
+                  unitsByName.set(normalizeMasterKey(entry.nombre), entry)
+                })
+                unit = unitsByName.get(normalizeMasterKey(unitName)) ?? null
+              } else {
+                throw err
+              }
+            }
+          }
+
+          if (!unit) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.UNIT_NOT_FOUND)
+            continue
+          }
+
+          const laboratoryName = row.laboratorio.trim()
+          let labId: string | undefined
+          if (laboratoryName) {
+            const labKey = normalizeMasterKey(laboratoryName)
+            let lab = labsByName.get(labKey) ?? null
+            if (!lab) {
+              try {
+                const result = await productsService.createMasterLaboratory(accessToken, {
+                  nombre: laboratoryName,
+                })
                 const refreshed = await productsService.listMasterLaboratories(accessToken)
                 refreshed.rows.forEach((entry) =>
                   labsByName.set(normalizeMasterKey(entry.nombre), entry),
                 )
-                lab = labsByName.get(labKey) ?? null
-              } else {
-                throw err
+                lab = refreshed.rows.find((entry) => entry.id === result.id) ?? null
+              } catch (err) {
+                if (err instanceof ApiError && err.status === 409) {
+                  const refreshed = await productsService.listMasterLaboratories(accessToken)
+                  refreshed.rows.forEach((entry) =>
+                    labsByName.set(normalizeMasterKey(entry.nombre), entry),
+                  )
+                  lab = labsByName.get(labKey) ?? null
+                } else {
+                  throw err
+                }
               }
             }
-          }
-          if (lab) {
+
+            if (!lab) {
+              pushError(row.row, IMPLEMENTATION_MESSAGES.LABORATORY_NOT_FOUND)
+              continue
+            }
+
             labId = lab.id
           }
-        }
 
-        const presentationName = row.presentacion.trim()
-        let presentationId: string | undefined
-        if (presentationName) {
-          const presentationKey = normalizeMasterKey(presentationName)
-          let presentation = presentationsByName.get(presentationKey) ?? null
-          if (!presentation) {
-            try {
-              const result = await productsService.createMasterPresentation(accessToken, {
-                nombre: presentationName,
-              })
-              const refreshed = await productsService.listMasterPresentations(accessToken)
-              refreshed.rows.forEach((entry) =>
-                presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
-              )
-              presentation =
-                refreshed.rows.find((entry) => entry.id === result.id) ??
-                presentationsByName.get(presentationKey) ??
-                null
-            } catch (err) {
-              if (err instanceof ApiError && err.status === 409) {
+          const presentationName = row.presentacion.trim()
+          let presentationId: string | undefined
+          if (presentationName) {
+            const presentationKey = normalizeMasterKey(presentationName)
+            let presentation = presentationsByName.get(presentationKey) ?? null
+            if (!presentation) {
+              try {
+                const result = await productsService.createMasterPresentation(accessToken, {
+                  nombre: presentationName,
+                })
                 const refreshed = await productsService.listMasterPresentations(accessToken)
                 refreshed.rows.forEach((entry) =>
                   presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
                 )
-                presentation = presentationsByName.get(presentationKey) ?? null
-              } else {
-                throw err
+                presentation =
+                  refreshed.rows.find((entry) => entry.id === result.id) ??
+                  presentationsByName.get(presentationKey) ??
+                  null
+              } catch (err) {
+                if (err instanceof ApiError && err.status === 409) {
+                  const refreshed = await productsService.listMasterPresentations(accessToken)
+                  refreshed.rows.forEach((entry) =>
+                    presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
+                  )
+                  presentation = presentationsByName.get(presentationKey) ?? null
+                } else {
+                  throw err
+                }
               }
             }
-          }
-          if (presentation) {
+
+            if (!presentation) {
+              pushError(row.row, IMPLEMENTATION_MESSAGES.PRESENTATION_NOT_FOUND)
+              continue
+            }
+
             presentationId = presentation.id
           }
-        }
 
-        const price = Number(row.precioVenta)
-        const refCost = Number(row.costoReferencia)
-        if (!Number.isFinite(price) || price < 0) {
-          throw new Error(`Fila ${row.row}: Precio de venta inválido.`)
-        }
-        if (!Number.isFinite(refCost) || refCost < 0) {
-          throw new Error(`Fila ${row.row}: Costo referencial inválido.`)
-        }
+          const price = Number(row.precioVenta)
+          if (!Number.isFinite(price) || price < 0) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
+            continue
+          }
 
-        const mode = normalizePackagingMode(row.modoEmpaque)
-        if (!mode) {
-          throw new Error(`Fila ${row.row}: Modo de empaque inválido (SIMPLE o BLISTER).`)
-        }
+          const refCost = Number(row.costoReferencia)
+          if (!Number.isFinite(refCost) || refCost < 0) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_COST)
+            continue
+          }
 
-        const unitsPerBlister = row.unidadesPorBlister ? Number(row.unidadesPorBlister) : null
-        const blistersPerBox = row.blistersPorCaja ? Number(row.blistersPorCaja) : null
-        const blisterPrice = row.precioVentaBlister ? Number(row.precioVentaBlister) : null
+          const mode = normalizePackagingMode(row.modoEmpaque)
+          if (!mode) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.PACKAGE_TYPE_NOT_FOUND)
+            continue
+          }
 
-        const payload: CreateProductPayload = {
-          categoriaId: category.id,
-          laboratorioId: labId,
-          presentacionId: presentationId,
-          unidadMedidaId: unit.id,
-          modoEmpaque: mode,
-          ...(mode === 'BLISTER' && unitsPerBlister && unitsPerBlister > 0
-            ? { unidadesPorBlister: Math.floor(unitsPerBlister) }
-            : {}),
-          ...(mode === 'BLISTER' && blistersPerBox && blistersPerBox > 0
-            ? { blistersPorCaja: Math.floor(blistersPerBox) }
-            : {}),
-          ...(mode === 'BLISTER' && blisterPrice !== null && Number.isFinite(blisterPrice) && blisterPrice >= 0
-            ? { precioVentaBlister: blisterPrice }
-            : {}),
-          sku,
-          ...(row.codigoInterno?.trim() ? { codigoInterno: row.codigoInterno.trim() } : {}),
-          ...(row.codigoBarras?.trim() ? { codigoBarras: row.codigoBarras.trim() } : {}),
-          nombre: row.nombre.trim(),
-          ...(row.descripcion?.trim() ? { descripcion: row.descripcion.trim() } : {}),
-          ...(row.concentracion?.trim() ? { concentracion: row.concentracion.trim() } : {}),
-          ...(row.registroSanitario?.trim() ? { registroSanitario: row.registroSanitario.trim() } : {}),
-          requiereReceta: normalizeBoolean(row.requiereReceta),
-          esControlado: normalizeBoolean(row.esControlado),
-          precioVenta: price,
-          costoReferencia: refCost,
-          ...(row.observaciones?.trim() ? { observaciones: row.observaciones.trim() } : {}),
-        }
+          const unitsPerBlister = row.unidadesPorBlister ? Number(row.unidadesPorBlister) : null
+          const blistersPerBox = row.blistersPorCaja ? Number(row.blistersPorCaja) : null
+          const blisterPrice = row.precioVentaBlister ? Number(row.precioVentaBlister) : null
 
-        const existing = await productsService.list(accessToken, {
-          search: sku,
-          page: 1,
-          pageSize: 10,
-        })
-        const existingProduct =
-          existing.items.find((item) => item.sku.toLowerCase() === sku.toLowerCase()) ?? null
+          if (mode === 'BLISTER') {
+            if (!unitsPerBlister || !Number.isInteger(unitsPerBlister) || unitsPerBlister <= 1) {
+              pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
+              continue
+            }
+            if (!blistersPerBox || !Number.isInteger(blistersPerBox) || blistersPerBox <= 0) {
+              pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
+              continue
+            }
+            if (
+              blisterPrice !== null &&
+              (!Number.isFinite(blisterPrice) || blisterPrice < 0)
+            ) {
+              pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
+              continue
+            }
+          }
 
-        if (existingProduct) {
-          await productsService.update(accessToken, existingProduct.id, payload)
-          updated += 1
-        } else {
+          const payload: CreateProductPayload = {
+            categoriaId: category.id,
+            laboratorioId: labId,
+            presentacionId: presentationId,
+            unidadMedidaId: unit.id,
+            modoEmpaque: mode,
+            ...(mode === 'BLISTER'
+              ? {
+                  unidadesPorBlister: Math.floor(unitsPerBlister ?? 0),
+                  blistersPorCaja: Math.floor(blistersPerBox ?? 0),
+                  ...(blisterPrice !== null ? { precioVentaBlister: blisterPrice } : {}),
+                }
+              : {}),
+            sku,
+            ...(row.codigoBarras?.trim() ? { codigoBarras: row.codigoBarras.trim() } : {}),
+            nombre: productName,
+            ...(row.descripcion?.trim() ? { descripcion: row.descripcion.trim() } : {}),
+            ...(row.concentracion?.trim() ? { concentracion: row.concentracion.trim() } : {}),
+            ...(row.registroSanitario?.trim()
+              ? { registroSanitario: row.registroSanitario.trim() }
+              : {}),
+            requiereReceta: normalizeBoolean(row.requiereReceta),
+            esControlado: normalizeBoolean(row.esControlado),
+            precioVenta: price,
+            costoReferencia: refCost,
+            ...(row.observaciones?.trim() ? { observaciones: row.observaciones.trim() } : {}),
+          }
+
           await productsService.create(accessToken, payload)
           created += 1
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) {
+            throw err
+          }
+
+          if (err instanceof ApiError && err.status === 409) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.SKU_ALREADY_EXISTS)
+            continue
+          }
+
+          const message = err instanceof Error ? err.message : IMPLEMENTATION_MESSAGES.IMPORT_FAILED
+          pushError(row.row, message)
         }
       }
 
-      setCatalogImportSummary({ created, updated, skipped })
-      toast.success(`Catálogo importado: ${created} creados, ${updated} actualizados.`)
+      setCatalogImportSummary({ created, skipped, errors, errorDetails })
+      const summaryText = `${created} creados · ${errors} con error · ${skipped} omitidos`
+      if (errors === 0) {
+        toast.success(`${IMPLEMENTATION_MESSAGES.IMPORT_SUCCESS}\n\n${summaryText}`)
+      } else if (created > 0) {
+        toast.success(`${IMPLEMENTATION_MESSAGES.IMPORT_PARTIAL_SUCCESS}\n\n${summaryText}`)
+      } else {
+        toast.error(`${IMPLEMENTATION_MESSAGES.IMPORT_FAILED}\n\n${summaryText}`)
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         await handleUnauthorized()
         return
       }
-      toast.error(err instanceof Error ? err.message : 'No se pudo importar el catálogo.')
+      const detail = err instanceof Error ? err.message : 'No se pudo importar el catálogo.'
+      if (detail.startsWith(IMPLEMENTATION_MESSAGES.INVALID_FILE)) {
+        toast.error(detail)
+      } else {
+        toast.error(formatImplementationMessage('INVALID_FILE', detail))
+      }
     } finally {
       setIsCatalogImporting(false)
       if (catalogCsvInputRef.current) {
@@ -1600,9 +1668,16 @@ export function ConfiguracionPage() {
                         <div className="rounded-xl border bg-muted/30 p-4">
                           <p className="text-sm font-medium text-foreground">Resumen</p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {catalogImportSummary.created} creados · {catalogImportSummary.updated} actualizados ·{' '}
+                            {catalogImportSummary.created} creados · {catalogImportSummary.errors} con error ·{' '}
                             {catalogImportSummary.skipped} omitidos
                           </p>
+                          {catalogImportSummary.errorDetails.length > 0 ? (
+                            <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                              {catalogImportSummary.errorDetails.map((line) => (
+                                <p key={line}>{line}</p>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </CardContent>

@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +54,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
+import { paths } from '@/routes/paths'
 import type {
   CashDrawerStatus,
   CashMovementType,
@@ -139,6 +141,7 @@ type CashCountFormValues = z.infer<typeof cashCountSchema>
 
 export function CajaPage() {
   const { logout, session } = useAuth()
+  const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -256,6 +259,10 @@ export function CajaPage() {
       setOpenDrawerDialogOpen(false)
       openDrawerForm.reset()
       await loadDashboard()
+
+      if (window.sessionStorage.getItem('pos_pending_purchase_payment')) {
+        navigate(paths.compras)
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         await handleUnauthorized()

@@ -2,6 +2,7 @@ import { EstadoProducto, ModoEmpaqueProducto, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { IMPLEMENTATION_MESSAGES } from '../../shared/implementation/messages.js'
 
 const productInclude = {
   categoria: {
@@ -101,7 +102,6 @@ type CreateProductPayload = {
   precioVentaBlister?: number
   principioActivoId?: string
   sku: string
-  codigoInterno?: string
   codigoBarras?: string
   nombre: string
   descripcion?: string
@@ -598,7 +598,7 @@ export async function getProductOptions(request: FastifyRequest) {
 
 type MasterCategoryPayload = {
   parentId?: string | null
-  codigo: string
+  codigo?: string
   nombre: string
   descripcion?: string
   color?: string
@@ -620,19 +620,172 @@ type MasterPresentationPayload = {
 }
 
 type MasterUnitPayload = {
-  codigo: string
+  codigo?: string
   nombre: string
   simbolo: string
   descripcion?: string
   activo?: boolean
 }
 
-function normalizeCode(value: string) {
-  return value.trim().toUpperCase()
+function normalizeCode(value: string, maxLength = 30) {
+  const normalized = value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+  return normalized.slice(0, maxLength) || 'MASTER'
 }
 
 function normalizeName(value: string) {
   return value.trim()
+}
+
+function normalizeUnitSymbol(value: string, maxLength = 20) {
+  const normalized = value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+
+  return normalized.slice(0, maxLength)
+}
+
+async function resolveUniqueCodeForCategory(
+  companyId: string,
+  baseCode: string,
+  excludeId?: string,
+) {
+  const normalized = normalizeCode(baseCode, 30)
+
+  for (let attempt = 0; attempt < 99; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${attempt + 1}`
+    const trimmed = normalized.slice(0, Math.max(1, 30 - suffix.length))
+    const candidate = `${trimmed}${suffix}`.slice(0, 30)
+
+    const exists = await prisma.categoria.findFirst({
+      where: {
+        deletedAt: null,
+        empresaId: companyId,
+        codigo: candidate,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    })
+
+    if (!exists) return candidate
+  }
+
+  return normalized.slice(0, 30)
+}
+
+async function resolveUniqueCodeForLaboratory(
+  companyId: string,
+  baseCode: string,
+  excludeId?: string,
+) {
+  const normalized = normalizeCode(baseCode, 30)
+
+  for (let attempt = 0; attempt < 99; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${attempt + 1}`
+    const trimmed = normalized.slice(0, Math.max(1, 30 - suffix.length))
+    const candidate = `${trimmed}${suffix}`.slice(0, 30)
+
+    const exists = await prisma.laboratorio.findFirst({
+      where: {
+        deletedAt: null,
+        empresaId: companyId,
+        codigo: candidate,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    })
+
+    if (!exists) return candidate
+  }
+
+  return normalized.slice(0, 30)
+}
+
+async function resolveUniqueCodeForPresentation(
+  companyId: string,
+  baseCode: string,
+  excludeId?: string,
+) {
+  const normalized = normalizeCode(baseCode, 30)
+
+  for (let attempt = 0; attempt < 99; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${attempt + 1}`
+    const trimmed = normalized.slice(0, Math.max(1, 30 - suffix.length))
+    const candidate = `${trimmed}${suffix}`.slice(0, 30)
+
+    const exists = await prisma.presentacion.findFirst({
+      where: {
+        deletedAt: null,
+        empresaId: companyId,
+        codigo: candidate,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    })
+
+    if (!exists) return candidate
+  }
+
+  return normalized.slice(0, 30)
+}
+
+async function resolveUniqueCodeForUnit(companyId: string, baseCode: string, excludeId?: string) {
+  const normalized = normalizeCode(baseCode, 20)
+
+  for (let attempt = 0; attempt < 99; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${attempt + 1}`
+    const trimmed = normalized.slice(0, Math.max(1, 20 - suffix.length))
+    const candidate = `${trimmed}${suffix}`.slice(0, 20)
+
+    const exists = await prisma.unidadMedida.findFirst({
+      where: {
+        deletedAt: null,
+        empresaId: companyId,
+        codigo: candidate,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    })
+
+    if (!exists) return candidate
+  }
+
+  return normalized.slice(0, 20)
+}
+
+async function resolveUniqueInternalProductCode(companyId: string) {
+  for (let attempt = 0; attempt < 99; attempt += 1) {
+    const stamp = Date.now().toString(36).toUpperCase()
+    const entropy = Math.floor(Math.random() * 1_000_000)
+      .toString(36)
+      .toUpperCase()
+      .padStart(4, '0')
+    const suffix = attempt === 0 ? '' : `-${attempt + 1}`
+    const candidate = `INT-${stamp}-${entropy}${suffix}`.slice(0, 50)
+
+    const exists = await prisma.producto.findFirst({
+      where: {
+        deletedAt: null,
+        empresaId: companyId,
+        codigoInterno: candidate,
+      },
+      select: { id: true },
+    })
+
+    if (!exists) return candidate
+  }
+
+  return `INT-${Date.now().toString(36).toUpperCase()}`.slice(0, 50)
 }
 
 export async function listMasterCategories(request: FastifyRequest) {
@@ -700,11 +853,12 @@ export async function createMasterCategory(
   }
 
   try {
+    const codigo = await resolveUniqueCodeForCategory(companyId, payload.nombre)
     const created = await prisma.categoria.create({
       data: {
         empresaId: companyId,
         parentId: payload.parentId ?? null,
-        codigo: normalizeCode(payload.codigo),
+        codigo,
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
         color: toOptionalString(payload.color),
@@ -753,6 +907,7 @@ export async function updateMasterCategory(
   }
 
   try {
+    const codigo = await resolveUniqueCodeForCategory(companyId, payload.nombre, categoryId)
     await prisma.categoria.update({
       where: {
         id: categoryId,
@@ -761,7 +916,7 @@ export async function updateMasterCategory(
       },
       data: {
         parentId: payload.parentId ?? null,
-        codigo: normalizeCode(payload.codigo),
+        codigo,
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
         color: toOptionalString(payload.color),
@@ -859,6 +1014,7 @@ export async function listMasterLaboratories(request: FastifyRequest) {
   return {
     rows: laboratories.map((laboratory) => ({
       id: laboratory.id,
+      codigo: laboratory.codigo,
       nombre: laboratory.nombre,
       pais: laboratory.pais,
       descripcion: laboratory.descripcion,
@@ -877,9 +1033,11 @@ export async function createMasterLaboratory(
   const { userId, companyId } = await getAuthContext(request)
 
   try {
+    const codigo = await resolveUniqueCodeForLaboratory(companyId, payload.nombre)
     const created = await prisma.laboratorio.create({
       data: {
         empresaId: companyId,
+        codigo,
         nombre: normalizeName(payload.nombre),
         pais: toOptionalString(payload.pais),
         descripcion: toOptionalString(payload.descripcion),
@@ -895,7 +1053,7 @@ export async function createMasterLaboratory(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw createHttpError(409, 'Ya existe un laboratorio con ese nombre.')
+      throw createHttpError(409, 'Ya existe un laboratorio con ese código o nombre.')
     }
     throw error
   }
@@ -909,6 +1067,7 @@ export async function updateMasterLaboratory(
   const { userId, companyId } = await getAuthContext(request)
 
   try {
+    const codigo = await resolveUniqueCodeForLaboratory(companyId, payload.nombre, laboratoryId)
     await prisma.laboratorio.update({
       where: {
         id: laboratoryId,
@@ -916,6 +1075,7 @@ export async function updateMasterLaboratory(
         empresaId: companyId,
       },
       data: {
+        codigo,
         nombre: normalizeName(payload.nombre),
         pais: toOptionalString(payload.pais),
         descripcion: toOptionalString(payload.descripcion),
@@ -930,7 +1090,7 @@ export async function updateMasterLaboratory(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw createHttpError(409, 'Ya existe un laboratorio con ese nombre.')
+      throw createHttpError(409, 'Ya existe un laboratorio con ese código o nombre.')
     }
     throw error
   }
@@ -997,6 +1157,7 @@ export async function listMasterPresentations(request: FastifyRequest) {
   return {
     rows: presentations.map((presentation) => ({
       id: presentation.id,
+      codigo: presentation.codigo,
       nombre: presentation.nombre,
       descripcion: presentation.descripcion,
       activo: presentation.activo,
@@ -1014,9 +1175,11 @@ export async function createMasterPresentation(
   const { userId, companyId } = await getAuthContext(request)
 
   try {
+    const codigo = await resolveUniqueCodeForPresentation(companyId, payload.nombre)
     const created = await prisma.presentacion.create({
       data: {
         empresaId: companyId,
+        codigo,
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
         activo: payload.activo ?? true,
@@ -1031,7 +1194,7 @@ export async function createMasterPresentation(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw createHttpError(409, 'Ya existe una presentación con ese nombre.')
+      throw createHttpError(409, 'Ya existe una presentación con ese código o nombre.')
     }
     throw error
   }
@@ -1045,6 +1208,7 @@ export async function updateMasterPresentation(
   const { userId, companyId } = await getAuthContext(request)
 
   try {
+    const codigo = await resolveUniqueCodeForPresentation(companyId, payload.nombre, presentationId)
     await prisma.presentacion.update({
       where: {
         id: presentationId,
@@ -1052,6 +1216,7 @@ export async function updateMasterPresentation(
         empresaId: companyId,
       },
       data: {
+        codigo,
         nombre: normalizeName(payload.nombre),
         descripcion: toOptionalString(payload.descripcion),
         activo: payload.activo ?? true,
@@ -1065,7 +1230,7 @@ export async function updateMasterPresentation(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw createHttpError(409, 'Ya existe una presentación con ese nombre.')
+      throw createHttpError(409, 'Ya existe una presentación con ese código o nombre.')
     }
     throw error
   }
@@ -1151,12 +1316,17 @@ export async function createMasterUnit(
   const { userId, companyId } = await getAuthContext(request)
 
   try {
+    const codigo = await resolveUniqueCodeForUnit(companyId, payload.codigo ?? payload.nombre)
+    const simbolo = normalizeUnitSymbol(payload.simbolo, 20)
+    if (!simbolo) {
+      throw createHttpError(400, 'El símbolo de la unidad es obligatorio.')
+    }
     const created = await prisma.unidadMedida.create({
       data: {
         empresaId: companyId,
-        codigo: normalizeCode(payload.codigo),
+        codigo,
         nombre: normalizeName(payload.nombre),
-        simbolo: normalizeName(payload.simbolo),
+        simbolo,
         descripcion: toOptionalString(payload.descripcion),
         activo: payload.activo ?? true,
         createdById: userId,
@@ -1184,6 +1354,11 @@ export async function updateMasterUnit(
   const { userId, companyId } = await getAuthContext(request)
 
   try {
+    const codigo = await resolveUniqueCodeForUnit(companyId, payload.codigo ?? payload.nombre, unitId)
+    const simbolo = normalizeUnitSymbol(payload.simbolo, 20)
+    if (!simbolo) {
+      throw createHttpError(400, 'El símbolo de la unidad es obligatorio.')
+    }
     await prisma.unidadMedida.update({
       where: {
         id: unitId,
@@ -1191,9 +1366,9 @@ export async function updateMasterUnit(
         empresaId: companyId,
       },
       data: {
-        codigo: normalizeCode(payload.codigo),
+        codigo,
         nombre: normalizeName(payload.nombre),
-        simbolo: normalizeName(payload.simbolo),
+        simbolo,
         descripcion: toOptionalString(payload.descripcion),
         activo: payload.activo ?? true,
         updatedById: userId,
@@ -1265,6 +1440,14 @@ export async function createProduct(
   const marginReference =
     costPrice > 0 ? (salePrice - costPrice) / costPrice : null
 
+  if (!Number.isFinite(salePrice) || salePrice < 0) {
+    throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
+  }
+
+  if (!Number.isFinite(costPrice) || costPrice < 0) {
+    throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_COST)
+  }
+
   if (packagingMode === ModoEmpaqueProducto.BLISTER) {
     const nextUnitsPerBlister = Number(payload.unidadesPorBlister)
     const nextBlistersPerBox = Number(payload.blistersPorCaja)
@@ -1274,10 +1457,7 @@ export async function createProduct(
       !Number.isInteger(nextUnitsPerBlister) ||
       nextUnitsPerBlister <= 1
     ) {
-      throw createHttpError(
-        400,
-        'Las unidades por blíster deben ser un entero mayor a 1.',
-      )
+      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
     }
 
     if (
@@ -1285,14 +1465,11 @@ export async function createProduct(
       !Number.isInteger(nextBlistersPerBox) ||
       nextBlistersPerBox <= 0
     ) {
-      throw createHttpError(
-        400,
-        'Los blísteres por caja deben ser un entero mayor a 0.',
-      )
+      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
     }
 
     if (blisterPrice !== null && (!Number.isFinite(blisterPrice) || blisterPrice < 0)) {
-      throw createHttpError(400, 'El precio de venta por blíster no es válido.')
+      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
     }
 
     unitsPerBlister = nextUnitsPerBlister
@@ -1300,6 +1477,7 @@ export async function createProduct(
   }
 
   try {
+    const codigoInterno = await resolveUniqueInternalProductCode(companyId)
     const product = await prisma.producto.create({
       data: {
         empresaId: companyId,
@@ -1311,7 +1489,7 @@ export async function createProduct(
         unidadesPorBlister: unitsPerBlister,
         blistersPorCaja: blistersPerBox,
         sku: payload.sku.trim().toUpperCase(),
-        codigoInterno: toOptionalString(payload.codigoInterno),
+        codigoInterno,
         codigoBarras: toOptionalString(payload.codigoBarras),
         nombre: normalizedName,
         descripcion: toOptionalString(payload.descripcion),
@@ -1352,10 +1530,7 @@ export async function createProduct(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw createHttpError(
-        409,
-        'Ya existe un producto con el mismo SKU, código interno o código de barras.',
-      )
+      throw createHttpError(409, IMPLEMENTATION_MESSAGES.SKU_ALREADY_EXISTS)
     }
 
     throw error
@@ -1398,6 +1573,14 @@ export async function updateProduct(
   const marginReference =
     costPrice > 0 ? (salePrice - costPrice) / costPrice : null
 
+  if (!Number.isFinite(salePrice) || salePrice < 0) {
+    throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
+  }
+
+  if (!Number.isFinite(costPrice) || costPrice < 0) {
+    throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_COST)
+  }
+
   if (packagingMode === ModoEmpaqueProducto.BLISTER) {
     const nextUnitsPerBlister = Number(payload.unidadesPorBlister)
     const nextBlistersPerBox = Number(payload.blistersPorCaja)
@@ -1407,10 +1590,7 @@ export async function updateProduct(
       !Number.isInteger(nextUnitsPerBlister) ||
       nextUnitsPerBlister <= 1
     ) {
-      throw createHttpError(
-        400,
-        'Las unidades por blíster deben ser un entero mayor a 1.',
-      )
+      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
     }
 
     if (
@@ -1418,14 +1598,11 @@ export async function updateProduct(
       !Number.isInteger(nextBlistersPerBox) ||
       nextBlistersPerBox <= 0
     ) {
-      throw createHttpError(
-        400,
-        'Los blísteres por caja deben ser un entero mayor a 0.',
-      )
+      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
     }
 
     if (blisterPrice !== null && (!Number.isFinite(blisterPrice) || blisterPrice < 0)) {
-      throw createHttpError(400, 'El precio de venta por blíster no es válido.')
+      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
     }
 
     unitsPerBlister = nextUnitsPerBlister
@@ -1448,7 +1625,6 @@ export async function updateProduct(
         unidadesPorBlister: unitsPerBlister,
         blistersPorCaja: blistersPerBox,
         sku: payload.sku.trim().toUpperCase(),
-        codigoInterno: toOptionalString(payload.codigoInterno),
         codigoBarras: toOptionalString(payload.codigoBarras),
         nombre: normalizedName,
         descripcion: toOptionalString(payload.descripcion),
@@ -1476,10 +1652,7 @@ export async function updateProduct(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      throw createHttpError(
-        409,
-        'Ya existe un producto con el mismo SKU, código interno o código de barras.',
-      )
+      throw createHttpError(409, IMPLEMENTATION_MESSAGES.SKU_ALREADY_EXISTS)
     }
 
     throw error

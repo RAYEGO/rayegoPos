@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
+import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import {
   ChevronDown,
@@ -37,6 +38,14 @@ import {
 } from '@/components/ui/select'
 import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Table,
   TableBody,
   TableCell,
@@ -48,16 +57,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
+import { cashierService } from '@/services/cashierService'
 import { purchasesService } from '@/services/purchasesService'
+import { paths } from '@/routes/paths'
 import type {
+  CreatePurchaseReceptionPayload,
   CreatePurchaseOrderPayload,
-  PurchaseOrderStatus,
+  PurchaseFinancialStatus,
+  PurchaseLogisticsStatus,
   PurchaseReceiptStatus,
   PurchasesDashboardResponse,
   RegisterPurchasePaymentPayload,
   ReceivePurchaseItemPayload,
   ReturnPurchaseItemPayload,
 } from '@/types/purchases'
+import type { CreateCashMovementPayload } from '@/types/cashier'
 import { toast } from 'sonner'
 
 const createPurchaseSchema = z.object({
@@ -114,6 +128,15 @@ const registerPaymentSchema = z.object({
 })
 
 type RegisterPaymentFormValues = z.infer<typeof registerPaymentSchema>
+
+const registerCashIncomeSchema = z.object({
+  amount: z.number().positive('El monto debe ser mayor a 0.'),
+  concept: z.string().min(1, 'Selecciona un motivo de ingreso.').max(120),
+  reference: z.string().max(120).optional(),
+  observations: z.string().max(255).optional(),
+})
+
+type RegisterCashIncomeFormValues = z.infer<typeof registerCashIncomeSchema>
 
 type OrderReceiptDraft = {
   detailId: string
@@ -175,6 +198,13 @@ const defaultPaymentFormValues: RegisterPaymentFormValues = {
   monto: 0,
   referenciaExterna: '',
   observaciones: '',
+}
+
+const defaultCashIncomeFormValues: RegisterCashIncomeFormValues = {
+  amount: 0,
+  concept: 'Fondo adicional',
+  reference: '',
+  observations: '',
 }
 
 function formatCurrency(value: number) {
@@ -239,11 +269,31 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-xs text-destructive">{message}</p>
 }
 
-function getOrderStatusVariant(status: PurchaseOrderStatus) {
-  if (status === 'PAGADA') return 'success'
-  if (status === 'REGISTRADA' || status === 'PARCIAL') return 'info'
-  if (status === 'BORRADOR') return 'warning'
+function getLogisticsStatusVariant(status: PurchaseLogisticsStatus) {
+  if (status === 'RECEPCION_COMPLETA') return 'success'
+  if (status === 'RECEPCION_PARCIAL' || status === 'EN_RECEPCION') return 'info'
+  if (status === 'REGISTRADA') return 'warning'
   return 'destructive'
+}
+
+function getFinancialStatusVariant(status: PurchaseFinancialStatus) {
+  if (status === 'PAGADA') return 'success'
+  if (status === 'PAGO_PARCIAL') return 'info'
+  return 'warning'
+}
+
+function formatLogisticsStatus(status: PurchaseLogisticsStatus) {
+  if (status === 'REGISTRADA') return 'Registrada'
+  if (status === 'EN_RECEPCION') return 'En recepción'
+  if (status === 'RECEPCION_PARCIAL') return 'Recepción parcial'
+  if (status === 'RECEPCION_COMPLETA') return 'Recepción completa'
+  return 'Cancelada'
+}
+
+function formatFinancialStatus(status: PurchaseFinancialStatus) {
+  if (status === 'SIN_PAGAR') return 'Sin pagar'
+  if (status === 'PAGO_PARCIAL') return 'Pago parcial'
+  return 'Pagada'
 }
 
 function getReceiptStatusVariant(status: PurchaseReceiptStatus) {
@@ -254,10 +304,13 @@ function getReceiptStatusVariant(status: PurchaseReceiptStatus) {
 
 export function ComprasPage() {
   const { logout, session } = useAuth()
+  const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
   const activeBranchName = session?.user.branchName ?? ''
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'TODAS' | PurchaseOrderStatus>('TODAS')
+  const [logisticsStatusFilter, setLogisticsStatusFilter] = useState<
+    'TODAS' | PurchaseLogisticsStatus
+  >('TODAS')
   const [branchFilter, setBranchFilter] = useState('TODAS')
   const [dashboard, setDashboard] = useState<PurchasesDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -282,6 +335,16 @@ export function ComprasPage() {
   const [isOrderSummaryDialogOpen, setIsOrderSummaryDialogOpen] = useState(false)
   const [selectedSummaryOrderId, setSelectedSummaryOrderId] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(false)
+  const [isCashShortageDialogOpen, setIsCashShortageDialogOpen] = useState(false)
+  const [cashShortage, setCashShortage] = useState<{
+    openingId: string
+    available: number
+    required: number
+    missing: number
+  } | null>(null)
+  const [isCashIncomeDialogOpen, setIsCashIncomeDialogOpen] = useState(false)
+  const [isRegisteringCashIncome, setIsRegisteringCashIncome] = useState(false)
+  const [isMissingCashDrawerDialogOpen, setIsMissingCashDrawerDialogOpen] = useState(false)
 
   const form = useForm<CreatePurchaseFormValues>({
     resolver: zodResolver(createPurchaseSchema),
@@ -301,6 +364,11 @@ export function ComprasPage() {
   const paymentForm = useForm<RegisterPaymentFormValues>({
     resolver: zodResolver(registerPaymentSchema),
     defaultValues: defaultPaymentFormValues,
+  })
+
+  const cashIncomeForm = useForm<RegisterCashIncomeFormValues>({
+    resolver: zodResolver(registerCashIncomeSchema),
+    defaultValues: defaultCashIncomeFormValues,
   })
 
   const { fields, append, remove } = useFieldArray({
@@ -346,7 +414,7 @@ export function ComprasPage() {
     try {
       const response = await purchasesService.getDashboard(accessToken, {
         search,
-        status: statusFilter === 'TODAS' ? undefined : statusFilter,
+        logisticsStatus: logisticsStatusFilter === 'TODAS' ? undefined : logisticsStatusFilter,
         branchId: branchFilter === 'TODAS' ? undefined : branchFilter,
       })
 
@@ -356,15 +424,45 @@ export function ComprasPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, branchFilter, search, statusFilter])
+  }, [accessToken, branchFilter, search, logisticsStatusFilter])
 
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
 
   useEffect(() => {
+    if (!dashboard) {
+      return
+    }
+
+    const raw = window.sessionStorage.getItem('pos_pending_purchase_payment')
+    if (!raw) {
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as {
+        orderId: string
+        values: RegisterPaymentFormValues
+      }
+      const order = dashboard.orders.find((entry) => entry.id === parsed.orderId)
+      if (!order) {
+        window.sessionStorage.removeItem('pos_pending_purchase_payment')
+        return
+      }
+
+      setSelectedPaymentOrderId(order.id)
+      paymentForm.reset(parsed.values)
+      setIsPaymentDialogOpen(true)
+      window.sessionStorage.removeItem('pos_pending_purchase_payment')
+    } catch {
+      window.sessionStorage.removeItem('pos_pending_purchase_payment')
+    }
+  }, [dashboard, paymentForm])
+
+  useEffect(() => {
     setOrdersPage(1)
-  }, [branchFilter, search, statusFilter])
+  }, [branchFilter, search, logisticsStatusFilter])
 
   const purchaseMetrics = {
     totalOrders: dashboard?.summary?.totalOrders ?? 0,
@@ -675,6 +773,47 @@ export function ComprasPage() {
       return
     }
 
+    const requiredAmount = Number(values.monto)
+
+    try {
+      const activeDrawer = await cashierService.getActiveDrawer(accessToken)
+
+      if (activeDrawer.expectedAmount + 0.0001 < requiredAmount) {
+        const available = activeDrawer.expectedAmount
+        const missing = Number(Math.max(0, requiredAmount - available).toFixed(2))
+
+        setCashShortage({
+          openingId: activeDrawer.openingId,
+          available,
+          required: requiredAmount,
+          missing,
+        })
+        setIsCashShortageDialogOpen(true)
+        cashIncomeForm.reset({
+          ...defaultCashIncomeFormValues,
+          amount: missing,
+          reference: selectedPaymentOrder.code,
+        })
+        return
+      }
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error(
+          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar pagos.',
+        )
+        await logout()
+        return
+      }
+
+      if (nextError instanceof ApiError && nextError.status === 404) {
+        setIsMissingCashDrawerDialogOpen(true)
+        return
+      }
+
+      toast.error(getApiErrorMessage(nextError))
+      return
+    }
+
     const payload: RegisterPurchasePaymentPayload = {
       compraId: selectedPaymentOrder.id,
       formaPagoId: values.formaPagoId,
@@ -692,6 +831,8 @@ export function ComprasPage() {
       setIsPaymentDialogOpen(false)
       setSelectedPaymentOrderId(null)
       paymentForm.reset(defaultPaymentFormValues)
+      setIsCashShortageDialogOpen(false)
+      setCashShortage(null)
       await loadDashboard()
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
@@ -702,9 +843,77 @@ export function ComprasPage() {
         return
       }
 
+      if (nextError instanceof ApiError && nextError.status === 409) {
+        try {
+          const activeDrawer = await cashierService.getActiveDrawer(accessToken)
+          const available = activeDrawer.expectedAmount
+          const missing = Number(Math.max(0, requiredAmount - available).toFixed(2))
+
+          setCashShortage({
+            openingId: activeDrawer.openingId,
+            available,
+            required: requiredAmount,
+            missing,
+          })
+          setIsCashShortageDialogOpen(true)
+          cashIncomeForm.reset({
+            ...defaultCashIncomeFormValues,
+            amount: missing,
+            reference: selectedPaymentOrder.code,
+          })
+          return
+        } catch (drawerError) {
+          if (drawerError instanceof ApiError && drawerError.status === 404) {
+            setIsMissingCashDrawerDialogOpen(true)
+            return
+          }
+
+          toast.error(getApiErrorMessage(drawerError))
+          return
+        }
+      }
+
       toast.error(getApiErrorMessage(nextError))
     } finally {
       setIsPaying(false)
+    }
+  }
+
+  async function handleRegisterCashIncome(values: RegisterCashIncomeFormValues) {
+    if (!accessToken || !cashShortage) {
+      toast.error('No hay una caja activa disponible para registrar el ingreso.')
+      return
+    }
+
+    const payload: CreateCashMovementPayload = {
+      openingId: cashShortage.openingId,
+      type: 'INGRESO',
+      amount: Number(values.amount),
+      concept: values.concept,
+      reference: values.reference?.trim() || undefined,
+      observations: values.observations?.trim() || undefined,
+    }
+
+    setIsRegisteringCashIncome(true)
+
+    try {
+      await cashierService.createMovement(accessToken, payload)
+      toast.success('Ingreso registrado. Puedes completar el pago al proveedor.')
+      setIsCashIncomeDialogOpen(false)
+      cashIncomeForm.reset(defaultCashIncomeFormValues)
+      await handleRegisterPayment(paymentForm.getValues())
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error(
+          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar ingresos.',
+        )
+        await logout()
+        return
+      }
+
+      toast.error(getApiErrorMessage(nextError))
+    } finally {
+      setIsRegisteringCashIncome(false)
     }
   }
 
@@ -828,22 +1037,24 @@ export function ComprasPage() {
 
     try {
       const closedOrderId = selectedOrder.id
+      const items: ReceivePurchaseItemPayload[] = linesToReceive.map((line) => ({
+        detalleCompraId: line.detailId,
+        numeroLote: line.numeroLote.trim(),
+        fechaFabricacion: line.fechaFabricacion.trim() || undefined,
+        fechaVencimiento: line.fechaVencimiento,
+        cantidadRecibida: Number(line.cantidadRecibida),
+        stockReservado: Number(line.stockReservado),
+        stockBloqueado: Number(line.stockBloqueado),
+        almacen: line.almacen.trim() || undefined,
+        observaciones: line.observaciones.trim() || undefined,
+      }))
 
-      for (const line of linesToReceive) {
-        const payload: ReceivePurchaseItemPayload = {
-          detalleCompraId: line.detailId,
-          numeroLote: line.numeroLote.trim(),
-          fechaFabricacion: line.fechaFabricacion.trim() || undefined,
-          fechaVencimiento: line.fechaVencimiento,
-          cantidadRecibida: Number(line.cantidadRecibida),
-          stockReservado: Number(line.stockReservado),
-          stockBloqueado: Number(line.stockBloqueado),
-          almacen: line.almacen.trim() || undefined,
-          observaciones: line.observaciones.trim() || undefined,
-        }
-
-        await purchasesService.receiveItem(accessToken, payload)
+      const payload: CreatePurchaseReceptionPayload = {
+        compraId: closedOrderId,
+        items,
       }
+
+      await purchasesService.createReception(accessToken, payload)
 
       await loadDashboard()
 
@@ -957,21 +1168,21 @@ export function ComprasPage() {
                 </div>
 
                 <Select
-                  value={statusFilter}
+                  value={logisticsStatusFilter}
                   onValueChange={(value) =>
-                    setStatusFilter(value as 'TODAS' | PurchaseOrderStatus)
+                    setLogisticsStatusFilter(value as 'TODAS' | PurchaseLogisticsStatus)
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Estado" />
+                    <SelectValue placeholder="Estado logístico" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="TODAS">Todos los estados</SelectItem>
-                    <SelectItem value="BORRADOR">Borrador</SelectItem>
                     <SelectItem value="REGISTRADA">Registrada</SelectItem>
-                    <SelectItem value="PARCIAL">Parcial</SelectItem>
-                    <SelectItem value="PAGADA">Pagada</SelectItem>
-                    <SelectItem value="ANULADA">Anulada</SelectItem>
+                    <SelectItem value="EN_RECEPCION">En recepción</SelectItem>
+                    <SelectItem value="RECEPCION_PARCIAL">Recepción parcial</SelectItem>
+                    <SelectItem value="RECEPCION_COMPLETA">Recepción completa</SelectItem>
+                    <SelectItem value="CANCELADA">Cancelada</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -1017,8 +1228,8 @@ export function ComprasPage() {
                         <TableHead>Sucursal</TableHead>
                         <TableHead>Creación</TableHead>
                         <TableHead>Entrega esperada</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead>Estado</TableHead>
+                        <TableHead>Totales</TableHead>
+                        <TableHead>Estados</TableHead>
                         <TableHead className="text-right">Acción</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1053,28 +1264,34 @@ export function ComprasPage() {
                           <TableCell>
                             <div className="space-y-1">
                               <p className="font-medium text-foreground">
-                                {formatCurrency(order.totalAmount)}
+                                {formatCurrency(order.totalAmount)}{' '}
+                                <span className="text-small font-normal text-muted-foreground">
+                                  ordenado
+                                </span>
+                              </p>
+                              <p className="text-small text-muted-foreground">
+                                recepcionado {formatCurrency(order.receivedAmount)}
+                              </p>
+                              <p className="text-small text-emerald-700">
+                                pagado {formatCurrency(order.paidAmount)}
+                              </p>
+                              <p className="text-small text-muted-foreground">
+                                saldo pendiente {formatCurrency(order.adjustedPendingAmount)}
                               </p>
                               {order.returnedAmount > 0 ? (
                                 <p className="text-small text-amber-700">
                                   devuelto {formatCurrency(order.returnedAmount)}
                                 </p>
                               ) : null}
-                              <p className="text-small text-muted-foreground">
-                                neto {formatCurrency(order.netAmount)}
-                              </p>
-                              <p className="text-small text-emerald-700">
-                                pagado {formatCurrency(order.paidAmount)}
-                              </p>
-                              <p className="text-small text-muted-foreground">
-                                saldo ajustado {formatCurrency(order.adjustedPendingAmount)}
-                              </p>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
-                              <Badge variant={getOrderStatusVariant(order.status)}>
-                                {order.status}
+                              <Badge variant={getLogisticsStatusVariant(order.logisticsStatus)}>
+                                {formatLogisticsStatus(order.logisticsStatus)}
+                              </Badge>
+                              <Badge variant={getFinancialStatusVariant(order.financialStatus)}>
+                                {formatFinancialStatus(order.financialStatus)}
                               </Badge>
                               {receiptGroupsByOrder[order.id]?.pendingLines ? (
                                 <p className="text-small text-muted-foreground">
@@ -1086,7 +1303,8 @@ export function ComprasPage() {
                           <TableCell className="text-right">
                             {receiptGroupsByOrder[order.id]?.pendingLines > 0 &&
                             order.status !== 'BORRADOR' &&
-                            order.status !== 'ANULADA' ? (
+                            order.status !== 'ANULADA' &&
+                            order.logisticsStatus !== 'CANCELADA' ? (
                               <div className="flex justify-end gap-2">
                                 <Button
                                   type="button"
@@ -1133,10 +1351,10 @@ export function ComprasPage() {
                                   variant="outline"
                                   onClick={() => openOrderSummaryDialog(order.id)}
                                 >
-                                  {order.status === 'PAGADA' ? 'Ver cierre' : 'Ver detalle'}
+                                  Ver detalle
                                 </Button>
                                 <span className="self-center text-small text-muted-foreground">
-                                  {order.status === 'PAGADA' ? 'Finalizada' : 'Sin pendientes'}
+                                  Sin pendientes
                                 </span>
                               </div>
                             )}
@@ -2151,7 +2369,7 @@ export function ComprasPage() {
                 <p className="text-sm text-muted-foreground">
                   {selectedOrder && selectedOrderReceiptGroup
                     ? `${selectedOrder.code} · ${selectedOrder.supplierName} · ${selectedOrderReceiptGroup.pendingLines} líneas pendientes`
-                    : 'Completa todas las líneas pendientes y la orden quedará finalizada.'}
+                    : 'Completa las líneas pendientes y registra una nueva recepción.'}
                 </p>
               </div>
               <SidePanelClose asChild>
@@ -2192,13 +2410,28 @@ export function ComprasPage() {
                 </div>
                 <div>
                   <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Estado actual
+                    Estados
                   </p>
-                  <p className="mt-2">
-                    <Badge variant={selectedOrder ? getOrderStatusVariant(selectedOrder.status) : 'outline'}>
-                      {selectedOrder?.status ?? 'N/A'}
+                  <div className="mt-2 flex flex-col gap-1">
+                    <Badge
+                      variant={
+                        selectedOrder
+                          ? getLogisticsStatusVariant(selectedOrder.logisticsStatus)
+                          : 'outline'
+                      }
+                    >
+                      {selectedOrder ? formatLogisticsStatus(selectedOrder.logisticsStatus) : 'N/A'}
                     </Badge>
-                  </p>
+                    <Badge
+                      variant={
+                        selectedOrder
+                          ? getFinancialStatusVariant(selectedOrder.financialStatus)
+                          : 'outline'
+                      }
+                    >
+                      {selectedOrder ? formatFinancialStatus(selectedOrder.financialStatus) : 'N/A'}
+                    </Badge>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -2758,11 +2991,14 @@ export function ComprasPage() {
               <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-5">
                 <div>
                   <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Estado
+                    Estados
                   </p>
-                  <div className="mt-2">
-                    <Badge variant={getOrderStatusVariant(selectedSummaryOrder.status)}>
-                      {selectedSummaryOrder.status}
+                  <div className="mt-2 flex flex-col gap-1">
+                    <Badge variant={getLogisticsStatusVariant(selectedSummaryOrder.logisticsStatus)}>
+                      {formatLogisticsStatus(selectedSummaryOrder.logisticsStatus)}
+                    </Badge>
+                    <Badge variant={getFinancialStatusVariant(selectedSummaryOrder.financialStatus)}>
+                      {formatFinancialStatus(selectedSummaryOrder.financialStatus)}
                     </Badge>
                   </div>
                 </div>
@@ -2986,6 +3222,270 @@ export function ComprasPage() {
           </div>
         </SidePanelContent>
       </SidePanel>
+
+      <Dialog
+        open={isCashShortageDialogOpen}
+        onOpenChange={(open) => {
+          setIsCashShortageDialogOpen(open)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Saldo insuficiente en caja</DialogTitle>
+            <DialogDescription>
+              La caja activa no cuenta con saldo suficiente para registrar este pago.
+            </DialogDescription>
+          </DialogHeader>
+
+          {cashShortage ? (
+            <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">Saldo disponible</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {formatCurrency(cashShortage.available)}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">Monto requerido</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {formatCurrency(cashShortage.required)}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">Faltante</p>
+                <p className="text-sm font-semibold text-destructive">
+                  {formatCurrency(cashShortage.missing)}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => {
+                if (!cashShortage) return
+                setIsCashIncomeDialogOpen(true)
+                setIsCashShortageDialogOpen(false)
+              }}
+              disabled={!cashShortage}
+            >
+              Registrar ingreso de caja
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsCashShortageDialogOpen(false)
+                setCashShortage(null)
+              }}
+            >
+              Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SidePanel
+        open={isCashIncomeDialogOpen}
+        onOpenChange={(open) => {
+          setIsCashIncomeDialogOpen(open)
+          if (!open) {
+            cashIncomeForm.reset(defaultCashIncomeFormValues)
+          }
+        }}
+      >
+        <SidePanelContent className="p-0">
+          <form
+            className="flex h-full flex-col"
+            onSubmit={cashIncomeForm.handleSubmit(handleRegisterCashIncome)}
+          >
+            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">Registrar ingreso de caja</p>
+                <p className="text-sm text-muted-foreground">
+                  Registra el ingreso y vuelve automáticamente al flujo de pago a proveedor.
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
+              </SidePanelClose>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {cashShortage ? (
+                <div className="mb-6 grid gap-3 rounded-2xl border bg-muted/20 p-4 sm:grid-cols-3">
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Saldo disponible
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {formatCurrency(cashShortage.available)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Requerido
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {formatCurrency(cashShortage.required)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Faltante
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-destructive">
+                      {formatCurrency(cashShortage.missing)}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label htmlFor="cash-income-amount" className="text-xs font-medium text-foreground">
+                    Monto
+                  </label>
+                  <Input
+                    id="cash-income-amount"
+                    type="number"
+                    step="0.01"
+                    {...cashIncomeForm.register('amount', {
+                      valueAsNumber: true,
+                    })}
+                  />
+                  <FieldError message={cashIncomeForm.formState.errors.amount?.message} />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-foreground">Motivo</label>
+                  <Controller
+                    control={cashIncomeForm.control}
+                    name="concept"
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona un motivo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Fondo adicional">Fondo adicional</SelectItem>
+                          <SelectItem value="Transferencia de fondos">
+                            Transferencia de fondos
+                          </SelectItem>
+                          <SelectItem value="Otro ingreso">Otro ingreso</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  <FieldError message={cashIncomeForm.formState.errors.concept?.message} />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="cash-income-reference" className="text-xs font-medium text-foreground">
+                    Referencia
+                  </label>
+                  <Input id="cash-income-reference" {...cashIncomeForm.register('reference')} />
+                  <FieldError message={cashIncomeForm.formState.errors.reference?.message} />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="cash-income-observations" className="text-xs font-medium text-foreground">
+                    Observaciones
+                  </label>
+                  <Textarea
+                    id="cash-income-observations"
+                    rows={3}
+                    {...cashIncomeForm.register('observations')}
+                  />
+                  <FieldError message={cashIncomeForm.formState.errors.observations?.message} />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t bg-popover px-6 py-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCashIncomeDialogOpen(false)}
+                  disabled={isRegisteringCashIncome}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isRegisteringCashIncome}>
+                  {isRegisteringCashIncome ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Guardando ingreso
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4" />
+                      Registrar ingreso
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </SidePanelContent>
+      </SidePanel>
+
+      <Dialog
+        open={isMissingCashDrawerDialogOpen}
+        onOpenChange={(open) => setIsMissingCashDrawerDialogOpen(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No hay caja activa</DialogTitle>
+            <DialogDescription>
+              Para registrar un pago a proveedor necesitas una caja abierta en la sesión.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+            <p className="text-sm text-muted-foreground">
+              Abre la Caja y luego se retomará el flujo de pago sin que tengas que buscar nuevamente la orden.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => {
+                if (!selectedPaymentOrder) {
+                  setIsMissingCashDrawerDialogOpen(false)
+                  return
+                }
+
+                window.sessionStorage.setItem(
+                  'pos_pending_purchase_payment',
+                  JSON.stringify({
+                    orderId: selectedPaymentOrder.id,
+                    values: paymentForm.getValues(),
+                  }),
+                )
+                setIsMissingCashDrawerDialogOpen(false)
+                setIsPaymentDialogOpen(false)
+                navigate(paths.caja)
+              }}
+            >
+              Abrir Caja
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsMissingCashDrawerDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

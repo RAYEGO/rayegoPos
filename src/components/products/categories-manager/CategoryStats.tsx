@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Boxes, Layers, Package, SplitSquareVertical } from 'lucide-react'
+import { Boxes, CheckCircle2, Package, XCircle } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { CategoryStatsSnapshot } from './types'
@@ -19,21 +19,21 @@ export type CategoryStatsProps = {
 export function CategoryStats({ stats, className }: CategoryStatsProps) {
   const cards: StatCard[] = [
     {
-      key: 'rootCount',
-      label: 'Categorías principales',
-      icon: SplitSquareVertical,
-      tone: 'primary',
-    },
-    {
-      key: 'subcategoryCount',
-      label: 'Categorías hijas',
-      icon: Layers,
-      tone: 'muted',
-    },
-    {
       key: 'totalCount',
       label: 'Total categorías',
       icon: Boxes,
+      tone: 'primary',
+    },
+    {
+      key: 'activeCount',
+      label: 'Activas',
+      icon: CheckCircle2,
+      tone: 'muted',
+    },
+    {
+      key: 'inactiveCount',
+      label: 'Inactivas',
+      icon: XCircle,
       tone: 'muted',
     },
     {

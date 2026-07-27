@@ -130,6 +130,13 @@ export type CashCountsResponse = {
   rows: CashCountRecord[]
 }
 
+export type ActiveCashDrawerResponse = {
+  openingId: string
+  openedAt: string | null
+  openingAmount: number
+  expectedAmount: number
+}
+
 export interface BranchOption {
   id: string
   nombre: string

@@ -5,6 +5,15 @@ export type PurchaseOrderStatus =
   | 'PAGADA'
   | 'ANULADA'
 
+export type PurchaseLogisticsStatus =
+  | 'REGISTRADA'
+  | 'EN_RECEPCION'
+  | 'RECEPCION_PARCIAL'
+  | 'RECEPCION_COMPLETA'
+  | 'CANCELADA'
+
+export type PurchaseFinancialStatus = 'SIN_PAGAR' | 'PAGO_PARCIAL' | 'PAGADA'
+
 export type PurchaseReceiptStatus = 'PROGRAMADA' | 'RECIBIDA' | 'OBSERVADA'
 
 export type PurchasesDashboardResponse = {
@@ -43,6 +52,10 @@ export type PurchasesDashboardResponse = {
     paidAmount: number
     paymentCount: number
     status: PurchaseOrderStatus
+    logisticsStatus: PurchaseLogisticsStatus
+    financialStatus: PurchaseFinancialStatus
+    receivedUnits: number
+    receivedAmount: number
     observations: string | null
   }>
   receipts: Array<{
@@ -152,6 +165,12 @@ export type ReceivePurchaseItemPayload = {
   stockBloqueado?: number
   almacen?: string
   observaciones?: string
+}
+
+export type CreatePurchaseReceptionPayload = {
+  compraId: string
+  observaciones?: string
+  items: ReceivePurchaseItemPayload[]
 }
 
 export type ReturnPurchaseItemPayload = {

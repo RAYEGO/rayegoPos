@@ -73,6 +73,22 @@ enum EstadoCompra {
   ANULADA
 }
 
+/// Estados logísticos de una orden de compra (independiente del estado financiero).
+enum EstadoCompraLogistico {
+  REGISTRADA
+  EN_RECEPCION
+  RECEPCION_PARCIAL
+  RECEPCION_COMPLETA
+  CANCELADA
+}
+
+/// Estados financieros de una orden de compra (independiente del estado logístico).
+enum EstadoCompraFinanciero {
+  SIN_PAGAR
+  PAGO_PARCIAL
+  PAGADA
+}
+
 /// Estados de una venta.
 enum EstadoVenta {
   BORRADOR
@@ -337,6 +353,8 @@ model Usuario {
   detalleComprasActualizados           DetalleCompra[]              @relation("DetalleCompraUpdatedBy")
   compraPagosCreados                   CompraPago[]                 @relation("CompraPagoCreatedBy")
   compraPagosActualizados              CompraPago[]                 @relation("CompraPagoUpdatedBy")
+  compraRecepcionesCreadas             CompraRecepcion[]            @relation("CompraRecepcionCreatedBy")
+  compraRecepcionesActualizadas        CompraRecepcion[]            @relation("CompraRecepcionUpdatedBy")
   clientesCreados                      Cliente[]                    @relation("ClienteCreatedBy")
   clientesActualizados                 Cliente[]                    @relation("ClienteUpdatedBy")
   ventasCreadas                        Venta[]                      @relation("VentaCreatedBy")
@@ -536,6 +554,7 @@ model Categoria {
 model Laboratorio {
   id          String    @id @default(uuid()) @db.Uuid
   empresaId   String    @map("empresa_id") @db.Uuid
+  codigo      String    @db.VarChar(30)
   nombre      String    @db.VarChar(150)
   pais        String?   @db.VarChar(80)
   descripcion String?   @db.VarChar(255)
@@ -551,6 +570,7 @@ model Laboratorio {
   updatedBy Usuario?   @relation("LaboratorioUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
+  @@unique([empresaId, codigo])
   @@unique([empresaId, nombre])
   @@index([empresaId])
   @@index([deletedAt])
@@ -560,6 +580,7 @@ model Laboratorio {
 model Presentacion {
   id          String    @id @default(uuid()) @db.Uuid
   empresaId   String    @map("empresa_id") @db.Uuid
+  codigo      String    @db.VarChar(30)
   nombre      String    @db.VarChar(120)
   descripcion String?   @db.VarChar(255)
   activo      Boolean   @default(true)
@@ -574,6 +595,7 @@ model Presentacion {
   updatedBy Usuario?   @relation("PresentacionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   productos Producto[]
 
+  @@unique([empresaId, codigo])
   @@unique([empresaId, nombre])
   @@index([empresaId])
   @@index([deletedAt])
@@ -768,6 +790,7 @@ model Lote {
   sucursalId       String     @map("sucursal_id") @db.Uuid
   productoId       String     @map("producto_id") @db.Uuid
   detalleCompraId  String?    @map("detalle_compra_id") @db.Uuid
+  compraRecepcionId String?   @map("compra_recepcion_id") @db.Uuid
   proveedorId      String?    @map("proveedor_id") @db.Uuid
   numeroLote       String     @map("numero_lote") @db.VarChar(80)
   fechaFabricacion DateTime?  @map("fecha_fabricacion") @db.Date
@@ -788,6 +811,7 @@ model Lote {
   sucursal              Sucursal               @relation(fields: [sucursalId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   producto              Producto               @relation(fields: [productoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   detalleCompra         DetalleCompra?         @relation(fields: [detalleCompraId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  compraRecepcion       CompraRecepcion?       @relation(fields: [compraRecepcionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   proveedor             Proveedor?             @relation(fields: [proveedorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   createdBy             Usuario?               @relation("LoteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy             Usuario?               @relation("LoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
@@ -798,6 +822,7 @@ model Lote {
   @@unique([sucursalId, productoId, numeroLote])
   @@index([productoId, fechaVencimiento])
   @@index([sucursalId, fechaVencimiento])
+  @@index([compraRecepcionId])
   @@index([stockDisponible])
   @@index([deletedAt])
   @@map("lotes")
@@ -965,6 +990,8 @@ model Compra {
   serieComprobante     String?          @map("serie_comprobante") @db.VarChar(20)
   numeroComprobante    String?          @map("numero_comprobante") @db.VarChar(30)
   estado               EstadoCompra     @default(BORRADOR)
+  estadoLogistico      EstadoCompraLogistico  @default(REGISTRADA) @map("estado_logistico")
+  estadoFinanciero     EstadoCompraFinanciero @default(SIN_PAGAR) @map("estado_financiero")
   subtotal             Decimal          @default(0) @db.Decimal(14, 2)
   descuentoTotal       Decimal          @default(0) @map("descuento_total") @db.Decimal(14, 2)
   impuestoTotal        Decimal          @default(0) @map("impuesto_total") @db.Decimal(14, 2)
@@ -984,12 +1011,37 @@ model Compra {
   updatedBy          Usuario?        @relation("CompraUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
   detalles           DetalleCompra[]
   pagos              CompraPago[]
+  recepciones        CompraRecepcion[]
 
   @@index([sucursalId, fechaEmision])
   @@index([proveedorId, fechaEmision])
   @@index([estado])
   @@index([deletedAt])
   @@map("compras")
+}
+
+/// Recepción de una orden de compra. Una orden puede tener múltiples recepciones confirmadas.
+model CompraRecepcion {
+  id          String    @id @default(uuid()) @db.Uuid
+  compraId    String    @map("compra_id") @db.Uuid
+  numero      Int
+  fecha       DateTime  @default(now()) @map("fecha_recepcion")
+  observaciones String? @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  createdById String?   @map("created_by") @db.Uuid
+  updatedById String?   @map("updated_by") @db.Uuid
+
+  compra      Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  lotes       Lote[]
+  createdBy   Usuario?  @relation("CompraRecepcionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy   Usuario?  @relation("CompraRecepcionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([compraId, numero])
+  @@index([compraId, fecha])
+  @@index([deletedAt])
+  @@map("compra_recepciones")
 }
 
 model DetalleCompra {

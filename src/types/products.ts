@@ -119,7 +119,7 @@ export type MasterCategoriesResponse = {
 
 export type UpsertMasterCategoryPayload = {
   parentId?: string | null
-  codigo: string
+  codigo?: string
   nombre: string
   descripcion?: string
   color?: string
@@ -129,6 +129,7 @@ export type UpsertMasterCategoryPayload = {
 
 export type MasterLaboratoryRecord = {
   id: string
+  codigo: string
   nombre: string
   pais: string | null
   descripcion: string | null
@@ -151,6 +152,7 @@ export type UpsertMasterLaboratoryPayload = {
 
 export type MasterPresentationRecord = {
   id: string
+  codigo: string
   nombre: string
   descripcion: string | null
   activo: boolean
@@ -186,7 +188,7 @@ export type MasterUnitsResponse = {
 }
 
 export type UpsertMasterUnitPayload = {
-  codigo: string
+  codigo?: string
   nombre: string
   simbolo: string
   descripcion?: string
@@ -204,7 +206,6 @@ export type CreateProductPayload = {
   precioVentaBlister?: number
   principioActivoId?: string
   sku: string
-  codigoInterno?: string
   codigoBarras?: string
   nombre: string
   descripcion?: string

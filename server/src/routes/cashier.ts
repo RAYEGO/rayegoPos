@@ -4,6 +4,7 @@ import {
   closeCashDrawer,
   createCashCount,
   createCashMovement,
+  getActiveCashDrawer,
   getCashierDashboard,
   getCashCounts,
   getCashReconciliationPreview,
@@ -65,6 +66,10 @@ export async function cashierRoutes(app: FastifyInstance) {
       },
       request,
     )
+  })
+
+  app.get('/active', async (request) => {
+    return getActiveCashDrawer(request)
   })
 
   app.post('/open', async (request) => {

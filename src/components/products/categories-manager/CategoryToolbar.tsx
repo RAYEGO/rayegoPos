@@ -1,4 +1,4 @@
-import { Plus, MoreVertical, Copy, Edit, Power, Trash2 } from 'lucide-react'
+import { Plus, MoreVertical, Copy, Edit, Power, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ export type CategoryToolbarProps = {
   selected: CategoryRecord | null
   disabled?: boolean
   onCreate: () => void
+  onImport: () => void
   onEdit: () => void
   onDuplicate: () => void
   onToggleActive: () => void
@@ -23,6 +24,7 @@ export function CategoryToolbar({
   selected,
   disabled,
   onCreate,
+  onImport,
   onEdit,
   onDuplicate,
   onToggleActive,
@@ -37,6 +39,16 @@ export function CategoryToolbar({
         <Button type="button" onClick={onCreate} className="w-full sm:w-auto" disabled={isDisabled}>
           <Plus className="h-4 w-4" />
           Nueva categoría
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onImport}
+          className="w-full sm:w-auto"
+          disabled={isDisabled}
+        >
+          <Upload className="h-4 w-4" />
+          Importar Excel / CSV
         </Button>
       </div>
 

@@ -8,17 +8,17 @@ import { CategoryDetails } from './CategoryDetails'
 import { CategoryEmptyState } from './CategoryEmptyState'
 import { CategoryForm } from './CategoryForm'
 import type { CategoryFormMode, CategoryFormSubmitPayload } from './CategoryForm'
+import { CategoryImportDialog } from './CategoryImportDialog'
+import { CategoryList } from './CategoryList'
 import { CategorySearch } from './CategorySearch'
 import { CategoryStats } from './CategoryStats'
 import { CategoryToolbar } from './CategoryToolbar'
-import { CategoryTree } from './CategoryTree'
 import type { CategoryRecord } from './types'
-import { buildCategoryTree, filterCategoryTree, findCategoryAncestors, getCategoryStats } from './utils'
+import { getCategoryStats, normalizeCategoryKey } from './utils'
 
 type DialogState = {
   open: boolean
   mode: CategoryFormMode
-  defaultParentId: string | null
   record: CategoryRecord | null
 }
 
@@ -47,14 +47,13 @@ export function ProductCategoriesManager({
 }: ProductCategoriesManagerProps) {
   const [records, setRecords] = useState<CategoryRecord[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
   const [query, setQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isImportOpen, setIsImportOpen] = useState(false)
   const [dialog, setDialog] = useState<DialogState>({
     open: false,
     mode: 'create',
-    defaultParentId: null,
     record: null,
   })
 
@@ -73,7 +72,6 @@ export function ProductCategoriesManager({
         description: row.descripcion ?? '',
         color: row.color,
         order: row.orden,
-        parentId: row.parentId,
         active: row.activo,
         productCount: row.productCount,
         createdAt: row.createdAt,
@@ -97,60 +95,28 @@ export function ProductCategoriesManager({
     void loadCategories()
   }, [loadCategories])
 
-  const { roots } = useMemo(() => buildCategoryTree(records), [records])
   const stats = useMemo(() => getCategoryStats(records), [records])
 
-  const filteredTree = useMemo(() => filterCategoryTree(roots, query), [query, roots])
+  const filteredRecords = useMemo(() => {
+    const search = normalizeCategoryKey(query)
+    if (!search) return records
+    return records.filter((record) => normalizeCategoryKey(record.name).includes(search))
+  }, [query, records])
 
   const selected = useMemo(
     () => records.find((record) => record.id === selectedId) ?? null,
     [records, selectedId],
   )
 
-  const childCount = useMemo(() => {
-    if (!selected) return 0
-    return records.filter((record) => record.parentId === selected.id).length
-  }, [records, selected])
-
-  const forcedExpandedIds = useMemo(() => filteredTree.ancestorIds, [filteredTree.ancestorIds])
-
-  const handleToggle = useCallback((id: string) => {
-    setExpandedIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return next
-    })
-  }, [])
-
-  const handleSelect = useCallback(
-    (id: string) => {
-      setSelectedId(id)
-      const ancestors = findCategoryAncestors(id, records)
-        .map((record) => record.id)
-        .slice(0, -1)
-
-      if (ancestors.length) {
-        setExpandedIds((current) => {
-          const next = new Set(current)
-          ancestors.forEach((ancestorId) => next.add(ancestorId))
-          return next
-        })
-      }
-    },
-    [records],
-  )
+  const handleSelect = useCallback((id: string) => setSelectedId(id), [])
 
   const openCreate = useCallback(() => {
     if (canManage === false) {
       toast.error('No tienes permisos para gestionar categorías.')
       return
     }
-    setDialog({ open: true, mode: 'create', defaultParentId: selected?.id ?? null, record: null })
-  }, [canManage, selected])
+    setDialog({ open: true, mode: 'create', record: null })
+  }, [canManage])
 
   const openEdit = useCallback(() => {
     if (canManage === false) {
@@ -158,7 +124,7 @@ export function ProductCategoriesManager({
       return
     }
     if (!selected) return
-    setDialog({ open: true, mode: 'edit', defaultParentId: selected.parentId, record: selected })
+    setDialog({ open: true, mode: 'edit', record: selected })
   }, [canManage, selected])
 
   const openDuplicate = useCallback(() => {
@@ -167,7 +133,7 @@ export function ProductCategoriesManager({
       return
     }
     if (!selected) return
-    setDialog({ open: true, mode: 'duplicate', defaultParentId: selected.parentId, record: selected })
+    setDialog({ open: true, mode: 'duplicate', record: selected })
   }, [canManage, selected])
 
   const closeDialog = useCallback(() => {
@@ -180,8 +146,6 @@ export function ProductCategoriesManager({
 
     try {
       await productsService.updateMasterCategory(accessToken, selected.id, {
-        parentId: selected.parentId,
-        codigo: selected.code,
         nombre: selected.name,
         descripcion: selected.description || undefined,
         color: selected.color ?? undefined,
@@ -218,8 +182,6 @@ export function ProductCategoriesManager({
       try {
         if (dialog.mode === 'edit' && dialog.record) {
           await productsService.updateMasterCategory(accessToken, dialog.record.id, {
-            parentId: payload.parentId,
-            codigo: payload.code,
             nombre: payload.name,
             descripcion: payload.description || undefined,
             color: dialog.record.color ?? undefined,
@@ -228,8 +190,6 @@ export function ProductCategoriesManager({
           })
         } else {
           await productsService.createMasterCategory(accessToken, {
-            parentId: payload.parentId,
-            codigo: payload.code,
             nombre: payload.name,
             descripcion: payload.description || undefined,
             activo: payload.active,
@@ -266,7 +226,7 @@ export function ProductCategoriesManager({
               <div className="min-w-0">
                 <p className="text-base font-semibold text-foreground">Categorías</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Visualiza la jerarquía y administra un catálogo consistente para el registro de productos.
+                  Administra un catálogo simple y plano para el registro de productos.
                 </p>
               </div>
               <div className="w-full max-w-md">
@@ -279,6 +239,7 @@ export function ProductCategoriesManager({
                 selected={selected}
                 disabled={canManage === false}
                 onCreate={openCreate}
+                onImport={() => setIsImportOpen(true)}
                 onEdit={openEdit}
                 onDuplicate={openDuplicate}
                 onToggleActive={handleToggleActive}
@@ -288,15 +249,7 @@ export function ProductCategoriesManager({
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-            <CategoryTree
-              nodes={filteredTree.nodes}
-              expandedIds={expandedIds}
-              forcedExpandedIds={forcedExpandedIds}
-              selectedId={selectedId}
-              matchIds={filteredTree.matchIds}
-              onToggle={handleToggle}
-              onSelect={handleSelect}
-            />
+            <CategoryList records={filteredRecords} selectedId={selectedId} onSelect={handleSelect} />
 
             {records.length === 0 ? (
               <CategoryEmptyState
@@ -306,7 +259,7 @@ export function ProductCategoriesManager({
                 onAction={openCreate}
               />
             ) : selected ? (
-              <CategoryDetails selected={selected} records={records} childCount={childCount} />
+              <CategoryDetails selected={selected} />
             ) : (
               <CategoryEmptyState
                 title="Selecciona una categoría"
@@ -323,10 +276,20 @@ export function ProductCategoriesManager({
               if (!open) closeDialog()
             }}
             mode={dialog.mode}
-            records={records}
             selected={dialog.record}
-            defaultParentId={dialog.defaultParentId}
             onSubmit={handleSubmit}
+          />
+
+          <CategoryImportDialog
+            open={isImportOpen}
+            onOpenChange={setIsImportOpen}
+            accessToken={accessToken}
+            existing={records}
+            disabled={canManage === false}
+            onImported={() => {
+              void loadCategories()
+              onCategoriesChanged?.()
+            }}
           />
         </>
       )}

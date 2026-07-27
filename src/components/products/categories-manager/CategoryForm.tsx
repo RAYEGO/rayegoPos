@@ -9,25 +9,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import type { CategoryRecord } from './types'
-import { flattenCategoriesForSelect, formatCategoryPath } from './utils'
+import { generateCategoryCodeFromName } from './utils'
 
 export type CategoryFormMode = 'create' | 'edit' | 'duplicate'
 
 export type CategoryFormSubmitPayload = {
-  code: string
   name: string
   description: string
-  parentId: string | null
   active: boolean
 }
 
@@ -35,9 +26,7 @@ export type CategoryFormProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   mode: CategoryFormMode
-  records: CategoryRecord[]
   selected: CategoryRecord | null
-  defaultParentId: string | null
   onSubmit: (payload: CategoryFormSubmitPayload) => void
 }
 
@@ -49,21 +38,12 @@ export function CategoryForm({
   open,
   onOpenChange,
   mode,
-  records,
   selected,
-  defaultParentId,
   onSubmit,
 }: CategoryFormProps) {
-  const parentOptions = useMemo(() => flattenCategoriesForSelect(records), [records])
-
   const resolvedName = useMemo(() => {
     if (!selected) return ''
     return mode === 'duplicate' ? `${selected.name} (Copia)` : selected.name
-  }, [mode, selected])
-
-  const resolvedCode = useMemo(() => {
-    if (!selected) return ''
-    return mode === 'duplicate' ? `${selected.code}-COPY` : selected.code
   }, [mode, selected])
 
   const resolvedDescription = useMemo(() => {
@@ -71,26 +51,16 @@ export function CategoryForm({
     return selected.description
   }, [selected])
 
-  const resolvedParentId = useMemo(() => {
-    if (mode === 'create') return defaultParentId
-    if (!selected) return defaultParentId
-    return mode === 'duplicate' ? selected.parentId : selected.parentId
-  }, [defaultParentId, mode, selected])
-
-  const [code, setCode] = useState(resolvedCode)
   const [name, setName] = useState(resolvedName)
   const [description, setDescription] = useState(resolvedDescription)
-  const [parentId, setParentId] = useState<string>(resolvedParentId ?? 'NONE')
   const [active, setActive] = useState(selected?.active ?? true)
 
   useEffect(() => {
     if (!open) return
-    setCode(resolvedCode)
     setName(resolvedName)
     setDescription(resolvedDescription)
-    setParentId(resolvedParentId ?? 'NONE')
     setActive(selected?.active ?? true)
-  }, [open, resolvedCode, resolvedDescription, resolvedName, resolvedParentId, selected?.active])
+  }, [open, resolvedDescription, resolvedName, selected?.active])
 
   const title =
     mode === 'edit'
@@ -102,12 +72,9 @@ export function CategoryForm({
   const subtitle =
     mode === 'edit'
       ? 'Actualiza la información de la categoría seleccionada.'
-      : 'Crea una categoría y define su categoría padre solo si lo necesitas.'
+      : 'Crea una categoría para el catálogo de productos.'
 
-  const parentPreview = useMemo(() => {
-    if (parentId === 'NONE') return 'Ninguna'
-    return formatCategoryPath(parentId, records)
-  }, [parentId, records])
+  const generatedCode = useMemo(() => generateCategoryCodeFromName(name), [name])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -119,12 +86,9 @@ export function CategoryForm({
 
         <div className="grid gap-4">
           <div className="grid gap-2">
-            <p className="text-xs font-medium text-muted-foreground">Código *</p>
-            <Input value={code} onChange={(event) => setCode(event.target.value)} />
-          </div>
-          <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Nombre *</p>
             <Input value={name} onChange={(event) => setName(event.target.value)} />
+            <p className="text-xs text-muted-foreground">Código generado: {generatedCode}</p>
           </div>
 
           <div className="grid gap-2">
@@ -134,24 +98,6 @@ export function CategoryForm({
               onChange={(event) => setDescription(event.target.value)}
               rows={3}
             />
-          </div>
-
-          <div className="grid gap-2">
-            <p className="text-xs font-medium text-muted-foreground">Categoría padre</p>
-            <Select value={parentId} onValueChange={setParentId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecciona una categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="NONE">Ninguna</SelectItem>
-                {parentOptions.map((option) => (
-                  <SelectItem key={option.id} value={option.id} disabled={!option.active}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">Se creará dentro de: {parentPreview}</p>
           </div>
 
           <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
@@ -171,13 +117,11 @@ export function CategoryForm({
           </Button>
           <Button
             type="button"
-            disabled={!normalize(code) || !normalize(name)}
+            disabled={!normalize(name)}
             onClick={() => {
               const payload: CategoryFormSubmitPayload = {
-                code: normalize(code),
                 name: normalize(name),
                 description: normalize(description),
-                parentId: parentId === 'NONE' ? null : parentId,
                 active,
               }
               onSubmit(payload)

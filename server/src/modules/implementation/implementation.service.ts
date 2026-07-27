@@ -1,6 +1,7 @@
 import {
   EstadoLote,
   EmpaqueProducto,
+  EstadoProducto,
   ModoEmpaqueProducto,
   Prisma,
   TipoMovimientoInventario,
@@ -9,6 +10,7 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { IMPLEMENTATION_MESSAGES } from '../../shared/implementation/messages.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -136,6 +138,10 @@ function normalizeLotCode(value: string) {
   return normalized
 }
 
+function lotAlreadyExistsMessage() {
+  return IMPLEMENTATION_MESSAGES.LOT_ALREADY_EXISTS
+}
+
 export async function getInitialInventoryLoads(request: FastifyRequest) {
   const { branchId } = await getAuthContext(request)
   assertAdmin(request)
@@ -198,6 +204,51 @@ export async function createInitialInventoryLoad(
 
   try {
     result = await prisma.$transaction(async (tx) => {
+      const productIds = [...uniqueProducts]
+      const products = await tx.producto.findMany({
+        where: {
+          id: { in: productIds },
+          empresaId: companyId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          estado: true,
+          modoEmpaque: true,
+          unidadesPorBlister: true,
+          blistersPorCaja: true,
+        },
+      })
+      const productById = new Map(products.map((product) => [product.id, product]))
+
+      if (products.length !== productIds.length) {
+        throw createHttpError(404, IMPLEMENTATION_MESSAGES.PRODUCT_NOT_FOUND)
+      }
+
+      const payloadLots = new Set<string>()
+      for (const item of payload.items) {
+        const lotCode = normalizeLotCode(item.numeroLote)
+        const key = `${item.productoId}:${lotCode}`
+        if (payloadLots.has(key)) {
+          throw createHttpError(409, lotAlreadyExistsMessage())
+        }
+        payloadLots.add(key)
+
+        const existingLot = await tx.lote.findFirst({
+          where: {
+            deletedAt: null,
+            sucursalId: branchId,
+            productoId: item.productoId,
+            numeroLote: lotCode,
+          },
+          select: { id: true },
+        })
+
+        if (existingLot) {
+          throw createHttpError(409, lotAlreadyExistsMessage())
+        }
+      }
+
       const reason = await ensureMovementReason(tx, userId, {
         code: 'INVENTARIO_INICIAL',
         name: 'Inventario inicial',
@@ -235,22 +286,13 @@ export async function createInitialInventoryLoad(
           throw createHttpError(400, 'La cantidad debe ser un entero mayor a 0.')
         }
 
-        const product = await tx.producto.findFirst({
-          where: {
-            id: item.productoId,
-            empresaId: companyId,
-            deletedAt: null,
-          },
-          select: {
-            id: true,
-            modoEmpaque: true,
-            unidadesPorBlister: true,
-            blistersPorCaja: true,
-          },
-        })
-
+        const product = productById.get(item.productoId) ?? null
         if (!product) {
-          throw createHttpError(404, 'El producto seleccionado no está disponible.')
+          throw createHttpError(404, IMPLEMENTATION_MESSAGES.PRODUCT_NOT_FOUND)
+        }
+
+        if (product.estado !== EstadoProducto.ACTIVO) {
+          throw createHttpError(400, IMPLEMENTATION_MESSAGES.PRODUCT_INACTIVE)
         }
 
         const packType = item.empaque
@@ -259,30 +301,21 @@ export async function createInitialInventoryLoad(
 
         if (product.modoEmpaque === ModoEmpaqueProducto.SIMPLE) {
           if (packType !== EmpaqueProducto.UNIDAD) {
-            throw createHttpError(
-              400,
-              'La presentación seleccionada no es válida para este producto.',
-            )
+            throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION)
           }
         } else if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
           if (
             packType === EmpaqueProducto.BLISTER &&
             (!unitsPerBlister || unitsPerBlister <= 0)
           ) {
-            throw createHttpError(
-              400,
-              'El producto no tiene unidades por blíster configuradas.',
-            )
+            throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION)
           }
 
           if (
             packType === EmpaqueProducto.CAJA &&
             (!unitsPerBlister || unitsPerBlister <= 0 || !blistersPerBox || blistersPerBox <= 0)
           ) {
-            throw createHttpError(
-              400,
-              'El producto no tiene empaque de caja configurado (blísteres por caja y unidades por blíster).',
-            )
+            throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION)
           }
         }
 
@@ -392,10 +425,7 @@ export async function createInitialInventoryLoad(
     })
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw createHttpError(
-        409,
-        'Ya existe un lote con el mismo número para este producto en la sucursal.',
-      )
+      throw createHttpError(409, lotAlreadyExistsMessage())
     }
 
     throw err

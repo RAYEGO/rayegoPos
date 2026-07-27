@@ -1,8 +1,15 @@
-import { EmpaqueProducto, EstadoCompra, TipoComprobante } from '@prisma/client'
+import {
+  EmpaqueProducto,
+  EstadoCompra,
+  EstadoCompraFinanciero,
+  EstadoCompraLogistico,
+  TipoComprobante,
+} from '@prisma/client'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
   createPurchaseOrder,
+  createPurchaseReception,
   getPurchaseDashboard,
   registerPurchasePayment,
   receivePurchaseItem,
@@ -12,6 +19,8 @@ import {
 const purchaseDashboardQuerySchema = z.object({
   search: z.string().optional(),
   status: z.nativeEnum(EstadoCompra).optional(),
+  logisticsStatus: z.nativeEnum(EstadoCompraLogistico).optional(),
+  financialStatus: z.nativeEnum(EstadoCompraFinanciero).optional(),
   branchId: z.string().uuid().optional(),
   supplierId: z.string().uuid().optional(),
 })
@@ -51,6 +60,12 @@ const receivePurchaseItemSchema = z.object({
   observaciones: z.string().max(255).optional(),
 })
 
+const createPurchaseReceptionSchema = z.object({
+  compraId: z.string().uuid(),
+  observaciones: z.string().max(255).optional(),
+  items: z.array(receivePurchaseItemSchema).min(1),
+})
+
 const returnPurchaseItemSchema = z.object({
   lotId: z.string().uuid(),
   target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
@@ -81,6 +96,11 @@ export async function purchaseRoutes(app: FastifyInstance) {
   app.post('/receipts', async (request) => {
     const body = receivePurchaseItemSchema.parse(request.body)
     return receivePurchaseItem(body, request)
+  })
+
+  app.post('/receptions', async (request) => {
+    const body = createPurchaseReceptionSchema.parse(request.body)
+    return createPurchaseReception(body, request)
   })
 
   app.post('/returns', async (request) => {
