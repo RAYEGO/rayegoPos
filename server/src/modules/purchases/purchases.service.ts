@@ -1442,6 +1442,36 @@ export async function registerPurchasePayment(
   const paymentDate = payload.fechaPago
     ? new Date(`${payload.fechaPago}T00:00:00`)
     : new Date()
+  const requestId =
+    typeof request === 'object' &&
+    request !== null &&
+    'id' in request &&
+    typeof (request as { id?: unknown }).id === 'string'
+      ? (request as { id: string }).id
+      : null
+  const isDev = (process.env.NODE_ENV ?? 'development') !== 'production'
+  const exposeErrors = isDev || process.env.DEBUG_EXPOSE_ERRORS?.trim().toLowerCase() === 'true'
+
+  function rethrowStepError(step: string, err: unknown): never {
+    const info = extractErrorInfo(err)
+    reportDebugEvent('purchase.payment.step.error', {
+      requestId,
+      purchaseId: payload.compraId,
+      step,
+      error: info,
+    })
+
+    if (!exposeErrors) {
+      throw err
+    }
+
+    const wrapped = createHttpError(
+      500,
+      `Fallo en ${step}: ${info.message ?? 'Ocurrió un error inesperado.'}`,
+    ) as Error & { statusCode: number; stack?: string }
+    wrapped.stack = info.stack ?? wrapped.stack
+    throw wrapped
+  }
 
   // #region debug-point purchase-payment-advance-500.register-payment.start
   reportDebugEvent('purchase.payment.start', {
@@ -1451,6 +1481,7 @@ export async function registerPurchasePayment(
     userId,
     branchId,
     paymentDate: paymentDate.toISOString(),
+    requestId,
   })
   // #endregion debug-point purchase-payment-advance-500.register-payment.start
 
@@ -1477,29 +1508,37 @@ export async function registerPurchasePayment(
   }
   try {
     result = await prisma.$transaction(async (tx) => {
-      await ensureDefaultPaymentMethods(tx, userId)
+      try {
+        await ensureDefaultPaymentMethods(tx, userId)
+      } catch (err) {
+        rethrowStepError('ensureDefaultPaymentMethods', err)
+      }
 
       const [purchase, paymentMethod] = await Promise.all([
-        tx.compra.findFirst({
-          where: {
-            id: payload.compraId,
-            deletedAt: null,
-          },
-          include: {
-            proveedor: {
-              select: {
-                razonSocial: true,
+        tx.compra
+          .findFirst({
+            where: {
+              id: payload.compraId,
+              deletedAt: null,
+            },
+            include: {
+              proveedor: {
+                select: {
+                  razonSocial: true,
+                },
               },
             },
-          },
-        }),
-        tx.formaPago.findFirst({
-          where: {
-            id: payload.formaPagoId,
-            deletedAt: null,
-            activo: true,
-          },
-        }),
+          })
+          .catch((err) => rethrowStepError('loadPurchase', err)),
+        tx.formaPago
+          .findFirst({
+            where: {
+              id: payload.formaPagoId,
+              deletedAt: null,
+              activo: true,
+            },
+          })
+          .catch((err) => rethrowStepError('loadPaymentMethod', err)),
       ])
 
       // #region debug-point purchase-payment-advance-500.register-payment.loaded
@@ -1543,21 +1582,23 @@ export async function registerPurchasePayment(
       )
     }
 
-    const opening = await tx.aperturaCaja.findFirst({
-      where: {
-        deletedAt: null,
-        estado: EstadoAperturaCaja.ABIERTA,
-        usuarioId: userId,
-        caja: {
+    const opening = await tx.aperturaCaja
+      .findFirst({
+        where: {
           deletedAt: null,
-          sucursalId: branchId,
+          estado: EstadoAperturaCaja.ABIERTA,
+          usuarioId: userId,
+          caja: {
+            deletedAt: null,
+            sucursalId: branchId,
+          },
         },
-      },
-      select: {
-        id: true,
-        montoAperturaEfectivo: true,
-      },
-    })
+        select: {
+          id: true,
+          montoAperturaEfectivo: true,
+        },
+      })
+      .catch((err) => rethrowStepError('loadCashOpening', err))
 
     if (!opening) {
       throw createHttpError(
@@ -1577,43 +1618,51 @@ export async function registerPurchasePayment(
     })
     // #endregion debug-point purchase-payment-advance-500.register-payment.opening
 
-    await tx.$queryRaw(
-      Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id} FOR UPDATE`,
-    )
+    try {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id} FOR UPDATE`,
+      )
+    } catch (err) {
+      rethrowStepError('lockCashOpening', err)
+    }
 
     const isCashPayment = paymentMethod.codigo === CodigoFormaPago.EFECTIVO
     const cashScopeOr = [{ formaPagoId: null }, { formaPago: { codigo: CodigoFormaPago.EFECTIVO } }]
     const movementCashScope = isCashPayment ? { OR: cashScopeOr } : { formaPagoId: paymentMethod.id }
 
     const [incomeAggregate, expenseAggregate] = await Promise.all([
-      tx.movimientoCaja.aggregate({
-        where: {
-          deletedAt: null,
-          aperturaCajaId: opening.id,
-          ...movementCashScope,
-          tipo: {
-            notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+      tx.movimientoCaja
+        .aggregate({
+          where: {
+            deletedAt: null,
+            aperturaCajaId: opening.id,
+            ...movementCashScope,
+            tipo: {
+              notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+            },
+            operacion: OperacionCaja.INGRESO,
           },
-          operacion: OperacionCaja.INGRESO,
-        },
-        _sum: {
-          monto: true,
-        },
-      }),
-      tx.movimientoCaja.aggregate({
-        where: {
-          deletedAt: null,
-          aperturaCajaId: opening.id,
-          ...movementCashScope,
-          tipo: {
-            notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+          _sum: {
+            monto: true,
           },
-          operacion: OperacionCaja.EGRESO,
-        },
-        _sum: {
-          monto: true,
-        },
-      }),
+        })
+        .catch((err) => rethrowStepError('aggregateCashIncomes', err)),
+      tx.movimientoCaja
+        .aggregate({
+          where: {
+            deletedAt: null,
+            aperturaCajaId: opening.id,
+            ...movementCashScope,
+            tipo: {
+              notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+            },
+            operacion: OperacionCaja.EGRESO,
+          },
+          _sum: {
+            monto: true,
+          },
+        })
+        .catch((err) => rethrowStepError('aggregateCashExpenses', err)),
     ])
 
     const availableCash = Number(
@@ -1625,28 +1674,32 @@ export async function registerPurchasePayment(
     )
 
     const [paidAggregate, returnMovements] = await Promise.all([
-      tx.compraPago.aggregate({
-        where: {
-          compraId: purchase.id,
-          deletedAt: null,
-        },
-        _sum: {
-          monto: true,
-        },
-      }),
-      tx.movimientoInventario.findMany({
-        where: {
-          deletedAt: null,
-          origen: OrigenMovimientoInventario.DEVOLUCION_COMPRA,
-          detalleCompra: {
+      tx.compraPago
+        .aggregate({
+          where: {
             compraId: purchase.id,
+            deletedAt: null,
           },
-        },
-        select: {
-          cantidad: true,
-          costoUnitario: true,
-        },
-      }),
+          _sum: {
+            monto: true,
+          },
+        })
+        .catch((err) => rethrowStepError('aggregatePurchasePayments', err)),
+      tx.movimientoInventario
+        .findMany({
+          where: {
+            deletedAt: null,
+            origen: OrigenMovimientoInventario.DEVOLUCION_COMPRA,
+            detalleCompra: {
+              compraId: purchase.id,
+            },
+          },
+          select: {
+            cantidad: true,
+            costoUnitario: true,
+          },
+        })
+        .catch((err) => rethrowStepError('loadPurchaseReturns', err)),
     ])
 
     const totalAmount = decimalToNumber(purchase.total)
@@ -1702,18 +1755,20 @@ export async function registerPurchasePayment(
       )
     }
 
-    const payment = await tx.compraPago.create({
-      data: {
-        compraId: purchase.id,
-        formaPagoId: paymentMethod.id,
-        monto: toDecimal(amount, 2),
-        fechaPago: paymentDate,
-        referenciaExterna: toOptionalString(payload.referenciaExterna),
-        observaciones: toOptionalString(payload.observaciones),
-        createdById: userId,
-        updatedById: userId,
-      },
-    })
+    const payment = await tx.compraPago
+      .create({
+        data: {
+          compraId: purchase.id,
+          formaPagoId: paymentMethod.id,
+          monto: toDecimal(amount, 2),
+          fechaPago: paymentDate,
+          referenciaExterna: toOptionalString(payload.referenciaExterna),
+          observaciones: toOptionalString(payload.observaciones),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+      .catch((err) => rethrowStepError('createPurchasePayment', err))
 
     const nextOutstandingAmount = Number(Math.max(0, outstandingAmount - amount).toFixed(2))
     const nextPaidAmount = Number((paidAmount + amount).toFixed(2))
@@ -1724,43 +1779,49 @@ export async function registerPurchasePayment(
           ? EstadoCompraFinanciero.PAGO_PARCIAL
           : EstadoCompraFinanciero.SIN_PAGAR
 
-    await tx.compra.update({
-      where: {
-        id: purchase.id,
-      },
-      data: {
-        saldoPendiente: toDecimal(nextOutstandingAmount, 2),
-        estadoFinanciero: nextFinancialStatus,
-        updatedById: userId,
-      },
-    })
+    await tx.compra
+      .update({
+        where: {
+          id: purchase.id,
+        },
+        data: {
+          saldoPendiente: toDecimal(nextOutstandingAmount, 2),
+          estadoFinanciero: nextFinancialStatus,
+          updatedById: userId,
+        },
+      })
+      .catch((err) => rethrowStepError('updatePurchaseFinancialState', err))
 
-    const cashMovement = await tx.movimientoCaja.create({
-      data: {
-        aperturaCajaId: opening.id,
-        formaPagoId: paymentMethod.id,
-        tipo: TipoMovimientoCaja.EGRESO,
-        operacion: OperacionCaja.EGRESO,
-        monto: toDecimal(amount, 2),
-        referencia: toOptionalString(payment.id),
-        observaciones: toOptionalString(
-          `Pago a proveedor · ${purchase.proveedor.razonSocial} · ${paymentMethod.nombre}`,
-        ),
-        createdById: userId,
-        updatedById: userId,
-      },
-    })
+    const cashMovement = await tx.movimientoCaja
+      .create({
+        data: {
+          aperturaCajaId: opening.id,
+          formaPagoId: paymentMethod.id,
+          tipo: TipoMovimientoCaja.EGRESO,
+          operacion: OperacionCaja.EGRESO,
+          monto: toDecimal(amount, 2),
+          referencia: toOptionalString(payment.id),
+          observaciones: toOptionalString(
+            `Pago a proveedor · ${purchase.proveedor.razonSocial} · ${paymentMethod.nombre}`,
+          ),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+      .catch((err) => rethrowStepError('createCashMovementExpense', err))
 
-    await tx.egreso.create({
-      data: {
-        movimientoCajaId: cashMovement.id,
-        concepto: 'Pago a proveedor',
-        referencia: toOptionalString(payment.id),
-        observaciones: toOptionalString(payload.observaciones),
-        createdById: userId,
-        updatedById: userId,
-      },
-    })
+    await tx.egreso
+      .create({
+        data: {
+          movimientoCajaId: cashMovement.id,
+          concepto: 'Pago a proveedor',
+          referencia: toOptionalString(payment.id),
+          observaciones: toOptionalString(payload.observaciones),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+      .catch((err) => rethrowStepError('createCashExpenseRecord', err))
 
       return {
         id: payment.id,

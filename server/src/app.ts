@@ -205,11 +205,21 @@ export function createApp() {
       }
     } catch {}
     // #endregion debug-point purchase-payment-advance-500.error-handler
+    const requestId =
+      typeof _request === 'object' &&
+      _request !== null &&
+      'id' in _request &&
+      typeof (_request as { id?: unknown }).id === 'string'
+        ? (_request as { id: string }).id
+        : null
+    const isDev = (process.env.NODE_ENV ?? 'development') !== 'production'
+    const exposeErrors = isDev || process.env.DEBUG_EXPOSE_ERRORS?.trim().toLowerCase() === 'true'
 
     if (error instanceof ZodError) {
       return reply.code(400).send({
         message: 'La solicitud contiene datos inválidos.',
         issues: error.flatten(),
+        ...(requestId ? { requestId } : {}),
       })
     }
 
@@ -223,13 +233,20 @@ export function createApp() {
         'message' in error && typeof error.message === 'string'
           ? error.message
           : 'La API respondió con un error.'
+      const stack =
+        exposeErrors &&
+        'stack' in error &&
+        typeof (error as { stack?: unknown }).stack === 'string'
+          ? (error as { stack: string }).stack
+          : null
 
       return reply.code(error.statusCode).send({
         message,
+        ...(requestId ? { requestId } : {}),
+        ...(stack ? { stack } : {}),
       })
     }
 
-    const isDev = (process.env.NODE_ENV ?? 'development') !== 'production'
     const debugMessage =
       typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
         ? error.message
@@ -240,8 +257,9 @@ export function createApp() {
         : null
 
     return reply.code(500).send({
-      message: isDev ? debugMessage : 'Ocurrió un error inesperado en la API.',
-      ...(isDev && debugStack ? { stack: debugStack } : {}),
+      message: exposeErrors ? debugMessage : 'Ocurrió un error inesperado en la API.',
+      ...(requestId ? { requestId } : {}),
+      ...(exposeErrors && debugStack ? { stack: debugStack } : {}),
     })
   })
 
