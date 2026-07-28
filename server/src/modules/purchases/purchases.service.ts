@@ -1620,7 +1620,7 @@ export async function registerPurchasePayment(
 
     try {
       await tx.$queryRaw(
-        Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id} FOR UPDATE`,
+        Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id}::uuid FOR UPDATE`,
       )
     } catch (err) {
       rethrowStepError('lockCashOpening', err)
