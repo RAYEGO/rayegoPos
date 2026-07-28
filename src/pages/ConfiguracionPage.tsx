@@ -20,6 +20,7 @@ import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
 import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
+import { useAuthorization } from '@/hooks/useAuthorization'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
 import type { CompanyProfile, UpdateCompanyProfilePayload } from '@/types/company'
@@ -308,8 +309,10 @@ function FieldError({ message }: { message?: string }) {
 
 export function ConfiguracionPage() {
   const { logout, session } = useAuth()
+  const authorization = useAuthorization()
   const accessToken = session?.accessToken ?? ''
   const branchName = session?.user.branchName ?? ''
+  const canEditCompany = authorization.hasRole('ADMIN')
 
   const [activeTab, setActiveTab] = useState<
     'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'catalogos'
@@ -337,6 +340,7 @@ export function ConfiguracionPage() {
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const companyLogoInputRef = useRef<HTMLInputElement | null>(null)
 
   const initialInventoryForm = useForm<InitialInventoryFormValues>({
     resolver: zodResolver(initialInventorySchema),
@@ -1325,7 +1329,7 @@ export function ConfiguracionPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={!companyForm.formState.isDirty || isCompanySubmitting}
+                    disabled={!companyForm.formState.isDirty || isCompanySubmitting || !canEditCompany}
                     onClick={() => {
                       if (company) {
                         companyForm.reset(mapCompanyToFormValues(company))
@@ -1336,7 +1340,7 @@ export function ConfiguracionPage() {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={!companyForm.formState.isDirty || isCompanySubmitting}
+                    disabled={!companyForm.formState.isDirty || isCompanySubmitting || !canEditCompany}
                   >
                     {isCompanySubmitting ? <Loader className="h-4 w-4" /> : null}
                     Guardar cambios
@@ -1350,6 +1354,11 @@ export function ConfiguracionPage() {
                   <CardDescription>Datos legales y comerciales de la empresa.</CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-2">
+                  {!canEditCompany ? (
+                    <div className="rounded-xl border border-muted bg-muted/30 p-3 text-xs text-muted-foreground md:col-span-2">
+                      Solo un usuario administrador puede editar la información y el logo de la empresa.
+                    </div>
+                  ) : null}
                   <div className="space-y-2 md:col-span-2">
                     <p className="text-sm font-medium text-foreground">Logo</p>
                     <div className="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1378,31 +1387,31 @@ export function ConfiguracionPage() {
                       </div>
 
                       <div className="flex flex-col gap-2 sm:flex-row">
-                        <label className="inline-flex">
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/jpg,image/webp"
-                            className="hidden"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0]
-                              event.target.value = ''
-                              if (!file) return
-                              void handleUploadCompanyLogo(file)
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isCompanyLogoUploading || isCompanySubmitting}
-                          >
-                            {isCompanyLogoUploading ? <Loader className="h-4 w-4" /> : null}
-                            Subir logo
-                          </Button>
-                        </label>
+                        <input
+                          ref={companyLogoInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
+                          className="sr-only"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            event.target.value = ''
+                            if (!file) return
+                            void handleUploadCompanyLogo(file)
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={isCompanyLogoUploading || isCompanySubmitting || !canEditCompany}
+                          onClick={() => companyLogoInputRef.current?.click()}
+                        >
+                          {isCompanyLogoUploading ? <Loader className="h-4 w-4" /> : null}
+                          Subir logo
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
-                          disabled={!companyLogoUrl || isCompanyLogoUploading || isCompanySubmitting}
+                          disabled={!companyLogoUrl || isCompanyLogoUploading || isCompanySubmitting || !canEditCompany}
                           onClick={() => void handleDeleteCompanyLogo()}
                         >
                           Quitar
