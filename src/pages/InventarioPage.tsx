@@ -818,7 +818,7 @@ export function InventarioPage() {
                         <TableRow>
                           <TableHead>Producto</TableHead>
                           <TableHead>Lote</TableHead>
-                          <TableHead>Sucursal / almacén</TableHead>
+                          <TableHead>Ubicación</TableHead>
                           <TableHead>Stock</TableHead>
                           <TableHead>Costo / vencimiento</TableHead>
                           <TableHead>Estado</TableHead>
@@ -849,9 +849,8 @@ export function InventarioPage() {
                             </TableCell>
                             <TableCell>
                               <div className="space-y-1">
-                                <p className="font-medium text-foreground">{lot.branchName}</p>
-                                <p className="text-small text-muted-foreground">
-                                  {lot.warehouseName}
+                                <p className="font-medium text-foreground">
+                                  {lot.warehouseName || 'Sin ubicación'}
                                 </p>
                               </div>
                             </TableCell>

@@ -9,6 +9,7 @@ export type CashMovementType =
 
 export type CashDrawerRecord = {
   id: string
+  name: string
   code: string
   branchName: string
   cashierName: string

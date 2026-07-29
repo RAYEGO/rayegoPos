@@ -621,8 +621,8 @@ export function CajaPage() {
               <Card className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-foreground">{drawer.code}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{drawer.branchName}</p>
+                    <p className="truncate font-medium text-foreground">{drawer.name}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{drawer.code}</p>
                     <p className="mt-2 text-xs text-muted-foreground">
                       fondo {formatCurrency(drawer.openingAmount)}
                     </p>
@@ -646,7 +646,6 @@ export function CajaPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Caja</TableHead>
-                    <TableHead className="hidden lg:table-cell">Sucursal</TableHead>
                     <TableHead className="hidden lg:table-cell">Responsable</TableHead>
                     <TableHead className="hidden md:table-cell">Apertura</TableHead>
                     <TableHead>Esperado</TableHead>
@@ -663,14 +662,12 @@ export function CajaPage() {
                     >
                       <TableCell>
                         <div className="space-y-1">
-                          <p className="font-medium text-foreground">{drawer.code}</p>
+                          <p className="font-medium text-foreground">{drawer.name}</p>
+                          <p className="text-xs text-muted-foreground">{drawer.code}</p>
                           <p className="text-xs text-muted-foreground">
                             fondo {formatCurrency(drawer.openingAmount)}
                           </p>
                         </div>
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell text-muted-foreground">
-                        {drawer.branchName}
                       </TableCell>
                       <TableCell className="hidden lg:table-cell text-muted-foreground">
                         {drawer.cashierName}
@@ -767,9 +764,10 @@ export function CajaPage() {
                 <ArrowLeft className="h-4 w-4" />
               </Button>
               <div className="min-w-0">
-                <p className="truncate text-lg font-bold text-foreground">{selectedDrawer.code}</p>
+                <p className="truncate text-lg font-bold text-foreground">{selectedDrawer.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{selectedDrawer.code}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {selectedDrawer.branchName} · {selectedDrawer.cashierName}
+                  {selectedDrawer.cashierName}
                 </p>
               </div>
             </div>
@@ -1580,7 +1578,8 @@ export function CajaPage() {
               <div className="grid gap-4">
                 <div className="rounded-2xl border p-4">
                   <p className="text-xs text-muted-foreground">Turno</p>
-                  <p className="mt-1 font-medium text-foreground">{summaryDrawer?.code ?? '—'}</p>
+                  <p className="mt-1 font-medium text-foreground">{summaryDrawer?.name ?? '—'}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{summaryDrawer?.code ?? '—'}</p>
                   {summaryDrawer?.branchName ? (
                     <p className="mt-1 text-xs text-muted-foreground">{summaryDrawer.branchName}</p>
                   ) : null}

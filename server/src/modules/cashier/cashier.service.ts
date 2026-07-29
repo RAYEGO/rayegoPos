@@ -364,6 +364,7 @@ export async function getCashierDashboard(
 
     return {
       id: drawer.id,
+      name: drawer.caja.nombre,
       code: `${drawer.caja.codigo}-${drawer.fechaApertura
         .toISOString()
         .slice(0, 10)}-A`,

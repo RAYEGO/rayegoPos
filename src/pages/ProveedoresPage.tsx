@@ -4,7 +4,6 @@ import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   ChevronDown,
-  ClipboardCheck,
   Edit,
   History,
   Loader2,
@@ -13,7 +12,6 @@ import {
   Search,
   ShieldAlert,
   Trash2,
-  Truck,
   Warehouse,
   X,
 } from 'lucide-react'
@@ -58,7 +56,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
 import {
   supplierAlerts,
-  supplierDocuments,
 } from '@/modules/suppliers/mock-data'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { suppliersService } from '@/services/suppliersService'
@@ -136,12 +133,6 @@ function getSupplierStatusVariant(isActive: boolean) {
   return isActive ? 'success' : 'outline'
 }
 
-function getDocumentStatusVariant(status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDO') {
-  if (status === 'VIGENTE') return 'success'
-  if (status === 'POR_VENCER') return 'warning'
-  return 'destructive'
-}
-
 function getAlertPriorityVariant(priority: 'ALTA' | 'MEDIA' | 'BAJA') {
   if (priority === 'ALTA') return 'warning'
   if (priority === 'MEDIA') return 'info'
@@ -208,9 +199,6 @@ export function ProveedoresPage() {
     () => ({
       total: dashboard.summary.totalSuppliers,
       active: dashboard.summary.activeSuppliers,
-      inactive: dashboard.summary.inactiveSuppliers,
-      withContact: dashboard.suppliers.filter((supplier) => supplier.contactoNombre).length,
-      withEmail: dashboard.suppliers.filter((supplier) => supplier.email).length,
     }),
     [dashboard],
   )
@@ -404,20 +392,6 @@ export function ProveedoresPage() {
               <span className="text-xs text-muted-foreground">Activos</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <ClipboardCheck className="h-4 w-4 text-primary" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{supplierMetrics.withContact}</span>
-              <span className="text-xs text-muted-foreground">Con contacto</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-            <Truck className="h-4 w-4 text-info" />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-foreground">{supplierMetrics.withEmail}</span>
-              <span className="text-xs text-muted-foreground">Con correo</span>
-            </div>
-          </div>
         </div>
       )}
 
@@ -425,7 +399,6 @@ export function ProveedoresPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="padron">Padrón</TabsTrigger>
-            <TabsTrigger value="documentos">Documentos</TabsTrigger>
             <TabsTrigger value="alertas">Alertas</TabsTrigger>
           </TabsList>
           <Button type="button" size="sm" onClick={openCreateDialog}>
@@ -630,70 +603,6 @@ export function ProveedoresPage() {
               </div>
             </>
           )}
-        </TabsContent>
-
-        <TabsContent value="documentos" className="space-y-4 pt-4">
-          <Card className="p-4">
-            <p className="text-sm text-muted-foreground">
-              Vista referencial. El siguiente paso será conectar documentos de proveedor a la API.
-            </p>
-          </Card>
-
-          <div className="md:hidden space-y-3">
-            {supplierDocuments.map((document) => (
-              <Card key={document.id} className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-foreground">{document.supplierName}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{document.documentType}</p>
-                  </div>
-                  <Badge variant={getDocumentStatusVariant(document.status)}>{document.status}</Badge>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">Vence: {document.expiresAt}</p>
-              </Card>
-            ))}
-          </div>
-
-          <div className="hidden md:block">
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Proveedor</TableHead>
-                      <TableHead>Documento</TableHead>
-                      <TableHead className="hidden md:table-cell">Referencia</TableHead>
-                      <TableHead className="hidden lg:table-cell">Vence</TableHead>
-                      <TableHead>Estado</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {supplierDocuments.map((document) => (
-                      <TableRow key={document.id}>
-                        <TableCell className="font-medium text-foreground">
-                          {document.supplierName}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {document.documentType}
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-muted-foreground">
-                          {document.reference}
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell text-muted-foreground">
-                          {document.expiresAt}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getDocumentStatusVariant(document.status)}>
-                            {document.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
 
         <TabsContent value="alertas" className="space-y-4 pt-4">

@@ -1209,7 +1209,6 @@ export function ComprasPage() {
                       <TableRow>
                         <TableHead>Orden</TableHead>
                         <TableHead>Proveedor</TableHead>
-                        <TableHead>Sucursal</TableHead>
                         <TableHead>Creación</TableHead>
                         <TableHead>Entrega esperada</TableHead>
                         <TableHead>Totales</TableHead>
@@ -1235,9 +1234,6 @@ export function ComprasPage() {
                                 RUC/DOC {order.supplierDocument}
                               </p>
                             </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {order.branchName}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {formatDate(order.createdAt)}
