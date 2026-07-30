@@ -1,5 +1,5 @@
 CREATE TABLE "producto_presentaciones" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "id" UUID NOT NULL,
   "producto_id" UUID NOT NULL,
   "presentacion_id" UUID NOT NULL,
   "es_base" BOOLEAN NOT NULL DEFAULT false,
@@ -15,7 +15,7 @@ CREATE TABLE "producto_presentaciones" (
 );
 
 CREATE TABLE "producto_conversiones" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "id" UUID NOT NULL,
   "producto_id" UUID NOT NULL,
   "desde_presentacion_id" UUID NOT NULL,
   "hacia_presentacion_id" UUID NOT NULL,
