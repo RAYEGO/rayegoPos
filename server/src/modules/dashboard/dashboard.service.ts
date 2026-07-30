@@ -8,6 +8,7 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 
 type DashboardFilters = {
   branchId?: string
@@ -43,14 +44,8 @@ function formatFullName(user: { nombres: string; apellidos: string | null }) {
   return `${user.nombres} ${user.apellidos ?? ''}`.trim()
 }
 
-async function getAuthenticatedUserId(request: FastifyRequest) {
-  const { userId } = await getAuthContext(request)
-  return userId
-}
-
 export async function getDashboardOverview(filters: DashboardFilters, request: FastifyRequest) {
-  await getAuthenticatedUserId(request)
-  const { branchId } = await getAuthContext(request)
+  const { branchId, userId } = await getAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -134,6 +129,7 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
       select: {
         id: true,
         fechaApertura: true,
+        cierrePendiente: true,
         montoAperturaEfectivo: true,
         caja: {
           select: {
@@ -269,6 +265,32 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
     .filter((row) => row.stockUnits <= row.threshold)
     .sort((a, b) => a.stockUnits - b.stockUnits)
 
+  const cashClosePending = await (async () => {
+    if (!activeCashDrawer) return null
+
+    const now = new Date()
+    const closePending =
+      activeCashDrawer.cierrePendiente || !isSameDateInTimeZone(activeCashDrawer.fechaApertura, now)
+
+    if (closePending && !activeCashDrawer.cierrePendiente) {
+      await prisma.aperturaCaja.update({
+        where: { id: activeCashDrawer.id },
+        data: {
+          cierrePendiente: true,
+          updatedById: userId,
+        },
+      })
+    }
+
+    if (!closePending) return null
+
+    return {
+      openingId: activeCashDrawer.id,
+      openedAt: activeCashDrawer.fechaApertura.toISOString(),
+      openedDateLabel: formatDateInTimeZone(activeCashDrawer.fechaApertura),
+    }
+  })()
+
   const cashDrawer = activeCashDrawer
     ? (() => {
         const openingAmount = decimalToNumber(activeCashDrawer.montoAperturaEfectivo)
@@ -295,10 +317,12 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
           openedAt: activeCashDrawer.fechaApertura.toISOString(),
           cashierName: `${activeCashDrawer.usuario.nombres} ${activeCashDrawer.usuario.apellidos ?? ''}`.trim(),
           branchName: activeCashDrawer.caja.sucursal.nombre,
+          cashRegisterName: activeCashDrawer.caja.nombre,
           openingAmount,
           expectedAmount,
           countedAmount,
           differenceAmount,
+          closePending: Boolean(cashClosePending),
         }
       })()
     : null
@@ -343,6 +367,7 @@ export async function getDashboardOverview(filters: DashboardFilters, request: F
     alerts: {
       expiringLotsCount: expiringLots.length,
       lowStockProductsCount: lowStockRows.length,
+      cashClosePending,
       expiringLots: expiringLots.map((lot) => ({
         id: lot.id,
         branchName: lot.sucursal.nombre,

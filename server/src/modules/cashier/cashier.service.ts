@@ -9,6 +9,7 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 
 const cashDrawerInclude = {
   caja: {
@@ -65,6 +66,30 @@ function formatFullName(user: { nombres: string; apellidos: string | null }) {
   return `${user.nombres} ${user.apellidos ?? ''}`.trim()
 }
 
+async function ensureOpeningClosePendingState(params: {
+  opening: { id: string; fechaApertura: Date; cierrePendiente: boolean }
+  userId: string
+}) {
+  const now = new Date()
+  if (params.opening.cierrePendiente || !isSameDateInTimeZone(params.opening.fechaApertura, now)) {
+    if (!params.opening.cierrePendiente) {
+      await prisma.aperturaCaja.update({
+        where: { id: params.opening.id },
+        data: { cierrePendiente: true, updatedById: params.userId },
+      })
+    }
+
+    const openingDateLabel = formatDateInTimeZone(params.opening.fechaApertura)
+    throw createHttpError(
+      409,
+      [
+        `Caja pendiente de cierre desde el ${openingDateLabel}.`,
+        'Cierra la caja del día anterior para continuar operando.',
+      ].join('\n\n'),
+    )
+  }
+}
+
 async function getAuthenticatedUserId(request: FastifyRequest) {
   const { userId } = await getAuthContext(request)
   return userId
@@ -104,6 +129,7 @@ export async function getActiveCashDrawer(
     select: {
       id: true,
       fechaApertura: true,
+      cierrePendiente: true,
       montoAperturaEfectivo: true,
     },
   })
@@ -117,6 +143,8 @@ export async function getActiveCashDrawer(
       ].join('\n\n'),
     )
   }
+
+  await ensureOpeningClosePendingState({ opening, userId })
 
   const selectedPaymentMethodId = params?.paymentMethodId
   const selectedPaymentMethod = selectedPaymentMethodId
@@ -325,6 +353,7 @@ export async function getCashierDashboard(
   const cashPaymentSummary = Array.from(paymentSummaryMap.values())
 
   // Map cash drawers to frontend format
+  const now = new Date()
   const mappedCashDrawers = cashDrawers.map((drawer) => {
     const status =
       drawer.estado === 'ABIERTA'
@@ -376,6 +405,9 @@ export async function getCashierDashboard(
       countedAmount,
       differenceAmount,
       status,
+      closePending:
+        drawer.estado === 'ABIERTA' &&
+        (drawer.cierrePendiente || !isSameDateInTimeZone(drawer.fechaApertura, now)),
     }
   })
 
@@ -497,6 +529,15 @@ export async function openCashDrawer(
   })
 
   if (existingOpenDrawerForUser) {
+    await ensureOpeningClosePendingState({
+      opening: {
+        id: existingOpenDrawerForUser.id,
+        fechaApertura: existingOpenDrawerForUser.fechaApertura,
+        cierrePendiente: existingOpenDrawerForUser.cierrePendiente,
+      },
+      userId,
+    })
+
     throw createHttpError(
       400,
       `Ya tienes una caja abierta en ${existingOpenDrawerForUser.caja.sucursal.nombre}. Cierra el turno antes de abrir una nueva caja.`,
@@ -531,6 +572,15 @@ export async function openCashDrawer(
   })
 
   if (existingOpenDrawerForBranch) {
+    await ensureOpeningClosePendingState({
+      opening: {
+        id: existingOpenDrawerForBranch.id,
+        fechaApertura: existingOpenDrawerForBranch.fechaApertura,
+        cierrePendiente: existingOpenDrawerForBranch.cierrePendiente,
+      },
+      userId,
+    })
+
     throw createHttpError(
       400,
       `Ya existe una caja abierta para esta sucursal (responsable: ${formatFullName(existingOpenDrawerForBranch.usuario)}).`,
@@ -666,9 +716,13 @@ export async function closeCashDrawer(
     where: { id: opening.id },
     data: {
       estado: EstadoAperturaCaja.CERRADA,
+      cierrePendiente: false,
       updatedById: userId,
     },
   })
+
+  const isLateClose = !isSameDateInTimeZone(opening.fechaApertura, closing.fechaCierre)
+  const closingObservation = isLateClose ? 'Cierre tardío' : 'Cierre de caja'
 
   // Create the closing movement
   await prisma.movimientoCaja.create({
@@ -677,7 +731,7 @@ export async function closeCashDrawer(
       tipo: TipoMovimientoCaja.CIERRE,
       operacion: OperacionCaja.EGRESO,
       monto: toDecimal(data.countedAmount, 2),
-      observaciones: 'Cierre de caja',
+      observaciones: closingObservation,
       createdById: userId,
       updatedById: userId,
     },
@@ -717,6 +771,15 @@ export async function createCashMovement(
   if (opening.usuarioId !== userId) {
     throw createHttpError(403, 'No tienes permisos para registrar movimientos en esta caja.')
   }
+
+  await ensureOpeningClosePendingState({
+    opening: {
+      id: opening.id,
+      fechaApertura: opening.fechaApertura,
+      cierrePendiente: opening.cierrePendiente,
+    },
+    userId,
+  })
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
     throw createHttpError(400, 'La caja no está abierta.')

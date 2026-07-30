@@ -31,6 +31,7 @@ function toNullableTrimmed(value?: string | null) {
 export type CompanyProfile = {
   id: string
   logoUrl: string | null
+  operationMode: 'IMPLEMENTACION' | 'PRODUCCION'
   razonSocial: string
   nombreComercial: string | null
   ruc: string
@@ -47,6 +48,7 @@ export type CompanyProfile = {
 function mapCompany(company: {
   id: string
   logoUrl: string | null
+  modoOperacion: 'IMPLEMENTACION' | 'PRODUCCION'
   razonSocial: string
   nombreComercial: string | null
   numeroDocumento: string
@@ -62,6 +64,7 @@ function mapCompany(company: {
   return {
     id: company.id,
     logoUrl: company.logoUrl,
+    operationMode: company.modoOperacion,
     razonSocial: company.razonSocial,
     nombreComercial: company.nombreComercial,
     ruc: company.numeroDocumento,
@@ -88,6 +91,7 @@ export async function getCompanyProfile(request: FastifyRequest) {
     select: {
       id: true,
       logoUrl: true,
+      modoOperacion: true,
       razonSocial: true,
       nombreComercial: true,
       numeroDocumento: true,
@@ -163,6 +167,70 @@ export async function updateCompanyProfile(
     select: {
       id: true,
       logoUrl: true,
+      modoOperacion: true,
+      razonSocial: true,
+      nombreComercial: true,
+      numeroDocumento: true,
+      direccion: true,
+      telefono: true,
+      email: true,
+      monedaBase: true,
+      igvPorDefecto: true,
+      activo: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+
+  return { company: mapCompany(updated) }
+}
+
+export type UpdateCompanyOperationModePayload = {
+  operationMode: 'PRODUCCION'
+}
+
+export async function updateCompanyOperationMode(
+  payload: UpdateCompanyOperationModePayload,
+  request: FastifyRequest,
+) {
+  assertAdmin(request)
+  const { companyId, userId } = await getAuthContext(request)
+
+  const existing = await prisma.empresa.findFirst({
+    where: {
+      id: companyId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      modoOperacion: true,
+    },
+  })
+
+  if (!existing) {
+    throw createHttpError(404, 'La empresa no está disponible.')
+  }
+
+  if (existing.modoOperacion === 'PRODUCCION') {
+    throw createHttpError(409, 'La empresa ya se encuentra en modo PRODUCCIÓN.')
+  }
+
+  if (payload.operationMode !== 'PRODUCCION') {
+    throw createHttpError(400, 'El modo de operación indicado no es válido.')
+  }
+
+  const updated = await prisma.empresa.update({
+    where: {
+      id: companyId,
+    },
+    data: {
+      modoOperacion: 'PRODUCCION',
+      updatedById: userId,
+    },
+    select: {
+      id: true,
+      logoUrl: true,
+      modoOperacion: true,
       razonSocial: true,
       nombreComercial: true,
       numeroDocumento: true,
@@ -341,6 +409,7 @@ export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, reque
     select: {
       id: true,
       logoUrl: true,
+      modoOperacion: true,
       razonSocial: true,
       nombreComercial: true,
       numeroDocumento: true,
@@ -403,6 +472,7 @@ export async function deleteCompanyLogo(request: FastifyRequest) {
     select: {
       id: true,
       logoUrl: true,
+      modoOperacion: true,
       razonSocial: true,
       nombreComercial: true,
       numeroDocumento: true,

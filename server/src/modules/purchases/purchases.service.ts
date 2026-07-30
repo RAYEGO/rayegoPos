@@ -1,12 +1,10 @@
 import {
   CodigoFormaPago,
-  EmpaqueProducto,
   EstadoCompra,
   EstadoCompraFinanciero,
   EstadoCompraLogistico,
   EstadoAperturaCaja,
   EstadoLote,
-  ModoEmpaqueProducto,
   OrigenMovimientoInventario,
   OperacionCaja,
   Prisma,
@@ -17,6 +15,14 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
+import {
+  buildPackagingEdges,
+  resolveBasePresentation,
+  resolveFactorToBase,
+  resolvePresentationEntry,
+  resolvePresentationFactors,
+} from '../../lib/productPackaging.js'
 
 const purchaseInclude = {
   sucursal: {
@@ -66,6 +72,12 @@ const purchaseInclude = {
           },
         },
       },
+      presentacion: {
+        select: {
+          id: true,
+          nombre: true,
+        },
+      },
       lotes: {
         where: {
           deletedAt: null,
@@ -111,7 +123,6 @@ type CreatePurchaseOrderPayload = {
   items: Array<{
     productoId: string
     cantidad: number
-    empaque?: EmpaqueProducto
     costoUnitario: number
     porcentajeImpuesto?: number
   }>
@@ -776,11 +787,14 @@ function mapPurchaseReceipts(
         (sum, lot) => sum + decimalToNumber(lot.stockInicial),
         0,
       )
-      const packFactor = detail.factorEmpaque ?? null
-      const orderedPacks = detail.cantidadEmpaque ?? null
-      const receivedPacks = packFactor ? Number((receivedUnits / packFactor).toFixed(4)) : null
-      const pendingPacks = packFactor
-        ? Number(((orderedUnits - receivedUnits) / packFactor).toFixed(4))
+      const presentationFactor = detail.factorPresentacion ?? detail.factorEmpaque ?? null
+      const orderedPresentationQuantity =
+        detail.cantidadPresentacion ?? detail.cantidadEmpaque ?? null
+      const receivedPresentationQuantity = presentationFactor
+        ? Number((receivedUnits / presentationFactor).toFixed(4))
+        : null
+      const pendingPresentationQuantity = presentationFactor
+        ? Number(((orderedUnits - receivedUnits) / presentationFactor).toFixed(4))
         : null
       const latestLot = [...detail.lotes].sort(
         (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
@@ -805,11 +819,12 @@ function mapPurchaseReceipts(
         receivedUnits,
         orderedUnits,
         pendingUnits: Math.max(0, Number((orderedUnits - receivedUnits).toFixed(4))),
-        packaging: detail.empaque ?? null,
-        packFactor,
-        orderedPacks,
-        receivedPacks,
-        pendingPacks: pendingPacks === null ? null : Math.max(0, pendingPacks),
+        presentationName: detail.presentacion?.nombre ?? null,
+        presentationFactor,
+        orderedPresentationQuantity,
+        receivedPresentationQuantity,
+        pendingPresentationQuantity:
+          pendingPresentationQuantity === null ? null : Math.max(0, pendingPresentationQuantity),
         returnedUnits,
         returnedAmount,
         availableUnits: decimalToNumber(latestLot?.stockDisponible),
@@ -896,10 +911,31 @@ export async function getPurchaseDashboard(
         id: true,
         nombre: true,
         sku: true,
-        modoEmpaque: true,
-        unidadesPorBlister: true,
-        blistersPorCaja: true,
+        compraPresentacionId: true,
         costoReferencia: true,
+        presentacionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            esBase: true,
+            permiteCompra: true,
+            permiteVenta: true,
+            precioVenta: true,
+            presentacion: {
+              select: {
+                id: true,
+                nombre: true,
+              },
+            },
+          },
+        },
+        conversionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            desdePresentacionId: true,
+            haciaPresentacionId: true,
+            cantidad: true,
+          },
+        },
         unidadMedida: {
           select: {
             simbolo: true,
@@ -1103,14 +1139,37 @@ export async function getPurchaseDashboard(
         })),
       ),
       products: products.map((product) => ({
+        packaging: (() => {
+          const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
+          const basePresentationId = basePresentation?.presentacion.id ?? null
+          if (!basePresentationId) return null
+
+          const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
+          const factors = resolvePresentationFactors({
+            basePresentationId,
+            presentationIds: (product.presentacionesEmpaque ?? []).map((entry) => entry.presentacion.id),
+            edges,
+          })
+
+          return {
+            basePresentationId,
+            purchasePresentationId: product.compraPresentacionId ?? basePresentationId,
+            presentations: (product.presentacionesEmpaque ?? []).map((entry) => ({
+              id: entry.presentacion.id,
+              name: entry.presentacion.nombre,
+              isBase: entry.esBase,
+              allowsPurchase: entry.permiteCompra,
+              allowsSale: entry.permiteVenta,
+              salePrice: entry.precioVenta ? decimalToNumber(entry.precioVenta) : null,
+              factorToBase: factors.get(entry.presentacion.id) ?? null,
+            })),
+          }
+        })(),
         id: product.id,
         name: product.nombre,
         sku: product.sku,
         unitSymbol: product.unidadMedida.simbolo,
         referenceCost: decimalToNumber(product.costoReferencia),
-        packagingMode: product.modoEmpaque,
-        unitsPerBlister: product.unidadesPorBlister,
-        blistersPerBox: product.blistersPorCaja,
       })),
     },
   }
@@ -1200,9 +1259,30 @@ export async function createPurchaseOrder(
           id: true,
           nombre: true,
           sku: true,
-          modoEmpaque: true,
-          unidadesPorBlister: true,
-          blistersPorCaja: true,
+          compraPresentacionId: true,
+          presentacionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              esBase: true,
+              permiteCompra: true,
+              permiteVenta: true,
+              precioVenta: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  nombre: true,
+                },
+              },
+            },
+          },
+          conversionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              desdePresentacionId: true,
+              haciaPresentacionId: true,
+              cantidad: true,
+            },
+          },
           unidadMedida: {
             select: {
               simbolo: true,
@@ -1238,33 +1318,13 @@ export async function createPurchaseOrder(
       const requestedUnitCost = Number(item.costoUnitario)
       const taxRate = Number(item.porcentajeImpuesto ?? 18)
       const product = productMap.get(item.productoId)!
-      const packType =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? (item.empaque ?? EmpaqueProducto.CAJA)
-          : null
-      const packFactor =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? packType === EmpaqueProducto.UNIDAD
-            ? 1
-            : packType === EmpaqueProducto.BLISTER
-              ? product.unidadesPorBlister ?? null
-              : packType === EmpaqueProducto.CAJA
-                ? product.unidadesPorBlister && product.blistersPorCaja
-                  ? product.unidadesPorBlister * product.blistersPorCaja
-                  : null
-                : null
-          : null
-      const quantity =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? requestedQuantity * Number(packFactor)
-          : requestedQuantity
-      const unitCost =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? requestedUnitCost / Number(packFactor)
-          : requestedUnitCost
 
       if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
         throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
+      }
+
+      if (!Number.isInteger(requestedQuantity)) {
+        throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
       }
 
       if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
@@ -1281,29 +1341,46 @@ export async function createPurchaseOrder(
         )
       }
 
-      if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
-        if (!Number.isInteger(requestedQuantity)) {
-          throw createHttpError(
-            400,
-            'La cantidad debe ser un entero al comprar por caja o blíster.',
-          )
-        }
+      const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
+      if (!basePresentation) {
+        throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
+      }
 
-        if (!packFactor || !Number.isFinite(Number(packFactor)) || Number(packFactor) <= 0) {
-          throw createHttpError(400, 'La configuración de empaque del producto no es válida.')
-        }
+      const purchasePresentationId = product.compraPresentacionId ?? basePresentation.presentacion.id
 
-        if (!Number.isInteger(Number(packFactor))) {
-          throw createHttpError(400, 'El factor de empaque debe ser un entero.')
-        }
+      const resolvedPresentation = resolvePresentationEntry({
+        operation: 'PURCHASE',
+        presentationId: purchasePresentationId,
+        presentations: product.presentacionesEmpaque ?? [],
+      })
 
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
-        }
+      if (!resolvedPresentation.ok) {
+        throw createHttpError(400, resolvedPresentation.error)
+      }
 
-        if (!Number.isFinite(unitCost) || unitCost < 0) {
-          throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
-        }
+      const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
+      const factor = resolveFactorToBase({
+        presentationId: purchasePresentationId,
+        basePresentationId: basePresentation.presentacion.id,
+        edges,
+      })
+
+      if (!factor) {
+        throw createHttpError(
+          400,
+          'No fue posible resolver la conversión hacia la presentación base del producto.',
+        )
+      }
+
+      const quantity = requestedQuantity * factor
+      const unitCost = requestedUnitCost / factor
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+      }
+
+      if (!Number.isFinite(unitCost) || unitCost < 0) {
+        throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
       }
 
       const baseAmount = quantity * unitCost
@@ -1320,10 +1397,11 @@ export async function createPurchaseOrder(
         impuestoTotal: taxAmount,
         total: totalAmount,
         product,
-        pack: {
-          type: packType,
-          quantity: product.modoEmpaque === ModoEmpaqueProducto.BLISTER ? requestedQuantity : null,
-          factor: packFactor,
+        presentation: {
+          id: purchasePresentationId,
+          name: resolvedPresentation.entry.presentacion.nombre,
+          quantity: requestedQuantity,
+          factor,
         },
       }
     })
@@ -1358,15 +1436,12 @@ export async function createPurchaseOrder(
           create: lineItems.map((item) => ({
             productoId: item.productoId,
             cantidad: item.cantidad,
-            empaque: item.pack.type ?? undefined,
-            cantidadEmpaque:
-              item.pack.quantity === null || item.pack.quantity === undefined
+            presentacionId: item.presentation.id,
+            cantidadPresentacion:
+              item.presentation.quantity === null || item.presentation.quantity === undefined
                 ? undefined
-                : Math.trunc(item.pack.quantity),
-            factorEmpaque:
-              item.pack.factor === null || item.pack.factor === undefined
-                ? undefined
-                : Math.trunc(item.pack.factor),
+                : Math.trunc(item.presentation.quantity),
+            factorPresentacion: Math.trunc(item.presentation.factor),
             costoUnitario: toDecimal(item.costoUnitario, 6),
             descuentoTotal: toDecimal(0, 2),
             porcentajeImpuesto: toDecimal(item.porcentajeImpuesto, 4),
@@ -1418,10 +1493,10 @@ export async function createPurchaseOrder(
         productId: item.productoId,
         productName: item.product.nombre,
         sku: item.product.sku,
-        unitSymbol: item.product.unidadMedida.simbolo,
-        quantity: item.pack.quantity ?? item.cantidad,
+        unitSymbol: item.presentation.name ?? item.product.unidadMedida.simbolo,
+        quantity: item.presentation.quantity ?? item.cantidad,
         unitCost:
-          item.pack.quantity === null || item.pack.quantity === undefined
+          item.presentation.quantity === null || item.presentation.quantity === undefined
             ? item.costoUnitario
             : item.requestedUnitCost,
         taxRate: item.porcentajeImpuesto,
@@ -1491,6 +1566,50 @@ export async function registerPurchasePayment(
 
   if (Number.isNaN(paymentDate.getTime())) {
     throw createHttpError(400, 'La fecha del pago no es válida.')
+  }
+
+  const pendingOpening = await prisma.aperturaCaja.findFirst({
+    where: {
+      deletedAt: null,
+      estado: EstadoAperturaCaja.ABIERTA,
+      usuarioId: userId,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+      },
+    },
+    select: {
+      id: true,
+      fechaApertura: true,
+      cierrePendiente: true,
+    },
+  })
+
+  if (pendingOpening) {
+    const now = new Date()
+    const closePending =
+      pendingOpening.cierrePendiente || !isSameDateInTimeZone(pendingOpening.fechaApertura, now)
+
+    if (closePending) {
+      if (!pendingOpening.cierrePendiente) {
+        await prisma.aperturaCaja.update({
+          where: { id: pendingOpening.id },
+          data: {
+            cierrePendiente: true,
+            updatedById: userId,
+          },
+        })
+      }
+
+      const openingDateLabel = formatDateInTimeZone(pendingOpening.fechaApertura)
+      throw createHttpError(
+        409,
+        [
+          `Caja pendiente de cierre desde el ${openingDateLabel}.`,
+          'Cierra la caja del día anterior para continuar registrando pagos.',
+        ].join('\n\n'),
+      )
+    }
   }
 
   let result: {
@@ -1951,22 +2070,24 @@ async function receivePurchaseItemInTransaction(
   const receivedInput = Number(prepared.receivedUnits)
   const reservedInput = Number(prepared.reservedUnits)
   const blockedInput = Number(prepared.blockedUnits)
-  const packFactor = detail.factorEmpaque ? Number(detail.factorEmpaque) : 1
-  const receivedUnits = detail.factorEmpaque ? receivedInput * packFactor : receivedInput
-  const reservedUnits = detail.factorEmpaque ? reservedInput * packFactor : reservedInput
-  const blockedUnits = detail.factorEmpaque ? blockedInput * packFactor : blockedInput
+  const presentationFactor = detail.factorPresentacion ?? detail.factorEmpaque ?? 1
+  const receivedUnits = receivedInput * presentationFactor
+  const reservedUnits = reservedInput * presentationFactor
+  const blockedUnits = blockedInput * presentationFactor
   const availableUnits = receivedUnits - reservedUnits - blockedUnits
 
-  if (detail.factorEmpaque) {
-    if (!Number.isInteger(receivedInput)) {
-      throw createHttpError(400, 'La cantidad recibida debe ser un entero.')
-    }
-    if (!Number.isInteger(reservedInput) || !Number.isInteger(blockedInput)) {
-      throw createHttpError(400, 'El stock reservado y bloqueado debe ser un entero.')
-    }
-    if (!Number.isFinite(packFactor) || !Number.isInteger(packFactor) || packFactor <= 0) {
-      throw createHttpError(400, 'El factor de empaque configurado no es válido.')
-    }
+  if (!Number.isInteger(receivedInput)) {
+    throw createHttpError(400, 'La cantidad recibida debe ser un entero.')
+  }
+  if (!Number.isInteger(reservedInput) || !Number.isInteger(blockedInput)) {
+    throw createHttpError(400, 'El stock reservado y bloqueado debe ser un entero.')
+  }
+  if (
+    !Number.isFinite(presentationFactor) ||
+    !Number.isInteger(presentationFactor) ||
+    presentationFactor <= 0
+  ) {
+    throw createHttpError(400, 'El factor de presentación configurado no es válido.')
   }
 
   if (!Number.isFinite(receivedUnits) || receivedUnits <= 0) {

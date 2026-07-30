@@ -60,6 +60,12 @@ type DialogState = {
   record: LaboratoryRecord | null
 }
 
+type DeleteBlockedState = {
+  open: boolean
+  message: string
+  record: LaboratoryRecord
+}
+
 type ImportRowStatus = 'create' | 'skip' | 'error'
 
 type ImportRow = {
@@ -560,6 +566,7 @@ export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLa
   const [error, setError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState>({ open: false, mode: 'create', record: null })
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [deleteBlocked, setDeleteBlocked] = useState<DeleteBlockedState | null>(null)
 
   const loadLaboratories = useCallback(async () => {
     if (!accessToken) return
@@ -667,9 +674,32 @@ export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLa
       setSelectedId(null)
       await loadLaboratories()
     } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 409) {
+        setDeleteBlocked({ open: true, message: nextError.message, record: selected })
+        return
+      }
+
       toast.error(getApiErrorMessage(nextError))
     }
   }, [accessToken, loadLaboratories, selected])
+
+  const handleBlockedInactivate = useCallback(async () => {
+    if (!accessToken) return
+    if (!deleteBlocked) return
+
+    try {
+      await productsService.updateMasterLaboratory(accessToken, deleteBlocked.record.id, {
+        nombre: deleteBlocked.record.name,
+        descripcion: deleteBlocked.record.description || undefined,
+        activo: false,
+      })
+      toast.success('Laboratorio marcado como Inactivo.')
+      setDeleteBlocked(null)
+      await loadLaboratories()
+    } catch (nextError) {
+      toast.error(getApiErrorMessage(nextError))
+    }
+  }, [accessToken, deleteBlocked, loadLaboratories])
 
   const handleSubmit = useCallback(
     async (payload: LaboratoryFormSubmitPayload) => {
@@ -936,9 +966,36 @@ export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLa
               void loadLaboratories()
             }}
           />
+
+          <Dialog
+            open={deleteBlocked?.open ?? false}
+            onOpenChange={(open) => {
+              if (!open) setDeleteBlocked(null)
+            }}
+          >
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>No se puede eliminar</DialogTitle>
+                <DialogDescription className="whitespace-pre-line">
+                  {deleteBlocked?.message}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button type="button" variant="outline" onClick={() => setDeleteBlocked(null)}>
+                  Cerrar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleBlockedInactivate()}
+                  disabled={!deleteBlocked?.record.active || canManage === false}
+                >
+                  Marcar Inactivo
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>
   )
 }
-

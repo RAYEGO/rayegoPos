@@ -1,4 +1,4 @@
-import { EmpaqueProducto, EstadoVenta, TipoComprobante } from '@prisma/client'
+import { EstadoVenta, TipoComprobante } from '@prisma/client'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { cancelSale, createSale, getSaleReceipt, getSalesDashboard } from '../modules/sales/sales.service.js'
@@ -19,7 +19,7 @@ const createSaleSchema = z.object({
       z.object({
         productoId: z.string().uuid(),
         cantidad: z.number().int().positive(),
-        empaque: z.nativeEnum(EmpaqueProducto).optional(),
+        presentacionId: z.string().uuid(),
         descuentoTotal: z.number().min(0).optional(),
       }),
     )

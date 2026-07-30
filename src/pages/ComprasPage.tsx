@@ -85,7 +85,6 @@ const createPurchaseSchema = z.object({
       z.object({
         productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
         cantidad: z.number().int().positive('La cantidad debe ser mayor a 0.'),
-        empaque: z.enum(['UNIDAD', 'BLISTER', 'CAJA']).optional(),
         costoUnitario: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
         porcentajeImpuesto: z
           .number()
@@ -142,7 +141,7 @@ type OrderReceiptDraft = {
   detailId: string
   productName: string
   pendingUnits: number
-  packFactor: number | null
+  presentationFactor: number | null
   pendingQuantity: number
   unitLabel: string
   include: boolean
@@ -168,7 +167,6 @@ const defaultFormValues: CreatePurchaseFormValues = {
     {
       productoId: '',
       cantidad: 1,
-      empaque: 'UNIDAD',
       costoUnitario: 0,
       porcentajeImpuesto: 18,
     },
@@ -554,7 +552,7 @@ export function ComprasPage() {
     }
 
     const received = Math.max(0, item.cantidadRecibida - item.stockReservado - item.stockBloqueado)
-    const factor = item.packFactor ?? 1
+    const factor = item.presentationFactor ?? 1
     return sum + received * factor
   }, 0)
 
@@ -604,7 +602,6 @@ export function ComprasPage() {
       items: values.items.map((item) => ({
         productoId: item.productoId,
         cantidad: Number(item.cantidad),
-        empaque: item.empaque === 'UNIDAD' ? undefined : item.empaque,
         costoUnitario: Number(item.costoUnitario),
         porcentajeImpuesto: Number(item.porcentajeImpuesto),
       })),
@@ -637,8 +634,9 @@ export function ComprasPage() {
   function openReceiveDialog(receipt: PurchasesDashboardResponse['receipts'][number]) {
     setSelectedReceiptId(receipt.id)
     const pendingQuantity =
-      typeof receipt.pendingPacks === 'number' && receipt.pendingPacks > 0
-        ? receipt.pendingPacks
+      typeof receipt.pendingPresentationQuantity === 'number' &&
+      receipt.pendingPresentationQuantity > 0
+        ? receipt.pendingPresentationQuantity
         : receipt.pendingUnits
     receiveForm.reset({
       ...defaultReceiveFormValues,
@@ -938,21 +936,17 @@ export function ComprasPage() {
 
     const nextDrafts: OrderReceiptDraft[] = pendingReceipts.map((receipt, index) => {
       const pendingQuantity =
-        typeof receipt.pendingPacks === 'number' && receipt.pendingPacks > 0
-          ? receipt.pendingPacks
+        typeof receipt.pendingPresentationQuantity === 'number' &&
+        receipt.pendingPresentationQuantity > 0
+          ? receipt.pendingPresentationQuantity
           : receipt.pendingUnits
-      const unitLabel =
-        receipt.packaging === 'CAJA'
-          ? 'Caja'
-          : receipt.packaging === 'BLISTER'
-            ? 'Blíster'
-            : 'Unidades'
+      const unitLabel = receipt.presentationName ?? 'Unidades'
 
       return {
         detailId: receipt.id,
         productName: receipt.productName,
         pendingUnits: receipt.pendingUnits,
-        packFactor: receipt.packFactor,
+        presentationFactor: receipt.presentationFactor,
         pendingQuantity,
         unitLabel,
         include: true,
@@ -1890,7 +1884,6 @@ export function ComprasPage() {
                     append({
                       productoId: '',
                       cantidad: 1,
-                      empaque: 'UNIDAD',
                       costoUnitario: 0,
                       porcentajeImpuesto: 18,
                     })
@@ -1907,6 +1900,19 @@ export function ComprasPage() {
                   const selectedProduct = options.products.find(
                     (product) => product.id === selectedProductId,
                   )
+                  const purchasePresentationId =
+                    selectedProduct?.packaging?.purchasePresentationId ?? null
+                  const purchasePresentation =
+                    purchasePresentationId && selectedProduct?.packaging?.presentations?.length
+                      ? selectedProduct.packaging.presentations.find(
+                          (entry) => entry.id === purchasePresentationId,
+                        ) ?? null
+                      : null
+                  const purchasePresentationName = purchasePresentation?.name ?? null
+                  const purchasePresentationFactor =
+                    purchasePresentation?.factorToBase && purchasePresentation.factorToBase > 0
+                      ? purchasePresentation.factorToBase
+                      : null
 
                   return (
                     <div key={field.id} className="grid gap-4 rounded-2xl border p-4 lg:grid-cols-[1.6fr_0.45fr_0.55fr_0.45fr_auto]">
@@ -1937,11 +1943,6 @@ export function ComprasPage() {
                                 }
 
                                 if (product) {
-                                  form.setValue(
-                                    `items.${index}.empaque`,
-                                    product.packagingMode === 'BLISTER' ? 'CAJA' : 'UNIDAD',
-                                    { shouldDirty: true },
-                                  )
                                 }
                               }}
                             >
@@ -1970,26 +1971,6 @@ export function ComprasPage() {
 
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Cantidad</label>
-                        {selectedProduct?.packagingMode === 'BLISTER' ? (
-                          <Controller
-                            control={form.control}
-                            name={`items.${index}.empaque`}
-                            render={({ field: packageField }) => (
-                              <Select
-                                value={packageField.value || 'CAJA'}
-                                onValueChange={packageField.onChange}
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue placeholder="Empaque" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="CAJA">Caja</SelectItem>
-                                  <SelectItem value="BLISTER">Blíster</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
-                          />
-                        ) : null}
                         <Input
                           type="number"
                           step="1"
@@ -2000,12 +1981,9 @@ export function ComprasPage() {
                         <FieldError
                           message={form.formState.errors.items?.[index]?.cantidad?.message}
                         />
-                        {selectedProduct?.packagingMode === 'BLISTER' &&
-                        selectedProduct.unitsPerBlister &&
-                        selectedProduct.blistersPerBox ? (
+                        {selectedProduct && purchasePresentationFactor ? (
                           <p className="text-small text-muted-foreground">
-                            1 caja = {selectedProduct.blistersPerBox} blíster · 1 blíster ={' '}
-                            {selectedProduct.unitsPerBlister} unidades
+                            1 {purchasePresentationName ?? 'presentación'} = {purchasePresentationFactor} unidades base
                           </p>
                         ) : null}
                       </div>
@@ -2055,10 +2033,8 @@ export function ComprasPage() {
                           </p>
                           {selectedProduct ? (
                             <p>
-                              {selectedProduct.packagingMode === 'BLISTER'
-                                ? watchedItems[index]?.empaque === 'BLISTER'
-                                  ? 'Blíster'
-                                  : 'Caja'
+                              {purchasePresentationName
+                                ? purchasePresentationName
                                 : selectedProduct.unitSymbol}
                             </p>
                           ) : null}
@@ -2162,9 +2138,9 @@ export function ComprasPage() {
                 <p className="text-sm text-muted-foreground">
                   {selectedReceipt
                     ? `${selectedReceipt.productName} · ${selectedReceipt.purchaseCode} · pendiente ${
-                        typeof selectedReceipt.pendingPacks === 'number'
-                          ? `${selectedReceipt.pendingPacks.toFixed(0)} ${
-                              selectedReceipt.packaging === 'CAJA' ? 'cajas' : 'blísteres'
+                        typeof selectedReceipt.pendingPresentationQuantity === 'number'
+                          ? `${selectedReceipt.pendingPresentationQuantity.toFixed(0)} ${
+                              selectedReceipt.presentationName ?? 'unidades'
                             }`
                           : `${selectedReceipt.pendingUnits.toFixed(0)} unidades`
                       }`

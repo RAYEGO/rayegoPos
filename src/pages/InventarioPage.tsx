@@ -105,6 +105,7 @@ const createLotSchema = z
 
 const adjustLotSchema = z.object({
   lotId: z.string().uuid({ message: 'Selecciona un lote.' }),
+  presentacionId: z.string().uuid({ message: 'Selecciona una presentación.' }),
   target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
   operation: z.enum(['SUMAR', 'RESTAR']),
   quantity: z.number().int().positive('Ingresa una cantidad mayor a 0.'),
@@ -114,6 +115,7 @@ const adjustLotSchema = z.object({
 const transferLotSchema = z.object({
   lotId: z.string().uuid({ message: 'Selecciona un lote.' }),
   destinationBranchId: z.string().uuid({ message: 'Selecciona una sucursal destino.' }),
+  presentacionId: z.string().uuid({ message: 'Selecciona una presentación.' }),
   quantity: z.number().int().positive('Ingresa una cantidad mayor a 0.'),
   destinationWarehouse: z.string().max(120).optional(),
   observaciones: z.string().max(255).optional(),
@@ -140,6 +142,7 @@ const defaultCreateFormValues: CreateLotFormValues = {
 
 const defaultAdjustFormValues: AdjustLotFormValues = {
   lotId: '',
+  presentacionId: '',
   target: 'DISPONIBLE',
   operation: 'RESTAR',
   quantity: 0,
@@ -149,6 +152,7 @@ const defaultAdjustFormValues: AdjustLotFormValues = {
 const defaultTransferFormValues: TransferLotFormValues = {
   lotId: '',
   destinationBranchId: '',
+  presentacionId: '',
   quantity: 0,
   destinationWarehouse: '',
   observaciones: '',
@@ -371,6 +375,7 @@ export function InventarioPage() {
   const watchedReserved = createForm.watch('stockReservado')
   const watchedBlocked = createForm.watch('stockBloqueado')
   const selectedAdjustLotId = adjustForm.watch('lotId')
+  const adjustPresentationId = adjustForm.watch('presentacionId')
   const adjustTarget = adjustForm.watch('target')
   const adjustOperation = adjustForm.watch('operation')
   const adjustQuantity = adjustForm.watch('quantity')
@@ -393,15 +398,34 @@ export function InventarioPage() {
     [dashboard.lots, selectedTransferLotId],
   )
 
+  const selectedAdjustProduct = useMemo(() => {
+    if (!selectedAdjustLot) return null
+    return dashboard.options.products.find((product) => product.id === selectedAdjustLot.productId) ?? null
+  }, [dashboard.options.products, selectedAdjustLot])
+
+  const selectedTransferProduct = useMemo(() => {
+    if (!selectedTransferLot) return null
+    return dashboard.options.products.find((product) => product.id === selectedTransferLot.productId) ?? null
+  }, [dashboard.options.products, selectedTransferLot])
+
+  const adjustFactorToBase = useMemo(() => {
+    const factor =
+      selectedAdjustProduct?.packaging?.presentations.find(
+        (entry) => entry.id === adjustPresentationId,
+      )?.factorToBase ?? null
+
+    return factor && factor > 0 ? factor : 1
+  }, [adjustPresentationId, selectedAdjustProduct])
+
   const adjustmentPreview = useMemo(
     () =>
       getAdjustmentPreview(
         selectedAdjustLot,
         adjustTarget,
         adjustOperation,
-        Number(adjustQuantity || 0),
+        Number(adjustQuantity || 0) * adjustFactorToBase,
       ),
-    [adjustOperation, adjustQuantity, adjustTarget, selectedAdjustLot],
+    [adjustFactorToBase, adjustOperation, adjustQuantity, adjustTarget, selectedAdjustLot],
   )
 
   const createWarehouseSuggestions = useMemo(() => {
@@ -489,9 +513,21 @@ export function InventarioPage() {
   }, [productFilter, search, statusFilter])
 
   function openAdjustDialog(lot?: InventoryLotView) {
+    const lotId = lot?.id ?? dashboard.lots[0]?.id ?? ''
+    const nextLot = lotId ? dashboard.lots.find((entry) => entry.id === lotId) ?? lot : lot
+    const product =
+      nextLot
+        ? dashboard.options.products.find((entry) => entry.id === nextLot.productId) ?? null
+        : null
+    const presentacionId =
+      product?.packaging?.basePresentationId ??
+      product?.packaging?.presentations[0]?.id ??
+      ''
+
     adjustForm.reset({
       ...defaultAdjustFormValues,
-      lotId: lot?.id ?? dashboard.lots[0]?.id ?? '',
+      lotId,
+      presentacionId,
     })
     setIsAdjustDialogOpen(true)
   }
@@ -514,9 +550,21 @@ export function InventarioPage() {
   }, [dashboard.lots, isLoading, pendingAction])
 
   function openTransferDialog(lot?: InventoryLotView) {
+    const lotId = lot?.id ?? dashboard.lots[0]?.id ?? ''
+    const nextLot = lotId ? dashboard.lots.find((entry) => entry.id === lotId) ?? lot : lot
+    const product =
+      nextLot
+        ? dashboard.options.products.find((entry) => entry.id === nextLot.productId) ?? null
+        : null
+    const presentacionId =
+      product?.packaging?.basePresentationId ??
+      product?.packaging?.presentations[0]?.id ??
+      ''
+
     transferForm.reset({
       ...defaultTransferFormValues,
-      lotId: lot?.id ?? dashboard.lots[0]?.id ?? '',
+      lotId,
+      presentacionId,
     })
     setIsTransferDialogOpen(true)
   }
@@ -569,6 +617,7 @@ export function InventarioPage() {
 
     const payload: AdjustInventoryLotPayload = {
       lotId: values.lotId,
+      presentacionId: values.presentacionId,
       target: values.target,
       operation: values.operation,
       quantity: values.quantity,
@@ -604,6 +653,7 @@ export function InventarioPage() {
     const payload: TransferInventoryLotPayload = {
       lotId: values.lotId,
       destinationBranchId: values.destinationBranchId,
+      presentacionId: values.presentacionId,
       quantity: values.quantity,
       destinationWarehouse: values.destinationWarehouse?.trim() || undefined,
       observaciones: values.observaciones?.trim() || undefined,
@@ -1349,7 +1399,27 @@ export function InventarioPage() {
                   control={adjustForm.control}
                   name="lotId"
                   render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                    <Select
+                      value={field.value || undefined}
+                      onValueChange={(value) => {
+                        field.onChange(value)
+                        const nextLot = dashboard.lots.find((entry) => entry.id === value) ?? null
+                        const product =
+                          nextLot
+                            ? dashboard.options.products.find(
+                                (entry) => entry.id === nextLot.productId,
+                              ) ?? null
+                            : null
+                        const presentacionId =
+                          product?.packaging?.basePresentationId ??
+                          product?.packaging?.presentations[0]?.id ??
+                          ''
+                        adjustForm.setValue('presentacionId', presentacionId, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecciona lote" />
                       </SelectTrigger>
@@ -1364,6 +1434,36 @@ export function InventarioPage() {
                   )}
                 />
                 <FieldError message={adjustForm.formState.errors.lotId?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Presentación</label>
+                <Controller
+                  control={adjustForm.control}
+                  name="presentacionId"
+                  render={({ field }) => (
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona presentación" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(selectedAdjustProduct?.packaging?.presentations ?? [])
+                          .filter(
+                            (entry) =>
+                              entry.factorToBase !== null && entry.factorToBase > 0,
+                          )
+                          .map((entry) => (
+                            <SelectItem key={entry.id} value={entry.id}>
+                              {entry.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <FieldError
+                  message={adjustForm.formState.errors.presentacionId?.message}
+                />
               </div>
 
               <div className="rounded-2xl border bg-muted/20 p-4 md:col-span-2">
@@ -1525,7 +1625,27 @@ export function InventarioPage() {
                   control={transferForm.control}
                   name="lotId"
                   render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                    <Select
+                      value={field.value || undefined}
+                      onValueChange={(value) => {
+                        field.onChange(value)
+                        const nextLot = dashboard.lots.find((entry) => entry.id === value) ?? null
+                        const product =
+                          nextLot
+                            ? dashboard.options.products.find(
+                                (entry) => entry.id === nextLot.productId,
+                              ) ?? null
+                            : null
+                        const presentacionId =
+                          product?.packaging?.basePresentationId ??
+                          product?.packaging?.presentations[0]?.id ??
+                          ''
+                        transferForm.setValue('presentacionId', presentacionId, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecciona lote" />
                       </SelectTrigger>
@@ -1540,6 +1660,36 @@ export function InventarioPage() {
                   )}
                 />
                 <FieldError message={transferForm.formState.errors.lotId?.message} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Presentación</label>
+                <Controller
+                  control={transferForm.control}
+                  name="presentacionId"
+                  render={({ field }) => (
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona presentación" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(selectedTransferProduct?.packaging?.presentations ?? [])
+                          .filter(
+                            (entry) =>
+                              entry.factorToBase !== null && entry.factorToBase > 0,
+                          )
+                          .map((entry) => (
+                            <SelectItem key={entry.id} value={entry.id}>
+                              {entry.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <FieldError
+                  message={transferForm.formState.errors.presentacionId?.message}
+                />
               </div>
 
               <div className="rounded-2xl border bg-muted/20 p-4 md:col-span-2">

@@ -22,6 +22,14 @@ export const companyService = {
     })
   },
 
+  setOperationModeProduction(accessToken: string) {
+    return apiRequest<{ company: CompanyProfile }>('/api/settings/company/operation-mode', {
+      method: 'PATCH',
+      accessToken,
+      body: { operationMode: 'PRODUCCION' },
+    })
+  },
+
   uploadLogo(accessToken: string, payload: UploadCompanyLogoPayload) {
     return apiRequest<UploadCompanyLogoResponse>('/api/settings/company/logo', {
       method: 'POST',

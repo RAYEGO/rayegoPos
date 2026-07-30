@@ -39,10 +39,12 @@ export type DashboardCashDrawer = {
   openedAt: string
   cashierName: string
   branchName: string
+  cashRegisterName: string
   openingAmount: number
   expectedAmount: number
   countedAmount: number
   differenceAmount: number
+  closePending: boolean
   lastCashCount: {
     createdAt: string
     expectedCashAmount: number
@@ -74,6 +76,11 @@ export type DashboardOverviewResponse = {
   alerts: {
     expiringLotsCount: number
     lowStockProductsCount: number
+    cashClosePending: {
+      openingId: string
+      openedAt: string
+      openedDateLabel: string
+    } | null
     expiringLots: DashboardExpiringLot[]
     lowStockProducts: DashboardLowStockProduct[]
   }

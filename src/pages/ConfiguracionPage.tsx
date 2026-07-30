@@ -2,10 +2,18 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Download, ImageUp, Plus, RefreshCcw, Upload, X } from 'lucide-react'
+import { Download, ImageUp, Plus, RefreshCcw, Trash2, Upload, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -160,21 +168,17 @@ function ProductAutocomplete({
   )
 }
 
+const initialInventoryItemSchema = z
+  .object({
+    productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
+    numeroLote: z.string().min(2, 'Ingresa un lote.').max(80, 'Máximo 80 caracteres.'),
+    fechaVencimiento: z.string().min(1, 'Ingresa una fecha de vencimiento.'),
+    costoUnitario: z.number().min(0, 'El costo debe ser mayor o igual a 0.'),
+    cantidad: z.number().int().min(1, 'La cantidad debe ser mayor a 0.'),
+  })
+
 const initialInventorySchema = z.object({
-  items: z
-    .array(
-      z.object({
-        productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
-        numeroLote: z.string().min(2, 'Ingresa un lote.').max(80, 'Máximo 80 caracteres.'),
-        empaque: z.enum(['UNIDAD', 'BLISTER', 'CAJA'], {
-          message: 'Selecciona una presentación.',
-        }),
-        fechaVencimiento: z.string().min(1, 'Ingresa una fecha de vencimiento.'),
-        costoUnitario: z.number().min(0, 'El costo debe ser mayor o igual a 0.'),
-        cantidad: z.number().int().min(1, 'La cantidad debe ser mayor a 0.'),
-      }),
-    )
-    .min(1, 'Agrega al menos un lote.'),
+  items: z.array(initialInventoryItemSchema).min(1, 'Agrega al menos un lote.'),
 })
 
 type InitialInventoryFormValues = z.infer<typeof initialInventorySchema>
@@ -215,93 +219,6 @@ const appSystemInfo = {
   architecture: 'Multiempresa preparada',
 } as const
 
-type PackagingPresentation = 'UNIDAD' | 'BLISTER' | 'CAJA'
-
-const presentationLabels: Record<PackagingPresentation, string> = {
-  UNIDAD: 'Unidad',
-  BLISTER: 'Blíster',
-  CAJA: 'Caja',
-}
-
-function resolvePresentationOptions(product: ProductCatalogItem | null): PackagingPresentation[] {
-  if (!product) {
-    return ['UNIDAD']
-  }
-
-  if (product.packagingMode !== 'BLISTER') {
-    return ['UNIDAD']
-  }
-
-  const options: PackagingPresentation[] = ['UNIDAD']
-  const unitsPerBlister = product.unitsPerBlister ?? 0
-  const blistersPerBox = product.blistersPerBox ?? 0
-
-  if (unitsPerBlister > 0) {
-    options.push('BLISTER')
-  }
-
-  if (unitsPerBlister > 0 && blistersPerBox > 0) {
-    options.push('CAJA')
-  }
-
-  return options
-}
-
-function resolveConversionSummary(product: ProductCatalogItem | null) {
-  if (!product || product.packagingMode !== 'BLISTER') {
-    return null
-  }
-
-  const unitsPerBlister = product.unitsPerBlister ?? 0
-  const blistersPerBox = product.blistersPerBox ?? 0
-
-  const parts: string[] = []
-  if (unitsPerBlister > 0) {
-    parts.push(`1 Blíster = ${unitsPerBlister} Unidades`)
-  }
-  if (unitsPerBlister > 0 && blistersPerBox > 0) {
-    parts.push(
-      `1 Caja = ${blistersPerBox} Blísteres = ${unitsPerBlister * blistersPerBox} Unidades`,
-    )
-  }
-
-  return parts.length ? parts.join(' · ') : 'La configuración de empaque del producto está incompleta.'
-}
-
-function convertToBaseUnits(
-  product: ProductCatalogItem | null,
-  presentation: PackagingPresentation,
-  quantity: number,
-) {
-  const normalizedQuantity = Number(quantity)
-  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
-    return null
-  }
-
-  if (!product || product.packagingMode !== 'BLISTER') {
-    return normalizedQuantity
-  }
-
-  const unitsPerBlister = product.unitsPerBlister ?? 0
-  const blistersPerBox = product.blistersPerBox ?? 0
-
-  if (presentation === 'UNIDAD') {
-    return normalizedQuantity
-  }
-
-  if (presentation === 'BLISTER') {
-    return unitsPerBlister > 0 ? normalizedQuantity * unitsPerBlister : null
-  }
-
-  if (presentation === 'CAJA') {
-    return unitsPerBlister > 0 && blistersPerBox > 0
-      ? normalizedQuantity * unitsPerBlister * blistersPerBox
-      : null
-  }
-
-  return normalizedQuantity
-}
-
 function FieldError({ message }: { message?: string }) {
   if (!message) return null
   return <p className="text-xs text-destructive">{message}</p>
@@ -315,7 +232,7 @@ export function ConfiguracionPage() {
   const canEditCompany = authorization.hasRole('ADMIN')
 
   const [activeTab, setActiveTab] = useState<
-    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'catalogos'
+    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'herramientas' | 'catalogos'
   >('empresa')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -337,6 +254,12 @@ export function ConfiguracionPage() {
   const [isCompanyLoading, setIsCompanyLoading] = useState(false)
   const [isCompanySubmitting, setIsCompanySubmitting] = useState(false)
   const [isCompanyLogoUploading, setIsCompanyLogoUploading] = useState(false)
+  const [purgeDialogOpen, setPurgeDialogOpen] = useState(false)
+  const [purgeConfirmText, setPurgeConfirmText] = useState('')
+  const [isPurging, setIsPurging] = useState(false)
+  const [productionDialogOpen, setProductionDialogOpen] = useState(false)
+  const [productionConfirmText, setProductionConfirmText] = useState('')
+  const [isSettingProduction, setIsSettingProduction] = useState(false)
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
@@ -349,7 +272,6 @@ export function ConfiguracionPage() {
         {
           productoId: '',
           numeroLote: '',
-          empaque: 'UNIDAD',
           fechaVencimiento: '',
           costoUnitario: 0,
           cantidad: 1,
@@ -459,6 +381,50 @@ export function ConfiguracionPage() {
     }
   }, [initialInventoryForm])
 
+  const isImplementationMode = company?.operationMode !== 'PRODUCCION'
+
+  async function handlePurgeTestData() {
+    if (!accessToken) return
+    setIsPurging(true)
+    try {
+      const response = await implementationService.purgeTestData(accessToken, {
+        confirmText: purgeConfirmText,
+      })
+      toast.success(`Datos de prueba eliminados: ${Object.values(response.deleted).reduce((sum, value) => sum + value, 0)} registros.`)
+      setPurgeDialogOpen(false)
+      setPurgeConfirmText('')
+      await loadInitialInventoryLoads()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsPurging(false)
+    }
+  }
+
+  async function handleSetProductionMode() {
+    if (!accessToken) return
+    setIsSettingProduction(true)
+    try {
+      const response = await companyService.setOperationModeProduction(accessToken)
+      setCompany(response.company)
+      toast.success('La empresa fue marcada como PRODUCCIÓN.')
+      setProductionDialogOpen(false)
+      setProductionConfirmText('')
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsSettingProduction(false)
+    }
+  }
+
   async function handleCreateInitialInventoryLoad(values: InitialInventoryFormValues) {
     if (!accessToken) return
     setIsSubmitting(true)
@@ -479,22 +445,11 @@ export function ConfiguracionPage() {
     }
   }
 
-  function normalizePresentation(value: string): PackagingPresentation | null {
-    const normalized = value.trim().toUpperCase()
-    const withoutAccent = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    if (!withoutAccent) return null
-    if (withoutAccent === 'UNIDAD' || withoutAccent === 'UNIDADES') return 'UNIDAD'
-    if (withoutAccent === 'BLISTER' || withoutAccent === 'BLISTERS') return 'BLISTER'
-    if (withoutAccent === 'CAJA' || withoutAccent === 'CAJAS') return 'CAJA'
-    return null
-  }
-
   function buildInitialInventoryCsvTemplate() {
     return [
-      'sku,numeroLote,fechaVencimiento,costoUnitario,cantidad,presentacion',
-      'PARA-500-CAJA,LOTE-001,2027-12-31,1.80,1,CAJA',
-      'PARA-500-CAJA,LOTE-002,2027-12-31,0.18,10,BLISTER',
-      'PARA-500-CAJA,LOTE-003,2027-12-31,0.02,100,UNIDAD',
+      'sku,numeroLote,fechaVencimiento,costoUnitario,cantidad',
+      'PARA-500-CAJA,LOTE-001,2027-12-31,1.80,10',
+      'PARA-500-CAJA,LOTE-002,2027-12-31,1.80,5',
       '',
     ].join('\n')
   }
@@ -535,7 +490,6 @@ export function ConfiguracionPage() {
       'fechavencimiento',
       'costounitario',
       'cantidad',
-      'presentacion',
     ]
 
     const normalizedHeaders = headers.map((header) => header.toLowerCase())
@@ -563,7 +517,6 @@ export function ConfiguracionPage() {
         fechaVencimiento: get('fechavencimiento'),
         costoUnitario: get('costounitario'),
         cantidad: get('cantidad'),
-        presentacion: get('presentacion'),
       }
     })
   }
@@ -621,16 +574,6 @@ export function ConfiguracionPage() {
           const message = err instanceof Error ? err.message : 'Producto no encontrado.'
           throw new Error(`Fila ${row.row}: ${message}`)
         }
-        const presentation = normalizePresentation(row.presentacion)
-        if (!presentation) {
-          throw new Error(`Fila ${row.row}: ${IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION}`)
-        }
-
-        const allowed = resolvePresentationOptions(product)
-        if (!allowed.includes(presentation)) {
-          throw new Error(`Fila ${row.row}: ${IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION}`)
-        }
-
         const quantity = Number(row.cantidad)
         const unitCost = Number(row.costoUnitario)
         if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) {
@@ -643,7 +586,6 @@ export function ConfiguracionPage() {
         items.push({
           productoId: product.id,
           numeroLote: row.numeroLote,
-          empaque: presentation,
           fechaVencimiento: row.fechaVencimiento,
           costoUnitario: unitCost,
           cantidad: quantity,
@@ -678,10 +620,6 @@ export function ConfiguracionPage() {
         'costoReferencia',
         'requiereReceta',
         'esControlado',
-        'modoEmpaque',
-        'unidadesPorBlister',
-        'blistersPorCaja',
-        'precioVentaBlister',
         'descripcion',
         'concentracion',
         'registroSanitario',
@@ -700,10 +638,6 @@ export function ConfiguracionPage() {
         '0.10',
         'NO',
         'NO',
-        'BLISTER',
-        '10',
-        '10',
-        '0.20',
         'Analgésico',
         '500mg',
         '',
@@ -722,10 +656,6 @@ export function ConfiguracionPage() {
         '0.30',
         'NO',
         'NO',
-        'SIMPLE',
-        '',
-        '',
-        '',
         '',
         '1g',
         '',
@@ -756,15 +686,6 @@ export function ConfiguracionPage() {
     return false
   }
 
-  function normalizePackagingMode(value: string): 'SIMPLE' | 'BLISTER' | null {
-    const normalized = value.trim().toUpperCase()
-    const withoutAccent = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    if (!withoutAccent) return null
-    if (withoutAccent === 'SIMPLE') return 'SIMPLE'
-    if (withoutAccent === 'BLISTER') return 'BLISTER'
-    return null
-  }
-
   function normalizeMasterKey(value: string) {
     return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   }
@@ -787,13 +708,13 @@ export function ConfiguracionPage() {
       'sku',
       'nombre',
       'categoria',
+      'presentacion',
       'unidadnombre',
       'unidadsimbolo',
       'precioventa',
       'costoreferencia',
       'requiereReceta'.toLowerCase(),
       'escontrolado',
-      'modoempaque',
     ].map((header) => header.toLowerCase())
 
     const missing = expectedHeaders.filter((header) => !normalizedHeaders.includes(header))
@@ -824,10 +745,6 @@ export function ConfiguracionPage() {
         costoReferencia: value('costoreferencia'),
         requiereReceta: value('requierereceta'),
         esControlado: value('escontrolado'),
-        modoEmpaque: value('modoempaque'),
-        unidadesPorBlister: value('unidadesporblister'),
-        blistersPorCaja: value('blistersporcaja'),
-        precioVentaBlister: value('precioventablister'),
         descripcion: value('descripcion'),
         concentracion: value('concentracion'),
         registroSanitario: value('registrosanitario'),
@@ -1030,43 +947,45 @@ export function ConfiguracionPage() {
           }
 
           const presentationName = row.presentacion.trim()
-          let presentationId: string | undefined
-          if (presentationName) {
-            const presentationKey = normalizeMasterKey(presentationName)
-            let presentation = presentationsByName.get(presentationKey) ?? null
-            if (!presentation) {
-              try {
-                const result = await productsService.createMasterPresentation(accessToken, {
-                  nombre: presentationName,
-                })
+          if (!presentationName) {
+            pushError(row.row, 'La presentación es obligatoria para configurar el empaque del producto.')
+            continue
+          }
+
+          const presentationKey = normalizeMasterKey(presentationName)
+          let presentation = presentationsByName.get(presentationKey) ?? null
+          if (!presentation) {
+            try {
+              const result = await productsService.createMasterPresentation(accessToken, {
+                nombre: presentationName,
+              })
+              const refreshed = await productsService.listMasterPresentations(accessToken)
+              refreshed.rows.forEach((entry) =>
+                presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
+              )
+              presentation =
+                refreshed.rows.find((entry) => entry.id === result.id) ??
+                presentationsByName.get(presentationKey) ??
+                null
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 409) {
                 const refreshed = await productsService.listMasterPresentations(accessToken)
                 refreshed.rows.forEach((entry) =>
                   presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
                 )
-                presentation =
-                  refreshed.rows.find((entry) => entry.id === result.id) ??
-                  presentationsByName.get(presentationKey) ??
-                  null
-              } catch (err) {
-                if (err instanceof ApiError && err.status === 409) {
-                  const refreshed = await productsService.listMasterPresentations(accessToken)
-                  refreshed.rows.forEach((entry) =>
-                    presentationsByName.set(normalizeMasterKey(entry.nombre), entry),
-                  )
-                  presentation = presentationsByName.get(presentationKey) ?? null
-                } else {
-                  throw err
-                }
+                presentation = presentationsByName.get(presentationKey) ?? null
+              } else {
+                throw err
               }
             }
-
-            if (!presentation) {
-              pushError(row.row, IMPLEMENTATION_MESSAGES.PRESENTATION_NOT_FOUND)
-              continue
-            }
-
-            presentationId = presentation.id
           }
+
+          if (!presentation) {
+            pushError(row.row, IMPLEMENTATION_MESSAGES.PRESENTATION_NOT_FOUND)
+            continue
+          }
+
+          const presentationId = presentation.id
 
           const price = Number(row.precioVenta)
           if (!Number.isFinite(price) || price < 0) {
@@ -1080,47 +999,22 @@ export function ConfiguracionPage() {
             continue
           }
 
-          const mode = normalizePackagingMode(row.modoEmpaque)
-          if (!mode) {
-            pushError(row.row, IMPLEMENTATION_MESSAGES.PACKAGING_MODE_NOT_FOUND)
-            continue
-          }
-
-          const unitsPerBlister = row.unidadesPorBlister ? Number(row.unidadesPorBlister) : null
-          const blistersPerBox = row.blistersPorCaja ? Number(row.blistersPorCaja) : null
-          const blisterPrice = row.precioVentaBlister ? Number(row.precioVentaBlister) : null
-
-          if (mode === 'BLISTER') {
-            if (!unitsPerBlister || !Number.isInteger(unitsPerBlister) || unitsPerBlister <= 1) {
-              pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
-              continue
-            }
-            if (!blistersPerBox || !Number.isInteger(blistersPerBox) || blistersPerBox <= 0) {
-              pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
-              continue
-            }
-            if (
-              blisterPrice !== null &&
-              (!Number.isFinite(blisterPrice) || blisterPrice < 0)
-            ) {
-              pushError(row.row, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
-              continue
-            }
-          }
-
           const payload: CreateProductPayload = {
             categoriaId: category.id,
             laboratorioId: labId,
             presentacionId: presentationId,
             unidadMedidaId: unit.id,
-            modoEmpaque: mode,
-            ...(mode === 'BLISTER'
-              ? {
-                  unidadesPorBlister: Math.floor(unitsPerBlister ?? 0),
-                  blistersPorCaja: Math.floor(blistersPerBox ?? 0),
-                  ...(blisterPrice !== null ? { precioVentaBlister: blisterPrice } : {}),
-                }
-              : {}),
+            compraPresentacionId: presentationId,
+            basePresentacionId: presentationId,
+            presentacionesEmpaque: [
+              {
+                presentacionId: presentationId,
+                permiteCompra: true,
+                permiteVenta: true,
+                precioVenta: price,
+              },
+            ],
+            conversionesEmpaque: [],
             sku,
             ...(row.codigoBarras?.trim() ? { codigoBarras: row.codigoBarras.trim() } : {}),
             nombre: productName,
@@ -1131,7 +1025,6 @@ export function ConfiguracionPage() {
               : {}),
             requiereReceta: normalizeBoolean(row.requiereReceta),
             esControlado: normalizeBoolean(row.esControlado),
-            precioVenta: price,
             costoReferencia: refCost,
             ...(row.observaciones?.trim() ? { observaciones: row.observaciones.trim() } : {}),
           }
@@ -1298,6 +1191,9 @@ export function ConfiguracionPage() {
             Comprobantes
           </TabsTrigger>
           <TabsTrigger value="implementacion">Implementación</TabsTrigger>
+          <TabsTrigger value="herramientas" disabled={!company || !isImplementationMode}>
+            Herramientas del sistema
+          </TabsTrigger>
           <TabsTrigger value="catalogos" disabled>
             Catálogos
           </TabsTrigger>
@@ -1652,6 +1548,160 @@ export function ConfiguracionPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="herramientas" className="space-y-4 pt-4">
+          <Card>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Modo del sistema</CardTitle>
+                <CardDescription>
+                  Las herramientas de implementación solo están disponibles antes de iniciar la operación real.
+                </CardDescription>
+              </div>
+              <Badge variant={isImplementationMode ? 'outline' : 'success'}>
+                {company?.operationMode ?? 'IMPLEMENTACION'}
+              </Badge>
+            </CardHeader>
+            <CardContent>
+              {isImplementationMode ? (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Cuando confirmes PRODUCCIÓN, las herramientas de implementación quedarán deshabilitadas.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => setProductionDialogOpen(true)}
+                    disabled={!company || isSettingProduction}
+                  >
+                    {isSettingProduction ? <Loader className="mr-2 h-4 w-4" /> : null}
+                    Pasar a PRODUCCIÓN
+                  </Button>
+                </div>
+              ) : (
+                <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+                  La empresa ya se encuentra en modo PRODUCCIÓN. Las herramientas de implementación están deshabilitadas.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Eliminar datos de prueba</CardTitle>
+                <CardDescription>
+                  Elimina información generada durante la implementación para iniciar la operación real.
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => setPurgeDialogOpen(true)}
+                disabled={!isImplementationMode || isPurging}
+              >
+                {isPurging ? <Loader className="mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Eliminar datos de prueba
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                Esta operación elimina datos de ventas, compras, movimientos de caja, inventario, lotes, productos,
+                catálogos maestros, clientes y proveedores. No elimina empresa, usuarios, roles, permisos, configuración ni auditoría.
+              </div>
+            </CardContent>
+          </Card>
+
+          <Dialog
+            open={purgeDialogOpen}
+            onOpenChange={(open) => {
+              setPurgeDialogOpen(open)
+              if (!open) setPurgeConfirmText('')
+            }}
+          >
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Eliminar datos de prueba</DialogTitle>
+                <DialogDescription className="whitespace-pre-line">
+                  Esta operación es irreversible.
+                  {'\n\n'}
+                  Escribe ELIMINAR para habilitar la ejecución.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Confirmación</p>
+                <Input value={purgeConfirmText} onChange={(event) => setPurgeConfirmText(event.target.value)} />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button type="button" variant="outline" onClick={() => setPurgeDialogOpen(false)} disabled={isPurging}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => void handlePurgeTestData()}
+                  disabled={
+                    isPurging ||
+                    !isImplementationMode ||
+                    purgeConfirmText.trim().toUpperCase() !== 'ELIMINAR'
+                  }
+                >
+                  {isPurging ? <Loader className="mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                  Eliminar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={productionDialogOpen}
+            onOpenChange={(open) => {
+              setProductionDialogOpen(open)
+              if (!open) setProductionConfirmText('')
+            }}
+          >
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Pasar a PRODUCCIÓN</DialogTitle>
+                <DialogDescription className="whitespace-pre-line">
+                  Esta acción deshabilita las herramientas de implementación para evitar eliminaciones accidentales.
+                  {'\n\n'}
+                  Escribe PRODUCCION para confirmar.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Confirmación</p>
+                <Input
+                  value={productionConfirmText}
+                  onChange={(event) => setProductionConfirmText(event.target.value)}
+                />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setProductionDialogOpen(false)}
+                  disabled={isSettingProduction}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => void handleSetProductionMode()}
+                  disabled={
+                    isSettingProduction ||
+                    !isImplementationMode ||
+                    productionConfirmText.trim().toUpperCase() !== 'PRODUCCION'
+                  }
+                >
+                  {isSettingProduction ? <Loader className="mr-2 h-4 w-4" /> : null}
+                  Confirmar PRODUCCIÓN
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
         <TabsContent value="implementacion" className="space-y-4 pt-4">
           <Card>
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1928,19 +1978,25 @@ export function ConfiguracionPage() {
                         const itemError = initialInventoryForm.formState.errors.items?.[index]
                         const productId = initialInventoryForm.watch(`items.${index}.productoId`)
                         const selectedProduct = productId ? productCache[productId] ?? null : null
-                        const presentationOptions = resolvePresentationOptions(selectedProduct)
-                        const conversionSummary = resolveConversionSummary(selectedProduct)
-                        const selectedPresentation = initialInventoryForm.watch(
-                          `items.${index}.empaque`,
-                        ) as PackagingPresentation
+                        const purchasePresentationId =
+                          selectedProduct?.packaging?.purchasePresentationId ?? null
+                        const purchasePresentation =
+                          purchasePresentationId && selectedProduct?.packaging?.presentations?.length
+                            ? selectedProduct.packaging.presentations.find(
+                                (entry) => entry.id === purchasePresentationId,
+                              ) ?? null
+                            : null
+                        const purchaseFactor =
+                          purchasePresentation?.factorToBase && purchasePresentation.factorToBase > 0
+                            ? purchasePresentation.factorToBase
+                            : null
                         const selectedQuantity = initialInventoryForm.watch(
                           `items.${index}.cantidad`,
                         ) as number
-                        const baseUnits = convertToBaseUnits(
-                          selectedProduct,
-                          selectedPresentation,
-                          selectedQuantity,
-                        )
+                        const baseUnits =
+                          purchaseFactor && Number.isFinite(selectedQuantity)
+                            ? Math.floor(Number(selectedQuantity)) * purchaseFactor
+                            : null
                         return (
                           <div key={field.id} className="rounded-xl border p-4">
                             <div className="flex items-start justify-between gap-3">
@@ -1970,55 +2026,10 @@ export function ConfiguracionPage() {
                                   }
                                   onProductSelected={(product) => {
                                     setProductCache((prev) => ({ ...prev, [product.id]: product }))
-                                    const defaultPresentation =
-                                      product.packagingMode === 'BLISTER'
-                                        ? resolvePresentationOptions(product).includes('CAJA')
-                                          ? 'CAJA'
-                                          : resolvePresentationOptions(product).includes('BLISTER')
-                                            ? 'BLISTER'
-                                            : 'UNIDAD'
-                                        : 'UNIDAD'
-                                    initialInventoryForm.setValue(
-                                      `items.${index}.empaque`,
-                                      defaultPresentation,
-                                      { shouldValidate: true, shouldDirty: true },
-                                    )
                                   }}
                                   placeholder="Buscar por nombre o SKU"
                                 />
                                 <FieldError message={itemError?.productoId?.message} />
-                              </div>
-
-                              <div className="space-y-2">
-                                <p className="text-xs font-medium text-muted-foreground">Presentación</p>
-                                <Controller
-                                  control={initialInventoryForm.control}
-                                  name={`items.${index}.empaque` as const}
-                                  render={({ field }) => (
-                                    <Select
-                                      value={field.value}
-                                      onValueChange={(value) =>
-                                        field.onChange(value as PackagingPresentation)
-                                      }
-                                      disabled={!selectedProduct}
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Selecciona" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {presentationOptions.map((option) => (
-                                          <SelectItem key={option} value={option}>
-                                            {presentationLabels[option]}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  )}
-                                />
-                                <FieldError message={itemError?.empaque?.message as string | undefined} />
-                                {conversionSummary ? (
-                                  <p className="text-xs text-muted-foreground">{conversionSummary}</p>
-                                ) : null}
                               </div>
 
                               <div className="space-y-2">
@@ -2034,10 +2045,7 @@ export function ConfiguracionPage() {
                                 {baseUnits ? (
                                   <p className="text-xs text-muted-foreground">
                                     Se registrarán {baseUnits} unidades base.
-                                  </p>
-                                ) : selectedProduct && selectedProduct.packagingMode === 'BLISTER' ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    No se puede convertir con la configuración de empaque actual.
+                                    {purchasePresentation ? ` (${purchasePresentation.name})` : ''}
                                   </p>
                                 ) : null}
                               </div>
@@ -2083,7 +2091,6 @@ export function ConfiguracionPage() {
                           appendItem({
                             productoId: '',
                             numeroLote: '',
-                            empaque: 'UNIDAD',
                             fechaVencimiento: '',
                             costoUnitario: 0,
                             cantidad: 1,

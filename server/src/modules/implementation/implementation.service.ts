@@ -1,8 +1,6 @@
 import {
   EstadoLote,
-  EmpaqueProducto,
   EstadoProducto,
-  ModoEmpaqueProducto,
   Prisma,
   TipoMovimientoInventario,
   OrigenMovimientoInventario,
@@ -11,6 +9,12 @@ import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import { IMPLEMENTATION_MESSAGES } from '../../shared/implementation/messages.js'
+import {
+  buildPackagingEdges,
+  resolveBasePresentation,
+  resolveFactorToBase,
+  resolvePresentationEntry,
+} from '../../lib/productPackaging.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -62,12 +66,37 @@ function assertAdmin(request: FastifyRequest) {
   }
 }
 
+async function assertCompanyInImplementationMode(companyId: string) {
+  const company = await prisma.empresa.findFirst({
+    where: {
+      id: companyId,
+      deletedAt: null,
+    },
+    select: {
+      modoOperacion: true,
+    },
+  })
+
+  if (!company) {
+    throw createHttpError(404, 'La empresa no está disponible.')
+  }
+
+  if (company.modoOperacion !== 'IMPLEMENTACION') {
+    throw createHttpError(
+      409,
+      [
+        'Esta herramienta solo está disponible mientras la empresa se encuentre en modo IMPLEMENTACIÓN.',
+        'La empresa ya se encuentra en modo PRODUCCIÓN.',
+      ].join('\n\n'),
+    )
+  }
+}
+
 type ImplementationInventoryLoadItemInput = {
   productoId: string
   numeroLote: string
   fechaVencimiento: string
   costoUnitario: number
-  empaque: EmpaqueProducto
   cantidad: number
 }
 
@@ -186,6 +215,7 @@ export async function createInitialInventoryLoad(
 ) {
   const { userId, branchId, companyId } = await getAuthContext(request)
   assertAdmin(request)
+  await assertCompanyInImplementationMode(companyId)
 
   if (!payload.items.length) {
     throw createHttpError(400, 'Registra al menos un lote para cargar inventario.')
@@ -214,9 +244,30 @@ export async function createInitialInventoryLoad(
         select: {
           id: true,
           estado: true,
-          modoEmpaque: true,
-          unidadesPorBlister: true,
-          blistersPorCaja: true,
+          compraPresentacionId: true,
+          presentacionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              esBase: true,
+              permiteCompra: true,
+              permiteVenta: true,
+              precioVenta: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  nombre: true,
+                },
+              },
+            },
+          },
+          conversionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              desdePresentacionId: true,
+              haciaPresentacionId: true,
+              cantidad: true,
+            },
+          },
         },
       })
       const productById = new Map(products.map((product) => [product.id, product]))
@@ -295,49 +346,51 @@ export async function createInitialInventoryLoad(
           throw createHttpError(400, IMPLEMENTATION_MESSAGES.PRODUCT_INACTIVE)
         }
 
-        const packType = item.empaque
-        const unitsPerBlister = product.unidadesPorBlister ?? null
-        const blistersPerBox = product.blistersPorCaja ?? null
-
-        if (product.modoEmpaque === ModoEmpaqueProducto.SIMPLE) {
-          if (packType !== EmpaqueProducto.UNIDAD) {
-            throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION)
-          }
-        } else if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
-          if (
-            packType === EmpaqueProducto.BLISTER &&
-            (!unitsPerBlister || unitsPerBlister <= 0)
-          ) {
-            throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION)
-          }
-
-          if (
-            packType === EmpaqueProducto.CAJA &&
-            (!unitsPerBlister || unitsPerBlister <= 0 || !blistersPerBox || blistersPerBox <= 0)
-          ) {
-            throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRESENTATION)
-          }
+        const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
+        if (!basePresentation) {
+          throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
         }
 
-        const factor =
-          product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-            ? packType === EmpaqueProducto.UNIDAD
-              ? 1
-              : packType === EmpaqueProducto.BLISTER
-                ? Number(unitsPerBlister)
-                : packType === EmpaqueProducto.CAJA
-                  ? Number(unitsPerBlister) * Number(blistersPerBox)
-                  : 1
-            : 1
+        const purchasePresentationId =
+          product.compraPresentacionId ?? basePresentation.presentacion.id
+
+        const resolvedPresentation = resolvePresentationEntry({
+          operation: 'INVENTORY_IN',
+          presentationId: purchasePresentationId,
+          presentations: product.presentacionesEmpaque ?? [],
+        })
+
+        if (!resolvedPresentation.ok) {
+          throw createHttpError(400, resolvedPresentation.error)
+        }
+
+        const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
+        const factor = resolveFactorToBase({
+          presentationId: purchasePresentationId,
+          basePresentationId: basePresentation.presentacion.id,
+          edges,
+        })
+
+        if (!factor) {
+          throw createHttpError(
+            400,
+            'No fue posible resolver la equivalencia para la presentación principal de compra.',
+          )
+        }
 
         const quantity = requestedQuantity * Number(factor)
         if (!Number.isFinite(quantity) || quantity <= 0) {
           throw createHttpError(400, 'La cantidad convertida no es válida.')
         }
 
-        const costoUnitario = Number(item.costoUnitario)
-        if (!Number.isFinite(costoUnitario) || costoUnitario < 0) {
+        const requestedUnitCost = Number(item.costoUnitario)
+        if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
           throw createHttpError(400, 'El costo unitario debe ser mayor o igual a 0.')
+        }
+
+        const costoUnitario = requestedUnitCost / Number(factor)
+        if (!Number.isFinite(costoUnitario) || costoUnitario < 0) {
+          throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
         }
 
         const expiryDate = parseExpiryDate(item.fechaVencimiento)
@@ -442,4 +495,282 @@ export async function createInitialInventoryLoad(
       status: result.estado,
     },
   }
+}
+
+type PurgeTestDataPayload = {
+  confirmText: string
+}
+
+export async function purgeTestData(payload: PurgeTestDataPayload, request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
+  assertAdmin(request)
+  await assertCompanyInImplementationMode(companyId)
+
+  const normalizedConfirm = payload.confirmText.trim().toUpperCase()
+  if (normalizedConfirm !== 'ELIMINAR') {
+    throw createHttpError(400, 'La confirmación no es válida. Escribe ELIMINAR para continuar.')
+  }
+
+  const branches = await prisma.sucursal.findMany({
+    where: {
+      empresaId: companyId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  const branchIds = branches.map((branch) => branch.id)
+
+  const deleted = await prisma.$transaction(async (tx) => {
+    const salesDetailsLots = await tx.detalleVentaLote.deleteMany({
+      where: {
+        detalleVenta: {
+          venta: {
+            sucursalId: { in: branchIds },
+          },
+        },
+      },
+    })
+    const salesDetails = await tx.detalleVenta.deleteMany({
+      where: {
+        venta: {
+          sucursalId: { in: branchIds },
+        },
+      },
+    })
+    const salesPayments = await tx.ventaPago.deleteMany({
+      where: {
+        venta: {
+          sucursalId: { in: branchIds },
+        },
+      },
+    })
+    const sales = await tx.venta.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+
+    const purchasePayments = await tx.compraPago.deleteMany({
+      where: {
+        compra: {
+          sucursalId: { in: branchIds },
+        },
+      },
+    })
+    const purchaseReceipts = await tx.compraRecepcion.deleteMany({
+      where: {
+        compra: {
+          sucursalId: { in: branchIds },
+        },
+      },
+    })
+    const purchaseDetails = await tx.detalleCompra.deleteMany({
+      where: {
+        compra: {
+          sucursalId: { in: branchIds },
+        },
+      },
+    })
+    const purchases = await tx.compra.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+
+    const cashReconciliationDetails = await tx.conciliacionCajaDetalle.deleteMany({
+      where: {
+        conciliacionCaja: {
+          aperturaCaja: {
+            caja: {
+              sucursalId: { in: branchIds },
+            },
+          },
+        },
+      },
+    })
+    const cashReconciliations = await tx.conciliacionCaja.deleteMany({
+      where: {
+        aperturaCaja: {
+          caja: {
+            sucursalId: { in: branchIds },
+          },
+        },
+      },
+    })
+    const cashCounts = await tx.arqueoCaja.deleteMany({
+      where: {
+        aperturaCaja: {
+          caja: {
+            sucursalId: { in: branchIds },
+          },
+        },
+      },
+    })
+    const cashClosings = await tx.cierreCaja.deleteMany({
+      where: {
+        aperturaCaja: {
+          caja: {
+            sucursalId: { in: branchIds },
+          },
+        },
+      },
+    })
+    const cashIncomes = await tx.ingreso.deleteMany({
+      where: {
+        movimientoCaja: {
+          aperturaCaja: {
+            caja: {
+              sucursalId: { in: branchIds },
+            },
+          },
+        },
+      },
+    })
+    const cashExpenses = await tx.egreso.deleteMany({
+      where: {
+        movimientoCaja: {
+          aperturaCaja: {
+            caja: {
+              sucursalId: { in: branchIds },
+            },
+          },
+        },
+      },
+    })
+    const cashMovements = await tx.movimientoCaja.deleteMany({
+      where: {
+        aperturaCaja: {
+          caja: {
+            sucursalId: { in: branchIds },
+          },
+        },
+      },
+    })
+    const cashOpenings = await tx.aperturaCaja.deleteMany({
+      where: {
+        caja: {
+          sucursalId: { in: branchIds },
+        },
+      },
+    })
+
+    const inventoryMovements = await tx.movimientoInventario.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+
+    const initialLoadDetails = await tx.cargaInventarioInicialDetalle.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+    const initialLoads = await tx.cargaInventarioInicial.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+
+    const inventories = await tx.inventario.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+
+    const lots = await tx.lote.deleteMany({
+      where: {
+        sucursalId: { in: branchIds },
+      },
+    })
+
+    const productActivePrinciples = await tx.productoPrincipioActivo.deleteMany({
+      where: {
+        producto: {
+          empresaId: companyId,
+        },
+      },
+    })
+    const productTaxes = await tx.productoImpuesto.deleteMany({
+      where: {
+        producto: {
+          empresaId: companyId,
+        },
+      },
+    })
+    const products = await tx.producto.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+
+    const categories = await tx.categoria.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+    const laboratories = await tx.laboratorio.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+    const presentations = await tx.presentacion.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+    const units = await tx.unidadMedida.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+
+    const customers = await tx.cliente.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+    const suppliers = await tx.proveedor.deleteMany({
+      where: {
+        empresaId: companyId,
+      },
+    })
+
+    return {
+      ventas: sales.count,
+      ventasDetalles: salesDetails.count,
+      ventasDetallesLotes: salesDetailsLots.count,
+      ventasPagos: salesPayments.count,
+      compras: purchases.count,
+      comprasDetalles: purchaseDetails.count,
+      comprasRecepciones: purchaseReceipts.count,
+      comprasPagos: purchasePayments.count,
+      cajaMovimientos: cashMovements.count,
+      cajaIngresos: cashIncomes.count,
+      cajaEgresos: cashExpenses.count,
+      cajaAperturas: cashOpenings.count,
+      cajaCierres: cashClosings.count,
+      cajaConciliaciones: cashReconciliations.count,
+      cajaConciliacionesDetalle: cashReconciliationDetails.count,
+      cajaArqueos: cashCounts.count,
+      inventarioMovimientos: inventoryMovements.count,
+      inventarioInicialCargas: initialLoads.count,
+      inventarioInicialDetalle: initialLoadDetails.count,
+      inventarios: inventories.count,
+      lotes: lots.count,
+      productos: products.count,
+      productosPrincipiosActivos: productActivePrinciples.count,
+      productosImpuestos: productTaxes.count,
+      categorias: categories.count,
+      laboratorios: laboratories.count,
+      presentaciones: presentations.count,
+      unidadesMedida: units.count,
+      clientes: customers.count,
+      proveedores: suppliers.count,
+    }
+  })
+
+  return { success: true, deleted }
 }

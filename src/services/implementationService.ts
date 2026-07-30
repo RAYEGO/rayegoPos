@@ -3,6 +3,8 @@ import type {
   CreateInitialInventoryLoadPayload,
   CreateInitialInventoryLoadResponse,
   ListInitialInventoryLoadsResponse,
+  PurgeTestDataPayload,
+  PurgeTestDataResponse,
 } from '@/types/implementation'
 
 export const implementationService = {
@@ -19,5 +21,12 @@ export const implementationService = {
       body: payload,
     })
   },
-}
 
+  purgeTestData(accessToken: string, payload: PurgeTestDataPayload) {
+    return apiRequest<PurgeTestDataResponse>('/api/implementation/purge-test-data', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+}

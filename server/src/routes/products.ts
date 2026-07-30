@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { EstadoProducto, ModoEmpaqueProducto } from '@prisma/client'
+import { EstadoProducto } from '@prisma/client'
 import {
   createProduct,
   deleteProduct,
@@ -42,10 +42,27 @@ const createProductSchema = z.object({
   laboratorioId: z.string().uuid().optional(),
   presentacionId: z.string().uuid().optional(),
   unidadMedidaId: z.string().uuid(),
-  modoEmpaque: z.nativeEnum(ModoEmpaqueProducto).optional(),
-  unidadesPorBlister: z.number().int().positive().optional(),
-  blistersPorCaja: z.number().int().positive().optional(),
-  precioVentaBlister: z.number().nonnegative().optional(),
+  compraPresentacionId: z.string().uuid(),
+  basePresentacionId: z.string().uuid(),
+  presentacionesEmpaque: z
+    .array(
+      z.object({
+        presentacionId: z.string().uuid(),
+        permiteCompra: z.boolean().default(false),
+        permiteVenta: z.boolean().default(false),
+        precioVenta: z.number().nonnegative().optional(),
+      }),
+    )
+    .min(1),
+  conversionesEmpaque: z
+    .array(
+      z.object({
+        desdePresentacionId: z.string().uuid(),
+        haciaPresentacionId: z.string().uuid(),
+        cantidad: z.number().int().positive(),
+      }),
+    )
+    .default([]),
   principioActivoId: z.string().uuid().optional(),
   sku: z.string().min(1).max(50),
   codigoBarras: z.string().max(50).optional(),
@@ -55,7 +72,6 @@ const createProductSchema = z.object({
   registroSanitario: z.string().max(100).optional(),
   requiereReceta: z.boolean().default(false),
   esControlado: z.boolean().default(false),
-  precioVenta: z.number().nonnegative(),
   costoReferencia: z.number().nonnegative(),
   observaciones: z.string().max(500).optional(),
 })

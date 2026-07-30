@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   deleteCompanyLogo,
   getCompanyProfile,
+  updateCompanyOperationMode,
   updateCompanyProfile,
   uploadCompanyLogo,
 } from '../modules/settings/company.service.js'
@@ -26,12 +27,21 @@ const uploadCompanyLogoSchema = z.object({
   base64: z.string().min(1),
 })
 
+const updateCompanyOperationModeSchema = z.object({
+  operationMode: z.enum(['PRODUCCION']),
+})
+
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/company', async (request) => getCompanyProfile(request))
 
   app.put('/company', async (request) => {
     const body = updateCompanyProfileSchema.parse(request.body)
     return updateCompanyProfile(body, request)
+  })
+
+  app.patch('/company/operation-mode', async (request) => {
+    const body = updateCompanyOperationModeSchema.parse(request.body)
+    return updateCompanyOperationMode(body, request)
   })
 
   app.post('/company/logo', async (request) => {

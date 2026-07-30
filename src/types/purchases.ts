@@ -71,11 +71,11 @@ export type PurchasesDashboardResponse = {
     receivedUnits: number
     orderedUnits: number
     pendingUnits: number
-    packaging: 'UNIDAD' | 'BLISTER' | 'CAJA' | null
-    packFactor: number | null
-    orderedPacks: number | null
-    receivedPacks: number | null
-    pendingPacks: number | null
+    presentationName: string | null
+    presentationFactor: number | null
+    orderedPresentationQuantity: number | null
+    receivedPresentationQuantity: number | null
+    pendingPresentationQuantity: number | null
     returnedUnits: number
     returnedAmount: number
     availableUnits: number
@@ -132,9 +132,19 @@ export type PurchasesDashboardResponse = {
       sku: string
       unitSymbol: string
       referenceCost: number
-      packagingMode: 'SIMPLE' | 'BLISTER'
-      unitsPerBlister: number | null
-      blistersPerBox: number | null
+      packaging: {
+        basePresentationId: string | null
+        purchasePresentationId: string | null
+        presentations: Array<{
+          id: string
+          name: string
+          isBase: boolean
+          allowsPurchase: boolean
+          allowsSale: boolean
+          salePrice: number | null
+          factorToBase: number | null
+        }>
+      } | null
     }>
   }
 }
@@ -149,7 +159,6 @@ export type CreatePurchaseOrderPayload = {
   items: Array<{
     productoId: string
     cantidad: number
-    empaque?: 'UNIDAD' | 'BLISTER' | 'CAJA'
     costoUnitario: number
     porcentajeImpuesto?: number
   }>

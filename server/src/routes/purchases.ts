@@ -1,5 +1,4 @@
 import {
-  EmpaqueProducto,
   EstadoCompra,
   EstadoCompraFinanciero,
   EstadoCompraLogistico,
@@ -40,7 +39,6 @@ const createPurchaseOrderSchema = z.object({
       z.object({
         productoId: z.string().uuid(),
         cantidad: z.number().int().positive(),
-        empaque: z.nativeEnum(EmpaqueProducto).optional(),
         costoUnitario: z.number().nonnegative(),
         porcentajeImpuesto: z.number().min(0).max(100).optional(),
       }),

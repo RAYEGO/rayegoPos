@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Controller, useForm } from 'react-hook-form'
+import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   AlertTriangle,
@@ -96,12 +96,28 @@ import { toast } from 'sonner'
 const createProductSchema = z.object({
   categoriaId: z.string().uuid({ message: 'Selecciona una categoría.' }),
   laboratorioId: z.string().optional(),
-  presentacionId: z.string().optional(),
   unidadMedidaId: z.string().uuid({ message: 'Selecciona una unidad.' }),
-  modoEmpaque: z.enum(['SIMPLE', 'BLISTER']),
-  unidadesPorBlister: z.number().int().positive('Las unidades por blíster deben ser mayor a 0.').optional(),
-  blistersPorCaja: z.number().int().positive('Los blíster por caja deben ser mayor a 0.').optional(),
-  precioVentaBlister: z.number().nonnegative('El precio por blíster debe ser mayor o igual a 0.').optional(),
+  compraPresentacionId: z.string().uuid({ message: 'Selecciona una presentación de compra.' }),
+  basePresentacionId: z.string().uuid({ message: 'Selecciona una presentación base.' }),
+  presentacionesEmpaque: z
+    .array(
+      z.object({
+        presentacionId: z.string().uuid({ message: 'Selecciona una presentación.' }),
+        permiteCompra: z.boolean(),
+        permiteVenta: z.boolean(),
+        precioVenta: z.number().nonnegative('El precio debe ser mayor o igual a 0.').optional(),
+      }),
+    )
+    .min(1, 'Agrega al menos una presentación.'),
+  conversionesEmpaque: z
+    .array(
+      z.object({
+        desdePresentacionId: z.string().uuid({ message: 'Selecciona el origen.' }),
+        haciaPresentacionId: z.string().uuid({ message: 'Selecciona el destino.' }),
+        cantidad: z.number().int().positive('La cantidad debe ser un entero mayor a 0.'),
+      }),
+    )
+    .min(0),
   principioActivoId: z.string().optional(),
   sku: z.string().min(3, 'Ingresa un SKU válido.').max(50),
   codigoBarras: z.string().max(50).optional(),
@@ -111,28 +127,87 @@ const createProductSchema = z.object({
   registroSanitario: z.string().max(100).optional(),
   requiereReceta: z.boolean(),
   esControlado: z.boolean(),
-  precioVenta: z.number().nonnegative('El precio debe ser mayor o igual a 0.'),
   costoReferencia: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
 }).superRefine((values, ctx) => {
-  if (values.modoEmpaque !== 'BLISTER') {
-    return
-  }
-
-  if (!values.unidadesPorBlister || values.unidadesPorBlister <= 0) {
+  const presentationIds = values.presentacionesEmpaque.map((entry) => entry.presentacionId)
+  if (!presentationIds.includes(values.basePresentacionId)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Define las unidades por blíster.',
-      path: ['unidadesPorBlister'],
+      message: 'La presentación base debe estar incluida en las presentaciones configuradas.',
+      path: ['basePresentacionId'],
     })
   }
 
-  if (!values.blistersPorCaja || values.blistersPorCaja <= 0) {
+  if (!presentationIds.includes(values.compraPresentacionId)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Define los blíster por caja.',
-      path: ['blistersPorCaja'],
+      message: 'La presentación de compra debe estar incluida en las presentaciones configuradas.',
+      path: ['compraPresentacionId'],
+    })
+  } else {
+    const purchaseEntry = values.presentacionesEmpaque.find(
+      (entry) => entry.presentacionId === values.compraPresentacionId,
+    )
+    if (!purchaseEntry?.permiteCompra) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'La presentación principal de compra debe estar habilitada para compra.',
+        path: ['compraPresentacionId'],
+      })
+    }
+  }
+
+  if (new Set(presentationIds).size !== presentationIds.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'No se permiten presentaciones duplicadas.',
+      path: ['presentacionesEmpaque'],
     })
   }
+
+  values.presentacionesEmpaque.forEach((entry, index) => {
+    if (entry.permiteVenta && (entry.precioVenta === undefined || entry.precioVenta === null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Define un precio para la presentación habilitada para venta.',
+        path: ['presentacionesEmpaque', index, 'precioVenta'],
+      })
+    }
+  })
+
+  if (!values.presentacionesEmpaque.some((entry) => entry.permiteVenta)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'El producto debe tener al menos una presentación habilitada para venta.',
+      path: ['presentacionesEmpaque'],
+    })
+  }
+
+  values.conversionesEmpaque.forEach((entry, index) => {
+    if (entry.desdePresentacionId === entry.haciaPresentacionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Origen y destino no pueden ser iguales.',
+        path: ['conversionesEmpaque', index, 'haciaPresentacionId'],
+      })
+    }
+
+    if (!presentationIds.includes(entry.desdePresentacionId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'El origen debe ser una presentación configurada.',
+        path: ['conversionesEmpaque', index, 'desdePresentacionId'],
+      })
+    }
+
+    if (!presentationIds.includes(entry.haciaPresentacionId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'El destino debe ser una presentación configurada.',
+        path: ['conversionesEmpaque', index, 'haciaPresentacionId'],
+      })
+    }
+  })
 })
 
 const masterCategorySchema = z.object({
@@ -172,12 +247,11 @@ type MasterUnitFormValues = z.infer<typeof masterUnitSchema>
 const defaultFormValues: CreateProductFormValues = {
   categoriaId: '',
   laboratorioId: '',
-  presentacionId: '',
   unidadMedidaId: '',
-  modoEmpaque: 'SIMPLE',
-  unidadesPorBlister: undefined,
-  blistersPorCaja: undefined,
-  precioVentaBlister: undefined,
+  compraPresentacionId: '',
+  basePresentacionId: '',
+  presentacionesEmpaque: [],
+  conversionesEmpaque: [],
   principioActivoId: '',
   sku: '',
   codigoBarras: '',
@@ -187,7 +261,6 @@ const defaultFormValues: CreateProductFormValues = {
   registroSanitario: '',
   requiereReceta: false,
   esControlado: false,
-  precioVenta: 0,
   costoReferencia: 0,
 }
 
@@ -317,9 +390,18 @@ export function ProductosPage() {
     defaultValues: defaultFormValues,
   })
 
-  const watchedPackagingMode = form.watch('modoEmpaque')
-  const watchedUnitsPerBlister = form.watch('unidadesPorBlister')
-  const watchedBlistersPerBox = form.watch('blistersPorCaja')
+  const packagingPresentations = useFieldArray({
+    control: form.control,
+    name: 'presentacionesEmpaque',
+  })
+
+  const packagingConversions = useFieldArray({
+    control: form.control,
+    name: 'conversionesEmpaque',
+  })
+
+  const watchedBasePresentationId = form.watch('basePresentacionId')
+  const watchedPackagingPresentations = form.watch('presentacionesEmpaque')
 
   useEffect(() => {
     const wasOpen = previousPackagingOpenRef.current
@@ -708,11 +790,8 @@ export function ProductosPage() {
           await productsService.updateMasterPresentation(accessToken, editingPresentation.id, payload)
           toast.success('Presentación actualizada.')
         } else {
-          const created = await productsService.createMasterPresentation(accessToken, payload)
+          await productsService.createMasterPresentation(accessToken, payload)
           toast.success('Presentación creada.')
-          if (masterDialogTargetField === 'presentacionId') {
-            form.setValue('presentacionId', created.id)
-          }
         }
 
         resetMasterDialogState()
@@ -794,12 +873,20 @@ export function ProductosPage() {
     return {
       categoriaId: product.categoryId,
       laboratorioId: product.laboratoryId ?? '',
-      presentacionId: product.presentationId ?? '',
       unidadMedidaId: product.unitId,
-      modoEmpaque: product.packagingMode === 'BLISTER' ? 'BLISTER' : 'SIMPLE',
-      unidadesPorBlister: product.unitsPerBlister ?? undefined,
-      blistersPorCaja: product.blistersPerBox ?? undefined,
-      precioVentaBlister: product.blisterPrice ?? undefined,
+      compraPresentacionId: product.packaging.purchasePresentationId ?? '',
+      basePresentacionId: product.packaging.basePresentationId ?? '',
+      presentacionesEmpaque: product.packaging.presentations.map((entry) => ({
+        presentacionId: entry.id,
+        permiteCompra: entry.allowsPurchase,
+        permiteVenta: entry.allowsSale,
+        precioVenta: entry.salePrice ?? undefined,
+      })),
+      conversionesEmpaque: product.packaging.conversions.map((entry) => ({
+        desdePresentacionId: entry.fromPresentationId,
+        haciaPresentacionId: entry.toPresentationId,
+        cantidad: entry.quantity,
+      })),
       principioActivoId: '',
       sku: product.sku,
       codigoBarras: product.barcode ?? '',
@@ -809,7 +896,6 @@ export function ProductosPage() {
       registroSanitario: product.sanitaryRegistration ?? '',
       requiereReceta: product.requiresPrescription,
       esControlado: product.isControlled,
-      precioVenta: product.salePrice,
       costoReferencia: product.costPrice,
     }
   }
@@ -918,16 +1004,10 @@ export function ProductosPage() {
     }
 
     const editingId = editingProduct?.id ?? null
-    const packagingMode = values.modoEmpaque ?? 'SIMPLE'
 
     const payload: CreateProductPayload | UpdateProductPayload = {
       ...values,
       laboratorioId: values.laboratorioId || undefined,
-      presentacionId: values.presentacionId || undefined,
-      modoEmpaque: packagingMode === 'BLISTER' ? 'BLISTER' : undefined,
-      unidadesPorBlister: packagingMode === 'BLISTER' ? values.unidadesPorBlister : undefined,
-      blistersPorCaja: packagingMode === 'BLISTER' ? values.blistersPorCaja : undefined,
-      precioVentaBlister: packagingMode === 'BLISTER' ? values.precioVentaBlister : undefined,
       principioActivoId: values.principioActivoId || undefined,
       codigoBarras: values.codigoBarras?.trim() || undefined,
       descripcion: values.descripcion?.trim() || undefined,
@@ -1424,7 +1504,6 @@ export function ProductosPage() {
               className={`flex-1 px-6 py-4 ${isPackagingDialogOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
             >
               <div className="grid gap-4">
-                <input type="hidden" {...form.register('modoEmpaque')} />
                 <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium">SKU</label>
@@ -1519,45 +1598,6 @@ export function ProductosPage() {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium">Presentación</label>
-                  {canManageMasters ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => openCreateMaster('presentacion', 'presentacionId')}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  ) : null}
-                </div>
-                <Controller
-                  control={form.control}
-                  name="presentacionId"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value || 'none'}
-                      onValueChange={(value) => field.onChange(value === 'none' ? '' : value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Opcional" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Sin presentación</SelectItem>
-                        {options.presentations.map((presentation) => (
-                          <SelectItem key={presentation.id} value={presentation.id}>
-                            {presentation.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
                   <label className="text-xs font-medium">Unidad de medida</label>
                   {canManageMasters ? (
                     <Button
@@ -1593,16 +1633,6 @@ export function ProductosPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium">Precio de venta</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  {...form.register('precioVenta', { valueAsNumber: true })}
-                />
-                <FieldError message={form.formState.errors.precioVenta?.message} />
-              </div>
-
-              <div className="space-y-1.5">
                 <label className="text-xs font-medium">Costo referencial</label>
                 <Input
                   type="number"
@@ -1620,6 +1650,17 @@ export function ProductosPage() {
                   className="w-full justify-between gap-3"
                   onClick={() => {
                     createDialogScrollTopRef.current = createDialogContentRef.current?.scrollTop ?? 0
+                    if (packagingPresentations.fields.length === 0 && options.presentations.length > 0) {
+                      const firstPresentationId = options.presentations[0].id
+                      packagingPresentations.append({
+                        presentacionId: firstPresentationId,
+                        permiteCompra: true,
+                        permiteVenta: true,
+                        precioVenta: 0,
+                      })
+                      form.setValue('basePresentacionId', firstPresentationId, { shouldValidate: true })
+                      form.setValue('compraPresentacionId', firstPresentationId, { shouldValidate: true })
+                    }
                     setIsPackagingDialogOpen(true)
                   }}
                 >
@@ -1628,13 +1669,10 @@ export function ProductosPage() {
                     Configurar empaque
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {watchedPackagingMode === 'BLISTER'
-                      ? `Blíster · ${
-                          (watchedUnitsPerBlister ?? 0) > 0 && (watchedBlistersPerBox ?? 0) > 0
-                            ? `1 caja = ${(watchedUnitsPerBlister ?? 0) * (watchedBlistersPerBox ?? 0)} und`
-                            : 'definir factores'
-                        }`
-                      : 'Simple'}
+                    {`${watchedPackagingPresentations.length} presentación(es) · base ${
+                      options.presentations.find((item) => item.id === watchedBasePresentationId)?.name ??
+                      'sin definir'
+                    }`}
                   </span>
                 </Button>
               </div>
@@ -1711,104 +1749,262 @@ export function ProductosPage() {
 
           <div className="grid gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium">Modo de empaque</label>
+              <label className="text-xs font-medium">Presentación principal de compra</label>
               <Controller
                 control={form.control}
-                name="modoEmpaque"
+                name="compraPresentacionId"
                 render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={(value) => {
-                      field.onChange(value)
-                      if (value !== 'BLISTER') {
-                        form.setValue('unidadesPorBlister', undefined, { shouldValidate: true })
-                        form.setValue('blistersPorCaja', undefined, { shouldValidate: true })
-                        form.setValue('precioVentaBlister', undefined, { shouldValidate: true })
-                      }
-                    }}
-                  >
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Selecciona compra" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="SIMPLE">Simple (sin fraccionar)</SelectItem>
-                      <SelectItem value="BLISTER">Caja / Blíster / Unidad</SelectItem>
+                      {watchedPackagingPresentations
+                        .filter((entry) => entry.permiteCompra)
+                        .map((entry) => {
+                        const label =
+                          options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
+                          entry.presentacionId
+                        return (
+                          <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
+                            {label}
+                          </SelectItem>
+                        )
+                      })}
                     </SelectContent>
                   </Select>
                 )}
               />
+              <FieldError message={form.formState.errors.compraPresentacionId?.message} />
             </div>
 
-            {watchedPackagingMode === 'BLISTER' ? (
-              <div className="grid gap-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium">Unidades por blíster</label>
-                    <Input
-                      type="number"
-                      step="1"
-                      {...form.register('unidadesPorBlister', {
-                        valueAsNumber: true,
-                        setValueAs: (value) =>
-                          value === '' || value === null || value === undefined
-                            ? undefined
-                            : Number(value),
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Unidad mínima (base)</label>
+              <Controller
+                control={form.control}
+                name="basePresentacionId"
+                render={({ field }) => (
+                  <Select value={field.value || undefined} onValueChange={field.onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona base" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {watchedPackagingPresentations.map((entry) => {
+                        const label =
+                          options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
+                          entry.presentacionId
+                        return (
+                          <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
+                            {label}
+                          </SelectItem>
+                        )
                       })}
-                    />
-                    <FieldError message={form.formState.errors.unidadesPorBlister?.message} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium">Blíster por caja</label>
-                    <Input
-                      type="number"
-                      step="1"
-                      {...form.register('blistersPorCaja', {
-                        valueAsNumber: true,
-                        setValueAs: (value) =>
-                          value === '' || value === null || value === undefined
-                            ? undefined
-                            : Number(value),
-                      })}
-                    />
-                    <FieldError message={form.formState.errors.blistersPorCaja?.message} />
-                  </div>
-                </div>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              <FieldError message={form.formState.errors.basePresentacionId?.message} />
+            </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Precio venta blíster (opcional)</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="Se calcula automáticamente si lo dejas vacío"
-                    {...form.register('precioVentaBlister', {
-                      valueAsNumber: true,
-                      setValueAs: (value) =>
-                        value === '' || value === null || value === undefined
-                          ? undefined
-                          : Number(value),
-                    })}
-                  />
-                  <FieldError message={form.formState.errors.precioVentaBlister?.message} />
-                </div>
-
-                <div className="rounded-xl border bg-muted/20 p-3">
-                  <p className="text-sm font-medium text-foreground">Resumen</p>
-                  <div className="mt-2 grid gap-1 text-sm text-muted-foreground">
-                    <p>
-                      1 Blíster = {(watchedUnitsPerBlister ?? 0).toString()} und
-                    </p>
-                    <p>
-                      1 Caja = {(
-                        (watchedUnitsPerBlister ?? 0) * (watchedBlistersPerBox ?? 0)
-                      ).toString()}{' '}
-                      und
-                    </p>
-                  </div>
-                </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium">Presentaciones</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    packagingPresentations.append({
+                      presentacionId: options.presentations[0]?.id ?? '',
+                      permiteCompra: false,
+                      permiteVenta: false,
+                      precioVenta: undefined,
+                    })
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Agregar
+                </Button>
               </div>
-            ) : (
-              <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
-                Usa este modo para productos que se compran y venden en la misma unidad (ej. frascos).
+
+              <div className="grid gap-2">
+                {packagingPresentations.fields.map((field, index) => (
+                  <div key={field.id} className="grid gap-2 rounded-xl border p-3">
+                    <Controller
+                      control={form.control}
+                      name={`presentacionesEmpaque.${index}.presentacionId`}
+                      render={({ field }) => (
+                        <Select value={field.value || undefined} onValueChange={field.onChange}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona presentación" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {options.presentations.map((presentation) => (
+                              <SelectItem key={presentation.id} value={presentation.id}>
+                                {presentation.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <Controller
+                        control={form.control}
+                        name={`presentacionesEmpaque.${index}.permiteCompra`}
+                        render={({ field }) => (
+                          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                            <p className="text-sm font-medium text-foreground">Compra</p>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </label>
+                        )}
+                      />
+                      <Controller
+                        control={form.control}
+                        name={`presentacionesEmpaque.${index}.permiteVenta`}
+                        render={({ field }) => (
+                          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                            <p className="text-sm font-medium text-foreground">Venta</p>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </label>
+                        )}
+                      />
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium">Precio</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          {...form.register(`presentacionesEmpaque.${index}.precioVenta`, {
+                            valueAsNumber: true,
+                            setValueAs: (value) =>
+                              value === '' || value === null || value === undefined ? undefined : Number(value),
+                          })}
+                        />
+                        <FieldError
+                          message={
+                            form.formState.errors.presentacionesEmpaque?.[index]?.precioVenta?.message
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => packagingPresentations.remove(index)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <FieldError message={form.formState.errors.presentacionesEmpaque?.message as string | undefined} />
+            </div>
+
+            {watchedPackagingPresentations.length <= 1 ? null : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium">Equivalencias (enteros)</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      packagingConversions.append({
+                        desdePresentacionId: watchedPackagingPresentations[0]?.presentacionId ?? '',
+                        haciaPresentacionId: watchedPackagingPresentations[0]?.presentacionId ?? '',
+                        cantidad: 1,
+                      })
+                    }
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Agregar
+                  </Button>
+                </div>
+
+                <div className="grid gap-2">
+                  {packagingConversions.fields.map((field, index) => (
+                    <div key={field.id} className="grid gap-2 rounded-xl border p-3">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <Controller
+                          control={form.control}
+                          name={`conversionesEmpaque.${index}.desdePresentacionId`}
+                          render={({ field }) => (
+                            <Select value={field.value || undefined} onValueChange={field.onChange}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Desde" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {watchedPackagingPresentations.map((entry) => {
+                                  const label =
+                                    options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
+                                    entry.presentacionId
+                                  return (
+                                    <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
+                                      {label}
+                                    </SelectItem>
+                                  )
+                                })}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                        <Controller
+                          control={form.control}
+                          name={`conversionesEmpaque.${index}.haciaPresentacionId`}
+                          render={({ field }) => (
+                            <Select value={field.value || undefined} onValueChange={field.onChange}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Hacia" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {watchedPackagingPresentations.map((entry) => {
+                                  const label =
+                                    options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
+                                    entry.presentacionId
+                                  return (
+                                    <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
+                                      {label}
+                                    </SelectItem>
+                                  )
+                                })}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium">Cantidad</label>
+                          <Input
+                            type="number"
+                            step="1"
+                            {...form.register(`conversionesEmpaque.${index}.cantidad`, {
+                              valueAsNumber: true,
+                              setValueAs: (value) =>
+                                value === '' || value === null || value === undefined
+                                  ? undefined
+                                  : Number(value),
+                            })}
+                          />
+                          <FieldError
+                            message={form.formState.errors.conversionesEmpaque?.[index]?.cantidad?.message}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => packagingConversions.remove(index)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1875,18 +2071,13 @@ export function ProductosPage() {
               <div className="rounded-xl border p-3">
                 <p className="text-xs text-muted-foreground">Empaque</p>
                 <p className="mt-1 font-medium text-foreground">
-                  {selectedProductDetail.packagingMode === 'BLISTER'
-                    ? `Blíster · 1 caja = ${(selectedProductDetail.unitsPerBlister ?? 0) * (selectedProductDetail.blistersPerBox ?? 0)} und`
-                    : 'Simple'}
+                  {selectedProductDetail.packaging.presentations.find((item) => item.isBase)?.name ??
+                    'Sin base definida'}
                 </p>
-                {selectedProductDetail.packagingMode === 'BLISTER' ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    1 blíster = {selectedProductDetail.unitsPerBlister ?? 0} und
-                    {selectedProductDetail.blisterPrice !== null
-                      ? ` · precio blíster ${formatCurrency(selectedProductDetail.blisterPrice)}`
-                      : ''}
-                  </p>
-                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedProductDetail.packaging.presentations.length} presentaciones ·{' '}
+                  {selectedProductDetail.packaging.conversions.length} equivalencias
+                </p>
               </div>
             </div>
           ) : null}

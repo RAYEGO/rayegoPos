@@ -32,6 +32,7 @@ const createInventoryLotSchema = z.object({
 
 const adjustInventoryLotSchema = z.object({
   lotId: z.string().uuid(),
+  presentacionId: z.string().uuid(),
   target: z.enum(['DISPONIBLE', 'RESERVADO', 'BLOQUEADO']),
   operation: z.enum(['SUMAR', 'RESTAR']),
   quantity: z.number().int().positive(),
@@ -41,6 +42,7 @@ const adjustInventoryLotSchema = z.object({
 const transferInventoryLotSchema = z.object({
   lotId: z.string().uuid(),
   destinationBranchId: z.string().uuid(),
+  presentacionId: z.string().uuid(),
   quantity: z.number().int().positive(),
   destinationWarehouse: z.string().max(120).optional(),
   observaciones: z.string().max(255).optional(),

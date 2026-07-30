@@ -101,6 +101,19 @@ export type InventoryDashboardResponse = {
       id: string
       name: string
       sku: string
+      unitSymbol: string
+      packaging: {
+        basePresentationId: string | null
+        presentations: Array<{
+          id: string
+          name: string
+          isBase: boolean
+          allowsPurchase: boolean
+          allowsSale: boolean
+          salePrice: number | null
+          factorToBase: number | null
+        }>
+      } | null
     }>
     suppliers: Array<{
       id: string
@@ -134,6 +147,7 @@ export type InventoryAdjustmentOperation = 'SUMAR' | 'RESTAR'
 
 export type AdjustInventoryLotPayload = {
   lotId: string
+  presentacionId: string
   target: InventoryAdjustmentTarget
   operation: InventoryAdjustmentOperation
   quantity: number
@@ -143,6 +157,7 @@ export type AdjustInventoryLotPayload = {
 export type TransferInventoryLotPayload = {
   lotId: string
   destinationBranchId: string
+  presentacionId: string
   quantity: number
   destinationWarehouse?: string
   observaciones?: string

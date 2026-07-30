@@ -67,20 +67,25 @@ const saleCheckoutSchema = z.object({
 
 type SaleCheckoutFormValues = z.infer<typeof saleCheckoutSchema>
 
+type LocalCartPresentationOption = {
+  id: string
+  name: string
+  salePrice: number
+  factorToBase: number
+}
+
 type LocalCartItem = {
   productId: string
   name: string
   sku: string
   unitSymbol: string
-  salePrice: number
-  blisterPrice: number | null
-  packagingMode: 'SIMPLE' | 'BLISTER'
-  unitsPerBlister: number | null
-  blistersPerBox: number | null
-  empaque: 'UNIDAD' | 'BLISTER'
+  presentationId: string | null
+  presentationName: string | null
+  presentationPrice: number | null
+  presentationFactorToBase: number | null
+  presentationOptions: LocalCartPresentationOption[]
   quantity: number
   availableUnits: number
-  availableBlisters: number | null
   requiresPrescription: boolean
   isControlled: boolean
   coldChain: boolean
@@ -181,34 +186,26 @@ function clampQuantity(value: number, max: number) {
 }
 
 function getCartItemMax(item: LocalCartItem) {
-  if (item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER') {
-    const maxFromServer = item.availableBlisters ?? null
-    if (typeof maxFromServer === 'number' && Number.isFinite(maxFromServer)) {
-      return Math.max(0, Math.floor(maxFromServer))
-    }
-
-    const factor = item.unitsPerBlister ?? 0
-    if (!factor) return 0
-    return Math.max(0, Math.floor(item.availableUnits / factor))
+  const factor = item.presentationFactorToBase ?? null
+  if (!factor || !Number.isFinite(factor) || factor <= 0) {
+    return Math.max(0, Math.floor(item.availableUnits))
   }
-
-  return Math.max(0, Math.floor(item.availableUnits))
+  return Math.max(0, Math.floor(item.availableUnits / factor))
 }
 
 function getCartItemUnitPrice(item: LocalCartItem) {
-  if (item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER') {
-    return item.blisterPrice ?? item.salePrice * (item.unitsPerBlister ?? 1)
+  if (typeof item.presentationPrice === 'number') {
+    return item.presentationPrice
   }
-
-  return item.salePrice
+  return 0
 }
 
 function getCartItemReservedUnits(item: LocalCartItem) {
-  if (item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER') {
-    return item.quantity * (item.unitsPerBlister ?? 0)
+  const factor = item.presentationFactorToBase ?? null
+  if (!factor || !Number.isFinite(factor) || factor <= 0) {
+    return item.quantity
   }
-
-  return item.quantity
+  return item.quantity * factor
 }
 
 function getStockVariant(product: any) {
@@ -373,23 +370,47 @@ export function VentasPage() {
       return current
     }
 
-    const nextPackagingMode = nextProduct.packagingMode
-    const nextEmpaque =
-      nextPackagingMode === 'BLISTER' ? current.empaque : ('UNIDAD' as const)
+    const presentationOptions =
+      nextProduct.packaging?.presentations
+        ?.filter(
+          (entry) =>
+            entry.allowsSale &&
+            entry.salePrice !== null &&
+            entry.factorToBase !== null &&
+            entry.factorToBase > 0,
+        )
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          salePrice: entry.salePrice ?? 0,
+          factorToBase: entry.factorToBase ?? 1,
+        })) ?? []
+
+    const basePresentationId = nextProduct.packaging?.basePresentationId ?? null
+    const resolvedPresentationId =
+      presentationOptions.length > 0
+        ? presentationOptions.some((option) => option.id === current.presentationId)
+          ? current.presentationId
+          : presentationOptions.find((option) => option.id === basePresentationId)?.id ??
+            presentationOptions[0]?.id ??
+            null
+        : null
+
+    const resolvedPresentation = resolvedPresentationId
+      ? presentationOptions.find((option) => option.id === resolvedPresentationId) ?? null
+      : null
 
     return {
       ...current,
       name: nextProduct.name,
       sku: nextProduct.sku,
       unitSymbol: nextProduct.unitSymbol,
-      salePrice: nextProduct.salePrice,
-      blisterPrice: nextProduct.blisterPrice,
-      packagingMode: nextPackagingMode,
-      unitsPerBlister: nextProduct.unitsPerBlister,
-      blistersPerBox: nextProduct.blistersPerBox,
-      empaque: nextEmpaque,
+      presentationId: resolvedPresentationId,
+      presentationName: resolvedPresentation?.name ?? null,
+      presentationPrice: resolvedPresentation?.salePrice ?? null,
+      presentationFactorToBase: resolvedPresentation?.factorToBase ?? null,
+      presentationOptions,
       availableUnits: nextProduct.availableUnits,
-      availableBlisters: nextProduct.availableBlisters,
       requiresPrescription: nextProduct.requiresPrescription,
       isControlled: nextProduct.isControlled,
       coldChain: nextProduct.coldChain,
@@ -456,6 +477,36 @@ export function VentasPage() {
         )
       }
 
+      const presentationOptions =
+        product.packaging?.presentations
+          ?.filter(
+            (entry) =>
+              entry.allowsSale &&
+              entry.salePrice !== null &&
+              entry.factorToBase !== null &&
+              entry.factorToBase > 0,
+          )
+          .map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            salePrice: entry.salePrice ?? 0,
+            factorToBase: entry.factorToBase ?? 1,
+          })) ?? []
+
+      if (!presentationOptions.length) {
+        toast.error('El producto no tiene presentaciones habilitadas para venta.')
+        return current
+      }
+
+      const basePresentationId = product.packaging?.basePresentationId ?? null
+      const selectedPresentationId =
+        presentationOptions.find((option) => option.id === basePresentationId)?.id ??
+        presentationOptions[0]?.id ??
+        null
+      const selectedPresentation = selectedPresentationId
+        ? presentationOptions.find((option) => option.id === selectedPresentationId) ?? null
+        : null
+
       return [
         ...current,
         {
@@ -463,15 +514,13 @@ export function VentasPage() {
           name: product.name,
           sku: product.sku,
           unitSymbol: product.unitSymbol,
-          salePrice: product.salePrice,
-          blisterPrice: product.blisterPrice,
-          packagingMode: product.packagingMode,
-          unitsPerBlister: product.unitsPerBlister,
-          blistersPerBox: product.blistersPerBox,
-          empaque: 'UNIDAD',
+          presentationId: selectedPresentationId,
+          presentationName: selectedPresentation?.name ?? null,
+          presentationPrice: selectedPresentation?.salePrice ?? null,
+          presentationFactorToBase: selectedPresentation?.factorToBase ?? null,
+          presentationOptions,
           quantity: 1,
           availableUnits: product.availableUnits,
-          availableBlisters: product.availableBlisters,
           requiresPrescription: product.requiresPrescription,
           isControlled: product.isControlled,
           coldChain: product.coldChain,
@@ -495,13 +544,23 @@ export function VentasPage() {
     )
   }
 
-  function updateCartEmpaque(productId: string, empaque: 'UNIDAD' | 'BLISTER') {
+  function updateCartPresentation(productId: string, presentationId: string) {
     setCartItems((current) =>
       current.map((item) => {
         if (item.productId !== productId) return item
-        if (item.packagingMode !== 'BLISTER') return item
+        if (!item.presentationOptions.length) return item
 
-        const next: LocalCartItem = { ...item, empaque }
+        const selected = item.presentationOptions.find((option) => option.id === presentationId) ?? null
+        if (!selected) return item
+
+        const next = {
+          ...item,
+          presentationId: selected.id,
+          presentationName: selected.name,
+          presentationPrice: selected.salePrice,
+          presentationFactorToBase: selected.factorToBase,
+        }
+
         return {
           ...next,
           quantity: clampQuantity(next.quantity, getCartItemMax(next)),
@@ -596,7 +655,7 @@ export function VentasPage() {
       items: cartItems.map((item) => ({
         productoId: item.productId,
         cantidad: item.quantity,
-        empaque: item.packagingMode === 'BLISTER' ? item.empaque : undefined,
+        presentacionId: item.presentationId ?? '',
       })),
       payments: values.payments.map((payment) => ({
         formaPagoId: payment.formaPagoId,
@@ -715,6 +774,14 @@ export function VentasPage() {
                   const cartEntry = cartItems.find((item) => item.productId === product.id)
                   const reservedUnits = cartEntry ? getCartItemReservedUnits(cartEntry) : 0
                   const remainingUnits = product.availableUnits - reservedUnits
+                  const sellablePresentationPrices =
+                    product.packaging?.presentations
+                      ?.filter((entry) => entry.allowsSale && entry.salePrice !== null)
+                      .map((entry) => entry.salePrice ?? 0) ?? []
+                  const displayPrice =
+                    sellablePresentationPrices.length > 0
+                      ? Math.min(...sellablePresentationPrices)
+                      : product.salePrice
 
                   return (
                     <Card key={product.id} className="p-4">
@@ -726,16 +793,10 @@ export function VentasPage() {
                       </div>
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Badge variant="info">{formatCurrency(product.salePrice)}</Badge>
+                        <Badge variant="info">{formatCurrency(displayPrice)}</Badge>
                         <Badge variant={getStockVariant(product)}>
                           {product.availableUnits.toFixed(0)} {product.unitSymbol}
                         </Badge>
-                        {product.packagingMode === 'BLISTER' &&
-                          typeof product.availableBlisters === 'number' && (
-                            <Badge variant="outline">
-                              {product.availableBlisters.toFixed(0)} BLÍS
-                            </Badge>
-                          )}
                         {product.requiresPrescription && <Badge variant="warning">R</Badge>}
                         {product.isControlled && <Badge variant="destructive">C</Badge>}
                         {product.coldChain && <Badge variant="info">❄️</Badge>}
@@ -1121,24 +1182,23 @@ export function VentasPage() {
                               <p className="truncate font-medium text-foreground">{item.name}</p>
                               <p className="mt-1 text-xs text-muted-foreground">
                                 {formatCurrency(getCartItemUnitPrice(item))} /{' '}
-                                {item.packagingMode === 'BLISTER' && item.empaque === 'BLISTER'
-                                  ? 'BLÍS'
-                                  : item.unitSymbol}
+                                {item.presentationName ?? item.unitSymbol}
                               </p>
-                              {item.packagingMode === 'BLISTER' ? (
-                                <div className="mt-2 w-full max-w-[180px]">
+                              {item.presentationOptions.length > 1 ? (
+                                <div className="mt-2 w-full max-w-[220px]">
                                   <Select
-                                    value={item.empaque}
-                                    onValueChange={(value) =>
-                                      updateCartEmpaque(item.productId, value as 'UNIDAD' | 'BLISTER')
-                                    }
+                                    value={item.presentationId ?? ''}
+                                    onValueChange={(value) => updateCartPresentation(item.productId, value)}
                                   >
                                     <SelectTrigger className="h-8">
-                                      <SelectValue />
+                                      <SelectValue placeholder="Presentación" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="UNIDAD">Unidad</SelectItem>
-                                      <SelectItem value="BLISTER">Blíster</SelectItem>
+                                      {item.presentationOptions.map((option) => (
+                                        <SelectItem key={option.id} value={option.id}>
+                                          {option.name}
+                                        </SelectItem>
+                                      ))}
                                     </SelectContent>
                                   </Select>
                                 </div>

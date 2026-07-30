@@ -84,6 +84,10 @@ export const IMPLEMENTATION_MESSAGES = {
     'No se pudo completar la importación.',
     'Revise el archivo e intente nuevamente.',
   ].join('\n\n'),
+  MASTER_DELETE_BLOCKED_IN_USE: [
+    'No se puede eliminar este registro porque está siendo utilizado por otra entidad del sistema.',
+    'Solución: marca el registro como Inactivo.',
+  ].join('\n\n'),
 } as const
 
 export type ImplementationMessageKey = keyof typeof IMPLEMENTATION_MESSAGES

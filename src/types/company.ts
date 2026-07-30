@@ -1,6 +1,7 @@
 export type CompanyProfile = {
   id: string
   logoUrl: string | null
+  operationMode: 'IMPLEMENTACION' | 'PRODUCCION'
   razonSocial: string
   nombreComercial: string | null
   ruc: string

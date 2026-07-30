@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Activity,
   AlertTriangle,
@@ -19,6 +20,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { dashboardService } from '@/services/dashboardService'
 import type { DashboardOverviewResponse } from '@/types/dashboard'
+import { paths } from '@/routes/paths'
 import { toast } from 'sonner'
 
 function formatCurrency(value: number) {
@@ -41,6 +43,7 @@ const defaultDashboard: DashboardOverviewResponse = {
   alerts: {
     expiringLotsCount: 0,
     lowStockProductsCount: 0,
+    cashClosePending: null,
     expiringLots: [],
     lowStockProducts: [],
   },
@@ -68,6 +71,7 @@ function getApiErrorMessage(error: unknown) {
 export function DashboardPage() {
   const { logout, session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const navigate = useNavigate()
 
   const [dashboard, setDashboard] = useState<DashboardOverviewResponse>(defaultDashboard)
   const [isLoading, setIsLoading] = useState(true)
@@ -186,7 +190,7 @@ export function DashboardPage() {
                   {formatCurrency(activeDrawer.expectedAmount)}
                 </p>
                 <p className="text-small text-muted-foreground">
-                  {activeDrawer.branchName} · {activeDrawer.cashierName}
+                  {activeDrawer.cashRegisterName} · {activeDrawer.cashierName}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   apertura {new Date(activeDrawer.openedAt).toLocaleString('es-PE')}
@@ -232,10 +236,24 @@ export function DashboardPage() {
           <div className="flex flex-wrap gap-2">
             <Badge variant="warning">{dashboard.alerts.expiringLotsCount} por vencer</Badge>
             <Badge variant="info">{dashboard.alerts.lowStockProductsCount} bajo stock</Badge>
-            <Badge variant={activeDrawer ? 'success' : 'outline'}>
-              {activeDrawer ? 'Caja abierta' : 'Caja cerrada'}
-            </Badge>
           </div>
+
+          {dashboard.alerts.cashClosePending ? (
+            <div className="rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p>
+                  Caja pendiente de cierre desde el {dashboard.alerts.cashClosePending.openedDateLabel}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => navigate(paths.caja)}
+                >
+                  Ir a Caja
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           {showAlertDetails ? (
             <div className="space-y-3">

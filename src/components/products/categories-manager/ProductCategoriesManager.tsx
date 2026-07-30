@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Loader } from '@/components/ui/loader'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
@@ -20,6 +29,12 @@ type DialogState = {
   open: boolean
   mode: CategoryFormMode
   record: CategoryRecord | null
+}
+
+type DeleteBlockedState = {
+  open: boolean
+  message: string
+  record: CategoryRecord
 }
 
 export type ProductCategoriesManagerProps = {
@@ -51,6 +66,7 @@ export function ProductCategoriesManager({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [deleteBlocked, setDeleteBlocked] = useState<DeleteBlockedState | null>(null)
   const [dialog, setDialog] = useState<DialogState>({
     open: false,
     mode: 'create',
@@ -171,9 +187,35 @@ export function ProductCategoriesManager({
       await loadCategories()
       onCategoriesChanged?.()
     } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 409) {
+        setDeleteBlocked({ open: true, message: nextError.message, record: selected })
+        return
+      }
+
       toast.error(getApiErrorMessage(nextError))
     }
   }, [accessToken, loadCategories, onCategoriesChanged, selected])
+
+  const handleBlockedInactivate = useCallback(async () => {
+    if (!accessToken) return
+    if (!deleteBlocked) return
+
+    try {
+      await productsService.updateMasterCategory(accessToken, deleteBlocked.record.id, {
+        nombre: deleteBlocked.record.name,
+        descripcion: deleteBlocked.record.description || undefined,
+        color: deleteBlocked.record.color ?? undefined,
+        orden: deleteBlocked.record.order,
+        activo: false,
+      })
+      toast.success('Categoría marcada como Inactiva.')
+      setDeleteBlocked(null)
+      await loadCategories()
+      onCategoriesChanged?.()
+    } catch (nextError) {
+      toast.error(getApiErrorMessage(nextError))
+    }
+  }, [accessToken, deleteBlocked, loadCategories, onCategoriesChanged])
 
   const handleSubmit = useCallback(
     async (payload: CategoryFormSubmitPayload) => {
@@ -291,6 +333,34 @@ export function ProductCategoriesManager({
               onCategoriesChanged?.()
             }}
           />
+
+          <Dialog
+            open={deleteBlocked?.open ?? false}
+            onOpenChange={(open) => {
+              if (!open) setDeleteBlocked(null)
+            }}
+          >
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>No se puede eliminar</DialogTitle>
+                <DialogDescription className="whitespace-pre-line">
+                  {deleteBlocked?.message}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button type="button" variant="outline" onClick={() => setDeleteBlocked(null)}>
+                  Cerrar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleBlockedInactivate()}
+                  disabled={!deleteBlocked?.record.active || canManage === false}
+                >
+                  Marcar Inactivo
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>

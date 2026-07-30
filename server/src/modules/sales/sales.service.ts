@@ -1,10 +1,8 @@
 import {
   CodigoFormaPago,
-  EmpaqueProducto,
   EstadoLote,
   EstadoVenta,
   EstadoAperturaCaja,
-  ModoEmpaqueProducto,
   TipoMovimientoCaja,
   OperacionCaja,
   OrigenMovimientoInventario,
@@ -15,6 +13,14 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
+import {
+  buildPackagingEdges,
+  resolveBasePresentation,
+  resolveFactorToBase,
+  resolvePresentationEntry,
+  resolvePresentationFactors,
+} from '../../lib/productPackaging.js'
 
 const saleInclude = {
   sucursal: {
@@ -57,6 +63,12 @@ const saleInclude = {
               simbolo: true,
             },
           },
+        },
+      },
+      presentacion: {
+        select: {
+          id: true,
+          nombre: true,
         },
       },
       lotesAsignados: {
@@ -108,7 +120,7 @@ type CreateSalePayload = {
   items: Array<{
     productoId: string
     cantidad: number
-    empaque?: EmpaqueProducto
+    presentacionId: string
     descuentoTotal?: number
   }>
   payments: Array<{
@@ -563,6 +575,29 @@ export async function getSalesDashboard(
             nombre: true,
           },
         },
+        presentacionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            esBase: true,
+            permiteCompra: true,
+            permiteVenta: true,
+            precioVenta: true,
+            presentacion: {
+              select: {
+                id: true,
+                nombre: true,
+              },
+            },
+          },
+        },
+        conversionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            desdePresentacionId: true,
+            haciaPresentacionId: true,
+            cantidad: true,
+          },
+        },
         lotes: {
           where: {
             deletedAt: null,
@@ -617,6 +652,33 @@ export async function getSalesDashboard(
         0,
       )
 
+      const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
+      const packagingBasePresentationId = basePresentation?.presentacion.id ?? null
+      const packagingEdges = buildPackagingEdges(product.conversionesEmpaque ?? [])
+      const packagingFactors =
+        packagingBasePresentationId === null
+          ? new Map<string, number | null>()
+          : resolvePresentationFactors({
+              basePresentationId: packagingBasePresentationId,
+              presentationIds: (product.presentacionesEmpaque ?? []).map(
+                (entry) => entry.presentacion.id,
+              ),
+              edges: packagingEdges,
+            })
+
+      const packagingPresentations = (product.presentacionesEmpaque ?? []).map((entry) => ({
+        id: entry.presentacion.id,
+        name: entry.presentacion.nombre,
+        isBase: entry.esBase,
+        allowsPurchase: entry.permiteCompra,
+        allowsSale: entry.permiteVenta,
+        salePrice: entry.precioVenta ? decimalToNumber(entry.precioVenta) : null,
+        factorToBase:
+          packagingBasePresentationId === null
+            ? null
+            : (packagingFactors.get(entry.presentacion.id) ?? null),
+      }))
+
       return {
         id: product.id,
         name: product.nombre,
@@ -625,15 +687,14 @@ export async function getSalesDashboard(
         presentationName: product.presentacion?.nombre ?? 'Presentación general',
         unitSymbol: product.unidadMedida.simbolo,
         salePrice: decimalToNumber(product.precioVenta),
-        packagingMode: product.modoEmpaque,
-        unitsPerBlister: product.unidadesPorBlister,
-        blistersPerBox: product.blistersPorCaja,
-        blisterPrice: decimalToNumber(product.precioVentaBlister) || null,
-        availableUnits: Number(availableUnits.toFixed(2)),
-        availableBlisters:
-          product.modoEmpaque === 'BLISTER' && product.unidadesPorBlister
-            ? Math.floor(availableUnits / product.unidadesPorBlister)
+        packaging:
+          packagingPresentations.length > 0
+            ? {
+                basePresentationId: packagingBasePresentationId,
+                presentations: packagingPresentations,
+              }
             : null,
+        availableUnits: Number(availableUnits.toFixed(2)),
         requiresPrescription: product.requiereReceta,
         isControlled: product.esControlado,
         coldChain: isColdChainProduct(product.nombre),
@@ -727,6 +788,49 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     throw createHttpError(400, 'No repitas el mismo producto dentro de la misma venta.')
   }
 
+  const pendingOpening = await prisma.aperturaCaja.findFirst({
+    where: {
+      deletedAt: null,
+      estado: EstadoAperturaCaja.ABIERTA,
+      caja: {
+        deletedAt: null,
+        sucursalId: targetBranchId,
+      },
+    },
+    select: {
+      id: true,
+      fechaApertura: true,
+      cierrePendiente: true,
+    },
+  })
+
+  if (pendingOpening) {
+    const now = new Date()
+    const closePending =
+      pendingOpening.cierrePendiente || !isSameDateInTimeZone(pendingOpening.fechaApertura, now)
+
+    if (closePending) {
+      if (!pendingOpening.cierrePendiente) {
+        await prisma.aperturaCaja.update({
+          where: { id: pendingOpening.id },
+          data: {
+            cierrePendiente: true,
+            updatedById: userId,
+          },
+        })
+      }
+
+      const openingDateLabel = formatDateInTimeZone(pendingOpening.fechaApertura)
+      throw createHttpError(
+        409,
+        [
+          `Caja pendiente de cierre desde el ${openingDateLabel}.`,
+          'Cierra la caja del día anterior para continuar registrando ventas.',
+        ].join('\n\n'),
+      )
+    }
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     await ensureDefaultPaymentMethods(tx, userId)
 
@@ -766,14 +870,33 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           id: true,
           nombre: true,
           sku: true,
-          modoEmpaque: true,
-          unidadesPorBlister: true,
-          blistersPorCaja: true,
           precioVenta: true,
-          precioVentaBlister: true,
           costoReferencia: true,
           requiereReceta: true,
           esControlado: true,
+          presentacionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              esBase: true,
+              permiteCompra: true,
+              permiteVenta: true,
+              precioVenta: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  nombre: true,
+                },
+              },
+            },
+          },
+          conversionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              desdePresentacionId: true,
+              haciaPresentacionId: true,
+              cantidad: true,
+            },
+          },
           unidadMedida: {
             select: {
               simbolo: true,
@@ -911,63 +1034,59 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       const requestedQuantity = Number(item.cantidad)
       const discountTotal = Number(item.descuentoTotal ?? 0)
       const product = productMap.get(item.productoId)!
-      const baseUnitPrice = decimalToNumber(product.precioVenta)
-      const packType =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? (item.empaque ?? EmpaqueProducto.UNIDAD)
-          : null
-      const packFactor =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? packType === EmpaqueProducto.UNIDAD
-            ? 1
-            : packType === EmpaqueProducto.BLISTER
-              ? product.unidadesPorBlister ?? null
-              : null
-          : null
-      const packQuantity =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER ? requestedQuantity : null
-      const quantity =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER
-          ? Number(packQuantity) * Number(packFactor)
-          : requestedQuantity
 
       if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
         throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
       }
 
-      if (product.modoEmpaque === ModoEmpaqueProducto.BLISTER) {
-        if (!Number.isInteger(requestedQuantity)) {
-          throw createHttpError(
-            400,
-            'La cantidad debe ser un entero al vender por unidad o blíster.',
-          )
-        }
-
-        if (packType === EmpaqueProducto.CAJA) {
-          throw createHttpError(400, 'La venta por caja no está disponible.')
-        }
-
-        if (!packFactor || !Number.isFinite(Number(packFactor)) || Number(packFactor) <= 0) {
-          throw createHttpError(400, 'La configuración de empaque del producto no es válida.')
-        }
-
-        if (!Number.isInteger(Number(packFactor))) {
-          throw createHttpError(400, 'El factor de empaque debe ser un entero.')
-        }
-
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
-        }
+      if (!Number.isInteger(requestedQuantity)) {
+        throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
       }
 
-      const blisterPrice =
-        product.modoEmpaque === ModoEmpaqueProducto.BLISTER &&
-        packType === EmpaqueProducto.BLISTER
-          ? decimalToNumber(product.precioVentaBlister) ||
-            baseUnitPrice * Number(packFactor)
-          : null
-      const unitPrice =
-        blisterPrice !== null && packFactor ? blisterPrice / Number(packFactor) : baseUnitPrice
+      const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
+      if (!basePresentation) {
+        throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
+      }
+
+      const resolvedPresentation = resolvePresentationEntry({
+        operation: 'SALE',
+        presentationId: item.presentacionId,
+        presentations: product.presentacionesEmpaque ?? [],
+      })
+
+      if (!resolvedPresentation.ok) {
+        throw createHttpError(400, resolvedPresentation.error)
+      }
+
+      const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
+      const factor = resolveFactorToBase({
+        presentationId: item.presentacionId,
+        basePresentationId: basePresentation.presentacion.id,
+        edges,
+      })
+
+      if (!factor) {
+        throw createHttpError(
+          400,
+          'No fue posible resolver la conversión hacia la presentación base del producto.',
+        )
+      }
+
+      const quantity = requestedQuantity * factor
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+      }
+
+      const presentationPrice =
+        resolvedPresentation.entry.precioVenta === null || resolvedPresentation.entry.precioVenta === undefined
+          ? null
+          : decimalToNumber(resolvedPresentation.entry.precioVenta)
+
+      if (presentationPrice === null) {
+        throw createHttpError(400, 'La presentación seleccionada no tiene un precio de venta configurado.')
+      }
+
+      const unitPrice = presentationPrice / factor
       const grossAmount = quantity * unitPrice
 
       if (!Number.isFinite(discountTotal) || discountTotal < 0 || discountTotal > grossAmount) {
@@ -985,10 +1104,11 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         subtotal: grossAmount - discountTotal,
         total: grossAmount - discountTotal,
         product,
-        pack: {
-          type: packType,
-          quantity: packQuantity,
-          factor: packFactor,
+        presentation: {
+          id: item.presentacionId,
+          name: resolvedPresentation.entry.presentacion.nombre,
+          quantity: requestedQuantity,
+          factor,
         },
       }
     })
@@ -1127,15 +1247,12 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           create: lineItems.map((item) => ({
             productoId: item.productoId,
             cantidad: item.quantity,
-            empaque: item.pack.type ?? undefined,
-            cantidadEmpaque:
-              item.pack.quantity === null || item.pack.quantity === undefined
+            presentacionId: item.presentation.id,
+            cantidadPresentacion:
+              item.presentation.quantity === null || item.presentation.quantity === undefined
                 ? undefined
-                : Math.trunc(item.pack.quantity),
-            factorEmpaque:
-              item.pack.factor === null || item.pack.factor === undefined
-                ? undefined
-                : Math.trunc(item.pack.factor),
+                : Math.trunc(item.presentation.quantity),
+            factorPresentacion: Math.trunc(item.presentation.factor),
             precioUnitario: toDecimal(item.unitPrice, 6),
             descuentoTotal: toDecimal(item.discountTotal, 2),
             impuestoTotal: toDecimal(0, 2),
@@ -1411,6 +1528,9 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
           empaque: true,
           cantidadEmpaque: true,
           factorEmpaque: true,
+          presentacionId: true,
+          cantidadPresentacion: true,
+          factorPresentacion: true,
           precioUnitario: true,
           descuentoTotal: true,
           subtotal: true,
@@ -1424,6 +1544,11 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
                   simbolo: true,
                 },
               },
+            },
+          },
+          presentacion: {
+            select: {
+              nombre: true,
             },
           },
         },
@@ -1491,10 +1616,9 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
     items: sale.detalles.map((detail) => {
       const baseQuantity = decimalToNumber(detail.cantidad)
       const baseUnitPrice = decimalToNumber(detail.precioUnitario)
-      const factor = detail.factorEmpaque ?? 1
-      const packQuantity = detail.cantidadEmpaque ?? baseQuantity
-      const unitSymbol =
-        detail.empaque === 'BLISTER' ? 'BLÍS' : detail.producto.unidadMedida.simbolo
+      const factor = detail.factorPresentacion ?? detail.factorEmpaque ?? 1
+      const packQuantity = detail.cantidadPresentacion ?? detail.cantidadEmpaque ?? baseQuantity
+      const unitSymbol = detail.presentacion?.nombre ?? detail.producto.unidadMedida.simbolo
       const unitPrice = baseUnitPrice * factor
 
       return {

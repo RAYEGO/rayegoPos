@@ -19,6 +19,7 @@ export type CashDrawerRecord = {
   countedAmount: number
   differenceAmount: number
   status: CashDrawerStatus
+  closePending: boolean
 }
 
 export type CashMovementRecord = {

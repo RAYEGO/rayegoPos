@@ -2,7 +2,15 @@ import { EstadoProducto, ModoEmpaqueProducto, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
-import { IMPLEMENTATION_MESSAGES } from '../../shared/implementation/messages.js'
+import {
+  buildPackagingEdges,
+  resolveBasePresentation,
+  resolvePresentationFactors,
+} from '../../lib/productPackaging.js'
+import {
+  formatImplementationMessage,
+  IMPLEMENTATION_MESSAGES,
+} from '../../shared/implementation/messages.js'
 
 const productInclude = {
   categoria: {
@@ -24,11 +32,41 @@ const productInclude = {
       nombre: true,
     },
   },
+  compraPresentacion: {
+    select: {
+      id: true,
+      nombre: true,
+    },
+  },
   unidadMedida: {
     select: {
       id: true,
       nombre: true,
       simbolo: true,
+    },
+  },
+  presentacionesEmpaque: {
+    where: {
+      deletedAt: null,
+    },
+    include: {
+      presentacion: {
+        select: {
+          id: true,
+          nombre: true,
+        },
+      },
+    },
+  },
+  conversionesEmpaque: {
+    where: {
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      desdePresentacionId: true,
+      haciaPresentacionId: true,
+      cantidad: true,
     },
   },
   principiosActivos: {
@@ -96,10 +134,10 @@ type CreateProductPayload = {
   laboratorioId?: string
   presentacionId?: string
   unidadMedidaId: string
-  modoEmpaque?: ModoEmpaqueProducto
-  unidadesPorBlister?: number
-  blistersPorCaja?: number
-  precioVentaBlister?: number
+  compraPresentacionId: string
+  basePresentacionId: string
+  presentacionesEmpaque: PackagingPresentationInput[]
+  conversionesEmpaque?: PackagingConversionInput[]
   principioActivoId?: string
   sku: string
   codigoBarras?: string
@@ -109,7 +147,6 @@ type CreateProductPayload = {
   registroSanitario?: string
   requiereReceta: boolean
   esControlado: boolean
-  precioVenta: number
   costoReferencia: number
   observaciones?: string
 }
@@ -118,6 +155,182 @@ function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
   error.statusCode = statusCode
   return error
+}
+
+function buildMasterInUseDeleteMessage(detail: string) {
+  return formatImplementationMessage('MASTER_DELETE_BLOCKED_IN_USE', detail)
+}
+
+type PackagingPresentationInput = {
+  presentacionId: string
+  permiteCompra: boolean
+  permiteVenta: boolean
+  precioVenta?: number
+}
+
+type PackagingConversionInput = {
+  desdePresentacionId: string
+  haciaPresentacionId: string
+  cantidad: number
+}
+
+type NormalizedPackagingConfig = {
+  basePresentacionId: string
+  presentaciones: Array<{
+    presentacionId: string
+    esBase: boolean
+    permiteCompra: boolean
+    permiteVenta: boolean
+    precioVenta: Prisma.Decimal | null
+  }>
+  conversiones: Array<{
+    desdePresentacionId: string
+    haciaPresentacionId: string
+    cantidad: number
+  }>
+}
+
+async function buildPackagingConfig(
+  tx: Prisma.TransactionClient,
+  payload: CreateProductPayload,
+  params: { companyId: string },
+): Promise<NormalizedPackagingConfig> {
+  const { companyId } = params
+  const purchasePresentationId = payload.compraPresentacionId.trim()
+  const basePresentacionId = payload.basePresentacionId.trim()
+  const presentacionesEmpaque = payload.presentacionesEmpaque ?? null
+  const conversionesEmpaque = payload.conversionesEmpaque ?? null
+
+  if (
+    purchasePresentationId &&
+    basePresentacionId &&
+    presentacionesEmpaque &&
+    presentacionesEmpaque.length > 0
+  ) {
+    const ids = [...new Set(presentacionesEmpaque.map((entry) => entry.presentacionId))]
+    const presentations = await tx.presentacion.findMany({
+      where: {
+        id: { in: ids },
+        empresaId: companyId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (presentations.length !== ids.length) {
+      throw createHttpError(400, 'La configuración de presentaciones contiene registros inválidos.')
+    }
+
+    if (!ids.includes(basePresentacionId)) {
+      throw createHttpError(400, 'Selecciona una presentación base válida.')
+    }
+
+    if (!ids.includes(purchasePresentationId)) {
+      throw createHttpError(400, 'Selecciona una presentación de compra válida.')
+    }
+
+    const normalizedPresentations = presentacionesEmpaque.map((entry) => {
+      const salePrice =
+        entry.permiteVenta
+          ? entry.precioVenta === undefined
+            ? null
+            : Number(entry.precioVenta)
+          : entry.precioVenta === undefined
+            ? null
+            : Number(entry.precioVenta)
+
+      if (entry.permiteVenta) {
+        if (salePrice === null || !Number.isFinite(salePrice) || salePrice < 0) {
+          throw createHttpError(
+            400,
+            'Cada presentación habilitada para venta debe tener un precio válido.',
+          )
+        }
+      } else {
+        if (salePrice !== null && (!Number.isFinite(salePrice) || salePrice < 0)) {
+          throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
+        }
+      }
+
+      return {
+        presentacionId: entry.presentacionId,
+        esBase: entry.presentacionId === basePresentacionId,
+        permiteCompra: Boolean(entry.permiteCompra),
+        permiteVenta: Boolean(entry.permiteVenta),
+        precioVenta: salePrice === null ? null : new Prisma.Decimal(salePrice.toFixed(2)),
+      }
+    })
+
+    if (!normalizedPresentations.some((entry) => entry.permiteVenta)) {
+      throw createHttpError(
+        400,
+        'El producto debe tener al menos una presentación habilitada para venta.',
+      )
+    }
+
+    const purchasePresentationEntry =
+      normalizedPresentations.find((entry) => entry.presentacionId === purchasePresentationId) ??
+      null
+    if (!purchasePresentationEntry) {
+      throw createHttpError(400, 'Selecciona una presentación de compra válida.')
+    }
+    if (!purchasePresentationEntry.permiteCompra) {
+      throw createHttpError(400, 'La presentación principal de compra debe estar habilitada para compra.')
+    }
+
+    const conversionList = (conversionesEmpaque ?? []).map((entry) => {
+      const qty = Number(entry.cantidad)
+      if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty <= 0) {
+        throw createHttpError(400, 'Las equivalencias deben ser enteros positivos mayores que cero.')
+      }
+
+      if (!ids.includes(entry.desdePresentacionId) || !ids.includes(entry.haciaPresentacionId)) {
+        throw createHttpError(400, 'Las equivalencias deben usar presentaciones configuradas en el producto.')
+      }
+
+      if (entry.desdePresentacionId === entry.haciaPresentacionId) {
+        throw createHttpError(400, 'Una equivalencia no puede tener la misma presentación de origen y destino.')
+      }
+
+      return {
+        desdePresentacionId: entry.desdePresentacionId,
+        haciaPresentacionId: entry.haciaPresentacionId,
+        cantidad: qty,
+      }
+    })
+
+    const conversionKey = new Set<string>()
+    for (const entry of conversionList) {
+      const key = `${entry.desdePresentacionId}:${entry.haciaPresentacionId}`
+      if (conversionKey.has(key)) {
+        throw createHttpError(400, 'No se permiten equivalencias duplicadas para el mismo par de presentaciones.')
+      }
+      conversionKey.add(key)
+    }
+
+    const edges = buildPackagingEdges(conversionList)
+    const factors = resolvePresentationFactors({
+      basePresentationId: basePresentacionId,
+      presentationIds: ids,
+      edges,
+    })
+
+    if (ids.some((id) => factors.get(id) === null)) {
+      throw createHttpError(
+        400,
+        'Las presentaciones deben tener equivalencias válidas hacia la unidad mínima del producto.',
+      )
+    }
+
+    return {
+      basePresentacionId,
+      presentaciones: normalizedPresentations,
+      conversiones: conversionList,
+    }
+  }
+  throw createHttpError(400, 'La configuración de empaque del producto es obligatoria.')
 }
 
 function toOptionalString(value?: string | null) {
@@ -156,6 +369,18 @@ function mapProduct(product: ProductWithRelations) {
         left.fechaVencimiento.getTime() - right.fechaVencimiento.getTime(),
     )[0]?.fechaVencimiento
 
+  const basePackaging = resolveBasePresentation(product.presentacionesEmpaque)
+  const basePresentationId = basePackaging?.presentacion.id ?? null
+  const packagingEdges = buildPackagingEdges(product.conversionesEmpaque)
+  const packagingFactors =
+    basePresentationId === null
+      ? new Map<string, number | null>()
+      : resolvePresentationFactors({
+          basePresentationId,
+          presentationIds: product.presentacionesEmpaque.map((entry) => entry.presentacion.id),
+          edges: packagingEdges,
+        })
+
   return {
     id: product.id,
     sku: product.sku,
@@ -169,7 +394,6 @@ function mapProduct(product: ProductWithRelations) {
     requiresPrescription: product.requiereReceta,
     isControlled: product.esControlado,
     salePrice: decimalToNumber(product.precioVenta),
-    blisterPrice: product.precioVentaBlister ? decimalToNumber(product.precioVentaBlister) : null,
     costPrice: decimalToNumber(product.costoReferencia),
     marginReference: decimalToNumber(product.margenReferencia),
     observations: product.observaciones,
@@ -178,14 +402,36 @@ function mapProduct(product: ProductWithRelations) {
     laboratory: product.laboratorio?.nombre ?? null,
     laboratoryId: product.laboratorio?.id ?? null,
     laboratoryCountry: product.laboratorio?.pais ?? null,
-    presentation: product.presentacion?.nombre ?? null,
-    presentationId: product.presentacion?.id ?? null,
+    presentation: basePackaging?.presentacion.nombre ?? product.presentacion?.nombre ?? null,
+    presentationId: basePackaging?.presentacion.id ?? product.presentacion?.id ?? null,
     unit: product.unidadMedida.nombre,
     unitSymbol: product.unidadMedida.simbolo,
     unitId: product.unidadMedida.id,
-    packagingMode: product.modoEmpaque,
-    unitsPerBlister: product.unidadesPorBlister,
-    blistersPerBox: product.blistersPorCaja,
+    packaging: {
+      basePresentationId,
+      purchasePresentationId: product.compraPresentacion?.id ?? basePresentationId,
+      presentations: product.presentacionesEmpaque.map((entry) => ({
+        id: entry.presentacion.id,
+        name: entry.presentacion.nombre,
+        isBase: entry.esBase,
+        allowsPurchase: entry.permiteCompra,
+        allowsSale: entry.permiteVenta,
+        salePrice:
+          entry.precioVenta === null || entry.precioVenta === undefined
+            ? null
+            : decimalToNumber(entry.precioVenta),
+        factorToBase:
+          basePresentationId === null
+            ? null
+            : (packagingFactors.get(entry.presentacion.id) ?? null),
+      })),
+      conversions: product.conversionesEmpaque.map((entry) => ({
+        id: entry.id,
+        fromPresentationId: entry.desdePresentacionId,
+        toPresentationId: entry.haciaPresentacionId,
+        quantity: entry.cantidad,
+      })),
+    },
     activePrinciples: product.principiosActivos.map((entry) => ({
       id: entry.principioActivo.id,
       name: entry.principioActivo.nombre,
@@ -799,16 +1045,8 @@ export async function listMasterCategories(request: FastifyRequest) {
     include: {
       _count: {
         select: {
-          productos: {
-            where: {
-              deletedAt: null,
-            },
-          },
-          children: {
-            where: {
-              deletedAt: null,
-            },
-          },
+          productos: true,
+          children: true,
         },
       },
     },
@@ -942,11 +1180,23 @@ export async function deleteMasterCategory(
   categoryId: string,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { companyId } = await getAuthContext(request)
+
+  const category = await prisma.categoria.findFirst({
+    where: {
+      id: categoryId,
+      deletedAt: null,
+      empresaId: companyId,
+    },
+    select: { id: true },
+  })
+
+  if (!category) {
+    throw createHttpError(404, 'La categoría no existe.')
+  }
 
   const childCount = await prisma.categoria.count({
     where: {
-      deletedAt: null,
       parentId: categoryId,
       empresaId: companyId,
     },
@@ -955,13 +1205,14 @@ export async function deleteMasterCategory(
   if (childCount > 0) {
     throw createHttpError(
       409,
-      'No se puede eliminar la categoría porque tiene categorías hijas. Reasigna o elimina las categorías hijas primero.',
+      buildMasterInUseDeleteMessage(
+        `Referencias detectadas: ${childCount} categoría(s) dependiente(s).`,
+      ),
     )
   }
 
   const productCount = await prisma.producto.count({
     where: {
-      deletedAt: null,
       categoriaId: categoryId,
       empresaId: companyId,
     },
@@ -970,20 +1221,15 @@ export async function deleteMasterCategory(
   if (productCount > 0) {
     throw createHttpError(
       409,
-      'No se puede eliminar la categoría porque tiene productos asociados. Desactívala en su lugar.',
+      buildMasterInUseDeleteMessage(
+        `Referencias detectadas: ${productCount} producto(s) asociado(s).`,
+      ),
     )
   }
 
-  await prisma.categoria.update({
+  await prisma.categoria.delete({
     where: {
       id: categoryId,
-      deletedAt: null,
-      empresaId: companyId,
-    },
-    data: {
-      deletedAt: new Date(),
-      activo: false,
-      updatedById: userId,
     },
   })
 
@@ -1001,11 +1247,7 @@ export async function listMasterLaboratories(request: FastifyRequest) {
     include: {
       _count: {
         select: {
-          productos: {
-            where: {
-              deletedAt: null,
-            },
-          },
+          productos: true,
         },
       },
     },
@@ -1100,11 +1342,23 @@ export async function deleteMasterLaboratory(
   laboratoryId: string,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { companyId } = await getAuthContext(request)
+
+  const laboratory = await prisma.laboratorio.findFirst({
+    where: {
+      id: laboratoryId,
+      deletedAt: null,
+      empresaId: companyId,
+    },
+    select: { id: true },
+  })
+
+  if (!laboratory) {
+    throw createHttpError(404, 'El laboratorio no existe.')
+  }
 
   const productCount = await prisma.producto.count({
     where: {
-      deletedAt: null,
       laboratorioId: laboratoryId,
       empresaId: companyId,
     },
@@ -1113,20 +1367,15 @@ export async function deleteMasterLaboratory(
   if (productCount > 0) {
     throw createHttpError(
       409,
-      'No se puede eliminar el laboratorio porque tiene productos asociados. Desactívalo en su lugar.',
+      buildMasterInUseDeleteMessage(
+        `Referencias detectadas: ${productCount} producto(s) asociado(s).`,
+      ),
     )
   }
 
-  await prisma.laboratorio.update({
+  await prisma.laboratorio.delete({
     where: {
       id: laboratoryId,
-      deletedAt: null,
-      empresaId: companyId,
-    },
-    data: {
-      deletedAt: new Date(),
-      activo: false,
-      updatedById: userId,
     },
   })
 
@@ -1144,11 +1393,7 @@ export async function listMasterPresentations(request: FastifyRequest) {
     include: {
       _count: {
         select: {
-          productos: {
-            where: {
-              deletedAt: null,
-            },
-          },
+          productos: true,
         },
       },
     },
@@ -1240,11 +1485,23 @@ export async function deleteMasterPresentation(
   presentationId: string,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { companyId } = await getAuthContext(request)
+
+  const presentation = await prisma.presentacion.findFirst({
+    where: {
+      id: presentationId,
+      deletedAt: null,
+      empresaId: companyId,
+    },
+    select: { id: true },
+  })
+
+  if (!presentation) {
+    throw createHttpError(404, 'La presentación no existe.')
+  }
 
   const productCount = await prisma.producto.count({
     where: {
-      deletedAt: null,
       presentacionId: presentationId,
       empresaId: companyId,
     },
@@ -1253,20 +1510,15 @@ export async function deleteMasterPresentation(
   if (productCount > 0) {
     throw createHttpError(
       409,
-      'No se puede eliminar la presentación porque tiene productos asociados. Desactívala en su lugar.',
+      buildMasterInUseDeleteMessage(
+        `Referencias detectadas: ${productCount} producto(s) asociado(s).`,
+      ),
     )
   }
 
-  await prisma.presentacion.update({
+  await prisma.presentacion.delete({
     where: {
       id: presentationId,
-      deletedAt: null,
-      empresaId: companyId,
-    },
-    data: {
-      deletedAt: new Date(),
-      activo: false,
-      updatedById: userId,
     },
   })
 
@@ -1284,11 +1536,7 @@ export async function listMasterUnits(request: FastifyRequest) {
     include: {
       _count: {
         select: {
-          productos: {
-            where: {
-              deletedAt: null,
-            },
-          },
+          productos: true,
         },
       },
     },
@@ -1388,11 +1636,23 @@ export async function updateMasterUnit(
 }
 
 export async function deleteMasterUnit(unitId: string, request: FastifyRequest) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { companyId } = await getAuthContext(request)
+
+  const unit = await prisma.unidadMedida.findFirst({
+    where: {
+      id: unitId,
+      deletedAt: null,
+      empresaId: companyId,
+    },
+    select: { id: true },
+  })
+
+  if (!unit) {
+    throw createHttpError(404, 'La unidad no existe.')
+  }
 
   const productCount = await prisma.producto.count({
     where: {
-      deletedAt: null,
       unidadMedidaId: unitId,
       empresaId: companyId,
     },
@@ -1401,20 +1661,15 @@ export async function deleteMasterUnit(unitId: string, request: FastifyRequest) 
   if (productCount > 0) {
     throw createHttpError(
       409,
-      'No se puede eliminar la unidad porque tiene productos asociados. Desactívala en su lugar.',
+      buildMasterInUseDeleteMessage(
+        `Referencias detectadas: ${productCount} producto(s) asociado(s).`,
+      ),
     )
   }
 
-  await prisma.unidadMedida.update({
+  await prisma.unidadMedida.delete({
     where: {
       id: unitId,
-      deletedAt: null,
-      empresaId: companyId,
-    },
-    data: {
-      deletedAt: new Date(),
-      activo: false,
-      updatedById: userId,
     },
   })
 
@@ -1427,99 +1682,92 @@ export async function createProduct(
 ) {
   const { userId, companyId } = await getAuthContext(request)
   const normalizedName = payload.nombre.trim()
-  const packagingMode = payload.modoEmpaque ?? ModoEmpaqueProducto.SIMPLE
-  let unitsPerBlister: number | null = null
-  let blistersPerBox: number | null = null
-  const salePrice = Number(payload.precioVenta)
-  const blisterPrice =
-    packagingMode === ModoEmpaqueProducto.BLISTER &&
-    payload.precioVentaBlister !== undefined
-      ? Number(payload.precioVentaBlister)
-      : null
   const costPrice = Number(payload.costoReferencia)
-  const marginReference =
-    costPrice > 0 ? (salePrice - costPrice) / costPrice : null
-
-  if (!Number.isFinite(salePrice) || salePrice < 0) {
-    throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
-  }
 
   if (!Number.isFinite(costPrice) || costPrice < 0) {
     throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_COST)
   }
 
-  if (packagingMode === ModoEmpaqueProducto.BLISTER) {
-    const nextUnitsPerBlister = Number(payload.unidadesPorBlister)
-    const nextBlistersPerBox = Number(payload.blistersPorCaja)
-
-    if (
-      !Number.isFinite(nextUnitsPerBlister) ||
-      !Number.isInteger(nextUnitsPerBlister) ||
-      nextUnitsPerBlister <= 1
-    ) {
-      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
-    }
-
-    if (
-      !Number.isFinite(nextBlistersPerBox) ||
-      !Number.isInteger(nextBlistersPerBox) ||
-      nextBlistersPerBox <= 0
-    ) {
-      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
-    }
-
-    if (blisterPrice !== null && (!Number.isFinite(blisterPrice) || blisterPrice < 0)) {
-      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
-    }
-
-    unitsPerBlister = nextUnitsPerBlister
-    blistersPerBox = nextBlistersPerBox
-  }
-
   try {
     const codigoInterno = await resolveUniqueInternalProductCode(companyId)
-    const product = await prisma.producto.create({
-      data: {
-        empresaId: companyId,
-        categoriaId: payload.categoriaId,
-        laboratorioId: toOptionalString(payload.laboratorioId),
-        presentacionId: toOptionalString(payload.presentacionId),
-        unidadMedidaId: payload.unidadMedidaId,
-        modoEmpaque: packagingMode,
-        unidadesPorBlister: unitsPerBlister,
-        blistersPorCaja: blistersPerBox,
-        sku: payload.sku.trim().toUpperCase(),
-        codigoInterno,
-        codigoBarras: toOptionalString(payload.codigoBarras),
-        nombre: normalizedName,
-        descripcion: toOptionalString(payload.descripcion),
-        concentracion: toOptionalString(payload.concentracion),
-        registroSanitario: toOptionalString(payload.registroSanitario),
-        requiereReceta: payload.requiereReceta,
-        esControlado: payload.esControlado,
-        precioVenta: new Prisma.Decimal(salePrice.toFixed(2)),
-        precioVentaBlister:
-          blisterPrice === null ? undefined : new Prisma.Decimal(blisterPrice.toFixed(2)),
-        costoReferencia: new Prisma.Decimal(costPrice.toFixed(2)),
-        margenReferencia:
-          marginReference === null
-            ? undefined
-            : new Prisma.Decimal(marginReference.toFixed(4)),
-        observaciones: toOptionalString(payload.observaciones),
-        createdById: userId,
-        updatedById: userId,
-        principiosActivos: payload.principioActivoId
-          ? {
-              create: {
-                principioActivoId: payload.principioActivoId,
-                concentracion: toOptionalString(payload.concentracion),
-                createdById: userId,
-                updatedById: userId,
-              },
-            }
-          : undefined,
-      },
-      include: productInclude,
+    const product = await prisma.$transaction(async (tx) => {
+      const packagingConfig = await buildPackagingConfig(tx, payload, {
+        companyId,
+      })
+      const salePrices = packagingConfig.presentaciones
+        .filter((entry) => entry.permiteVenta && entry.precioVenta !== null)
+        .map((entry) => Number(entry.precioVenta))
+
+      const minSalePrice = salePrices.length ? Math.min(...salePrices) : 0
+      const marginReference =
+        costPrice > 0 ? (minSalePrice - costPrice) / costPrice : null
+
+      return tx.producto.create({
+        data: {
+          empresaId: companyId,
+          categoriaId: payload.categoriaId,
+          laboratorioId: toOptionalString(payload.laboratorioId),
+          presentacionId: toOptionalString(payload.presentacionId),
+          compraPresentacionId: payload.compraPresentacionId,
+          unidadMedidaId: payload.unidadMedidaId,
+          modoEmpaque: ModoEmpaqueProducto.SIMPLE,
+          unidadesPorBlister: null,
+          blistersPorCaja: null,
+          sku: payload.sku.trim().toUpperCase(),
+          codigoInterno,
+          codigoBarras: toOptionalString(payload.codigoBarras),
+          nombre: normalizedName,
+          descripcion: toOptionalString(payload.descripcion),
+          concentracion: toOptionalString(payload.concentracion),
+          registroSanitario: toOptionalString(payload.registroSanitario),
+          requiereReceta: payload.requiereReceta,
+          esControlado: payload.esControlado,
+          precioVenta: new Prisma.Decimal(minSalePrice.toFixed(2)),
+          precioVentaBlister: undefined,
+          costoReferencia: new Prisma.Decimal(costPrice.toFixed(2)),
+          margenReferencia:
+            marginReference === null
+              ? undefined
+              : new Prisma.Decimal(marginReference.toFixed(4)),
+          observaciones: toOptionalString(payload.observaciones),
+          createdById: userId,
+          updatedById: userId,
+          principiosActivos: payload.principioActivoId
+            ? {
+                create: {
+                  principioActivoId: payload.principioActivoId,
+                  concentracion: toOptionalString(payload.concentracion),
+                  createdById: userId,
+                  updatedById: userId,
+                },
+              }
+            : undefined,
+          presentacionesEmpaque: {
+            create: packagingConfig.presentaciones.map((entry) => ({
+              presentacionId: entry.presentacionId,
+              esBase: entry.esBase,
+              permiteCompra: entry.permiteCompra,
+              permiteVenta: entry.permiteVenta,
+              precioVenta: entry.precioVenta ?? undefined,
+              createdById: userId,
+              updatedById: userId,
+            })),
+          },
+          conversionesEmpaque:
+            packagingConfig.conversiones.length === 0
+              ? undefined
+              : {
+                  create: packagingConfig.conversiones.map((entry) => ({
+                    desdePresentacionId: entry.desdePresentacionId,
+                    haciaPresentacionId: entry.haciaPresentacionId,
+                    cantidad: entry.cantidad,
+                    createdById: userId,
+                    updatedById: userId,
+                  })),
+                },
+        },
+        include: productInclude,
+      })
     })
 
     return {
@@ -1560,90 +1808,86 @@ export async function updateProduct(
   }
 
   const normalizedName = payload.nombre.trim()
-  const packagingMode = payload.modoEmpaque ?? ModoEmpaqueProducto.SIMPLE
-  let unitsPerBlister: number | null = null
-  let blistersPerBox: number | null = null
-  const salePrice = Number(payload.precioVenta)
-  const blisterPrice =
-    packagingMode === ModoEmpaqueProducto.BLISTER &&
-    payload.precioVentaBlister !== undefined
-      ? Number(payload.precioVentaBlister)
-      : null
   const costPrice = Number(payload.costoReferencia)
-  const marginReference =
-    costPrice > 0 ? (salePrice - costPrice) / costPrice : null
-
-  if (!Number.isFinite(salePrice) || salePrice < 0) {
-    throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
-  }
 
   if (!Number.isFinite(costPrice) || costPrice < 0) {
     throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_COST)
   }
 
-  if (packagingMode === ModoEmpaqueProducto.BLISTER) {
-    const nextUnitsPerBlister = Number(payload.unidadesPorBlister)
-    const nextBlistersPerBox = Number(payload.blistersPorCaja)
-
-    if (
-      !Number.isFinite(nextUnitsPerBlister) ||
-      !Number.isInteger(nextUnitsPerBlister) ||
-      nextUnitsPerBlister <= 1
-    ) {
-      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
-    }
-
-    if (
-      !Number.isFinite(nextBlistersPerBox) ||
-      !Number.isInteger(nextBlistersPerBox) ||
-      nextBlistersPerBox <= 0
-    ) {
-      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_CONVERSION)
-    }
-
-    if (blisterPrice !== null && (!Number.isFinite(blisterPrice) || blisterPrice < 0)) {
-      throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
-    }
-
-    unitsPerBlister = nextUnitsPerBlister
-    blistersPerBox = nextBlistersPerBox
-  }
-
   try {
-    const updated = await prisma.producto.update({
-      where: {
-        id: productId,
-        deletedAt: null,
-        empresaId: companyId,
-      },
-      data: {
-        categoriaId: payload.categoriaId,
-        laboratorioId: toOptionalString(payload.laboratorioId),
-        presentacionId: toOptionalString(payload.presentacionId),
-        unidadMedidaId: payload.unidadMedidaId,
-        modoEmpaque: packagingMode,
-        unidadesPorBlister: unitsPerBlister,
-        blistersPorCaja: blistersPerBox,
-        sku: payload.sku.trim().toUpperCase(),
-        codigoBarras: toOptionalString(payload.codigoBarras),
-        nombre: normalizedName,
-        descripcion: toOptionalString(payload.descripcion),
-        concentracion: toOptionalString(payload.concentracion),
-        registroSanitario: toOptionalString(payload.registroSanitario),
-        requiereReceta: payload.requiereReceta,
-        esControlado: payload.esControlado,
-        precioVenta: new Prisma.Decimal(salePrice.toFixed(2)),
-        precioVentaBlister:
-          blisterPrice === null ? undefined : new Prisma.Decimal(blisterPrice.toFixed(2)),
-        costoReferencia: new Prisma.Decimal(costPrice.toFixed(2)),
-        margenReferencia:
-          marginReference === null
-            ? undefined
-            : new Prisma.Decimal(marginReference.toFixed(4)),
-        observaciones: toOptionalString(payload.observaciones),
-        updatedById: userId,
-      },
-      include: productInclude,
+    const updated = await prisma.$transaction(async (tx) => {
+      const packagingConfig = await buildPackagingConfig(tx, payload, {
+        companyId,
+      })
+      const salePrices = packagingConfig.presentaciones
+        .filter((entry) => entry.permiteVenta && entry.precioVenta !== null)
+        .map((entry) => Number(entry.precioVenta))
+
+      const minSalePrice = salePrices.length ? Math.min(...salePrices) : 0
+      const marginReference =
+        costPrice > 0 ? (minSalePrice - costPrice) / costPrice : null
+
+      return tx.producto.update({
+        where: {
+          id: productId,
+          deletedAt: null,
+          empresaId: companyId,
+        },
+        data: {
+          categoriaId: payload.categoriaId,
+          laboratorioId: toOptionalString(payload.laboratorioId),
+          presentacionId: toOptionalString(payload.presentacionId),
+          compraPresentacionId: payload.compraPresentacionId,
+          unidadMedidaId: payload.unidadMedidaId,
+          modoEmpaque: ModoEmpaqueProducto.SIMPLE,
+          unidadesPorBlister: null,
+          blistersPorCaja: null,
+          sku: payload.sku.trim().toUpperCase(),
+          codigoBarras: toOptionalString(payload.codigoBarras),
+          nombre: normalizedName,
+          descripcion: toOptionalString(payload.descripcion),
+          concentracion: toOptionalString(payload.concentracion),
+          registroSanitario: toOptionalString(payload.registroSanitario),
+          requiereReceta: payload.requiereReceta,
+          esControlado: payload.esControlado,
+          precioVenta: new Prisma.Decimal(minSalePrice.toFixed(2)),
+          precioVentaBlister: undefined,
+          costoReferencia: new Prisma.Decimal(costPrice.toFixed(2)),
+          margenReferencia:
+            marginReference === null
+              ? undefined
+              : new Prisma.Decimal(marginReference.toFixed(4)),
+          observaciones: toOptionalString(payload.observaciones),
+          updatedById: userId,
+          presentacionesEmpaque: {
+            deleteMany: {},
+            create: packagingConfig.presentaciones.map((entry) => ({
+              presentacionId: entry.presentacionId,
+              esBase: entry.esBase,
+              permiteCompra: entry.permiteCompra,
+              permiteVenta: entry.permiteVenta,
+              precioVenta: entry.precioVenta ?? undefined,
+              createdById: userId,
+              updatedById: userId,
+            })),
+          },
+          conversionesEmpaque: {
+            deleteMany: {},
+            ...(packagingConfig.conversiones.length === 0
+              ? {}
+              : {
+                  create: packagingConfig.conversiones.map((entry) => ({
+                    desdePresentacionId: entry.desdePresentacionId,
+                    haciaPresentacionId: entry.haciaPresentacionId,
+                    cantidad: entry.cantidad,
+                    createdById: userId,
+                    updatedById: userId,
+                  })),
+                }),
+          },
+        },
+        include: productInclude,
+      })
     })
 
     return { item: mapProduct(updated) }

@@ -7,6 +7,13 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import {
+  buildPackagingEdges,
+  resolveBasePresentation,
+  resolveFactorToBase,
+  resolvePresentationEntry,
+  resolvePresentationFactors,
+} from '../../lib/productPackaging.js'
 
 type InventoryDashboardFilters = {
   search?: string
@@ -32,6 +39,7 @@ type CreateInventoryLotPayload = {
 
 type AdjustInventoryLotPayload = {
   lotId: string
+  presentacionId: string
   target: 'DISPONIBLE' | 'RESERVADO' | 'BLOQUEADO'
   operation: 'SUMAR' | 'RESTAR'
   quantity: number
@@ -41,6 +49,7 @@ type AdjustInventoryLotPayload = {
 type TransferInventoryLotPayload = {
   lotId: string
   destinationBranchId: string
+  presentacionId: string
   quantity: number
   destinationWarehouse?: string
   observaciones?: string
@@ -189,6 +198,29 @@ async function getLotForOperation(tx: InventoryTransaction, lotId: string) {
           id: true,
           nombre: true,
           sku: true,
+          presentacionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              esBase: true,
+              permiteCompra: true,
+              permiteVenta: true,
+              precioVenta: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  nombre: true,
+                },
+              },
+            },
+          },
+          conversionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              desdePresentacionId: true,
+              haciaPresentacionId: true,
+              cantidad: true,
+            },
+          },
           unidadMedida: {
             select: {
               simbolo: true,
@@ -433,6 +465,34 @@ export async function getInventoryDashboard(
           id: true,
           nombre: true,
           sku: true,
+          unidadMedida: {
+            select: {
+              simbolo: true,
+            },
+          },
+          presentacionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              esBase: true,
+              permiteCompra: true,
+              permiteVenta: true,
+              precioVenta: true,
+              presentacion: {
+                select: {
+                  id: true,
+                  nombre: true,
+                },
+              },
+            },
+          },
+          conversionesEmpaque: {
+            where: { deletedAt: null },
+            select: {
+              desdePresentacionId: true,
+              haciaPresentacionId: true,
+              cantidad: true,
+            },
+          },
         },
       }),
       prisma.proveedor.findMany({
@@ -689,11 +749,43 @@ export async function getInventoryDashboard(
         id: branch.id,
         name: branch.nombre,
       })),
-      products: products.map((product) => ({
-        id: product.id,
-        name: product.nombre,
-        sku: product.sku,
-      })),
+      products: products.map((product) => {
+        const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
+        const basePresentationId = basePresentation?.presentacion.id ?? null
+        const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
+        const factors =
+          basePresentationId === null
+            ? new Map<string, number | null>()
+            : resolvePresentationFactors({
+                basePresentationId,
+                presentationIds: (product.presentacionesEmpaque ?? []).map(
+                  (entry) => entry.presentacion.id,
+                ),
+                edges,
+              })
+
+        return {
+          id: product.id,
+          name: product.nombre,
+          sku: product.sku,
+          unitSymbol: product.unidadMedida.simbolo,
+          packaging:
+            basePresentationId === null
+              ? null
+              : {
+                  basePresentationId,
+                  presentations: (product.presentacionesEmpaque ?? []).map((entry) => ({
+                    id: entry.presentacion.id,
+                    name: entry.presentacion.nombre,
+                    isBase: entry.esBase,
+                    allowsPurchase: entry.permiteCompra,
+                    allowsSale: entry.permiteVenta,
+                    salePrice: entry.precioVenta ? decimalToNumber(entry.precioVenta) : null,
+                    factorToBase: factors.get(entry.presentacion.id) ?? null,
+                  })),
+                },
+        }
+      }),
       suppliers: suppliers.map((supplier) => ({
         id: supplier.id,
         name: supplier.razonSocial,
@@ -1049,9 +1141,13 @@ export async function adjustInventoryLot(
   request: FastifyRequest,
 ) {
   const { userId, branchId } = await getAuthContext(request)
-  const quantity = Number(payload.quantity)
+  const requestedQuantity = Number(payload.quantity)
 
-  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
+  if (
+    !Number.isFinite(requestedQuantity) ||
+    !Number.isInteger(requestedQuantity) ||
+    requestedQuantity <= 0
+  ) {
     throw createHttpError(400, 'La cantidad del ajuste debe ser mayor a 0.')
   }
 
@@ -1062,6 +1158,40 @@ export async function adjustInventoryLot(
         403,
         'No tienes permisos para ajustar lotes de otra sucursal.',
       )
+    }
+
+    const basePresentation = resolveBasePresentation(lot.producto.presentacionesEmpaque ?? [])
+    if (!basePresentation) {
+      throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
+    }
+
+    const resolvedPresentation = resolvePresentationEntry({
+      operation: 'INVENTORY',
+      presentationId: payload.presentacionId,
+      presentations: lot.producto.presentacionesEmpaque ?? [],
+    })
+
+    if (!resolvedPresentation.ok) {
+      throw createHttpError(400, resolvedPresentation.error)
+    }
+
+    const edges = buildPackagingEdges(lot.producto.conversionesEmpaque ?? [])
+    const factor = resolveFactorToBase({
+      presentationId: payload.presentacionId,
+      basePresentationId: basePresentation.presentacion.id,
+      edges,
+    })
+
+    if (!factor) {
+      throw createHttpError(
+        400,
+        'No fue posible resolver la conversión hacia la presentación base del producto.',
+      )
+    }
+
+    const quantity = requestedQuantity * factor
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
     }
     const currentAvailable = decimalToNumber(lot.stockDisponible)
     const currentReserved = decimalToNumber(lot.stockReservado)
@@ -1215,9 +1345,13 @@ export async function transferInventoryLot(
   request: FastifyRequest,
 ) {
   const { userId, branchId } = await getAuthContext(request)
-  const quantity = Number(payload.quantity)
+  const requestedQuantity = Number(payload.quantity)
 
-  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
+  if (
+    !Number.isFinite(requestedQuantity) ||
+    !Number.isInteger(requestedQuantity) ||
+    requestedQuantity <= 0
+  ) {
     throw createHttpError(400, 'La cantidad a transferir debe ser mayor a 0.')
   }
 
@@ -1230,6 +1364,40 @@ export async function transferInventoryLot(
       )
     }
     const sourceAvailable = decimalToNumber(sourceLot.stockDisponible)
+
+    const basePresentation = resolveBasePresentation(sourceLot.producto.presentacionesEmpaque ?? [])
+    if (!basePresentation) {
+      throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
+    }
+
+    const resolvedPresentation = resolvePresentationEntry({
+      operation: 'INVENTORY',
+      presentationId: payload.presentacionId,
+      presentations: sourceLot.producto.presentacionesEmpaque ?? [],
+    })
+
+    if (!resolvedPresentation.ok) {
+      throw createHttpError(400, resolvedPresentation.error)
+    }
+
+    const edges = buildPackagingEdges(sourceLot.producto.conversionesEmpaque ?? [])
+    const factor = resolveFactorToBase({
+      presentationId: payload.presentacionId,
+      basePresentationId: basePresentation.presentacion.id,
+      edges,
+    })
+
+    if (!factor) {
+      throw createHttpError(
+        400,
+        'No fue posible resolver la conversión hacia la presentación base del producto.',
+      )
+    }
+
+    const quantity = requestedQuantity * factor
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+    }
 
     if (payload.destinationBranchId === sourceLot.sucursalId) {
       throw createHttpError(

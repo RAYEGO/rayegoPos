@@ -13,7 +13,6 @@ export type ProductCatalogItem = {
   requiresPrescription: boolean
   isControlled: boolean
   salePrice: number
-  blisterPrice: number | null
   costPrice: number
   marginReference: number
   observations: string | null
@@ -27,9 +26,25 @@ export type ProductCatalogItem = {
   unit: string
   unitSymbol: string
   unitId: string
-  packagingMode: 'SIMPLE' | 'BLISTER'
-  unitsPerBlister: number | null
-  blistersPerBox: number | null
+  packaging: {
+    basePresentationId: string | null
+    purchasePresentationId: string | null
+    presentations: Array<{
+      id: string
+      name: string
+      isBase: boolean
+      allowsPurchase: boolean
+      allowsSale: boolean
+      salePrice: number | null
+      factorToBase: number | null
+    }>
+    conversions: Array<{
+      id: string
+      fromPresentationId: string
+      toPresentationId: string
+      quantity: number
+    }>
+  }
   activePrinciples: Array<{
     id: string
     name: string
@@ -41,6 +56,19 @@ export type ProductCatalogItem = {
   branchCoverage: number
   nextExpiry: string | null
   canDelete: boolean
+}
+
+export type ProductPackagingPresentationInput = {
+  presentacionId: string
+  permiteCompra: boolean
+  permiteVenta: boolean
+  precioVenta?: number
+}
+
+export type ProductPackagingConversionInput = {
+  desdePresentacionId: string
+  haciaPresentacionId: string
+  cantidad: number
 }
 
 export type ProductCatalogResponse = {
@@ -200,10 +228,10 @@ export type CreateProductPayload = {
   laboratorioId?: string
   presentacionId?: string
   unidadMedidaId: string
-  modoEmpaque?: 'SIMPLE' | 'BLISTER'
-  unidadesPorBlister?: number
-  blistersPorCaja?: number
-  precioVentaBlister?: number
+  compraPresentacionId: string
+  basePresentacionId: string
+  presentacionesEmpaque: ProductPackagingPresentationInput[]
+  conversionesEmpaque?: ProductPackagingConversionInput[]
   principioActivoId?: string
   sku: string
   codigoBarras?: string
@@ -213,7 +241,6 @@ export type CreateProductPayload = {
   registroSanitario?: string
   requiereReceta: boolean
   esControlado: boolean
-  precioVenta: number
   costoReferencia: number
   observaciones?: string
 }

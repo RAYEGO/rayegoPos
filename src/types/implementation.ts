@@ -18,11 +18,19 @@ export type CreateInitialInventoryLoadPayload = {
     numeroLote: string
     fechaVencimiento: string
     costoUnitario: number
-    empaque: 'UNIDAD' | 'BLISTER' | 'CAJA'
     cantidad: number
   }>
 }
 
 export type CreateInitialInventoryLoadResponse = {
   item: InitialInventoryLoadRow
+}
+
+export type PurgeTestDataPayload = {
+  confirmText: string
+}
+
+export type PurgeTestDataResponse = {
+  success: true
+  deleted: Record<string, number>
 }

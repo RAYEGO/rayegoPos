@@ -536,6 +536,7 @@ export function CajaPage() {
     : []
   const canOperateSelected = selectedDrawer?.status === 'ABIERTA'
   const summaryDrawer = selectedDrawer ?? activeDrawer ?? null
+  const isSummaryClosePending = Boolean(summaryDrawer?.closePending)
   const summaryMovements = summaryDrawer
     ? cashMovements.filter((movement) => movement.openingId === summaryDrawer.id)
     : []
@@ -623,6 +624,9 @@ export function CajaPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium text-foreground">{drawer.name}</p>
                     <p className="mt-1 text-xs text-muted-foreground">{drawer.code}</p>
+                    {drawer.closePending ? (
+                      <p className="mt-2 text-xs text-warning-foreground">Cierre pendiente</p>
+                    ) : null}
                     <p className="mt-2 text-xs text-muted-foreground">
                       fondo {formatCurrency(drawer.openingAmount)}
                     </p>
@@ -780,6 +784,7 @@ export function CajaPage() {
                 <Button
                   type="button"
                   size="sm"
+                  disabled={isSummaryClosePending}
                   onClick={() => {
                     createMovementForm.setValue('openingId', selectedDrawer.id)
                     createMovementForm.setValue('type', 'INGRESO')
