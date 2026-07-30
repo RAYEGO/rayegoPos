@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -127,6 +127,7 @@ export function CategoryImportDialog({
   const [rows, setRows] = useState<ImportRow[]>([])
   const [isParsing, setIsParsing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   const summary = useMemo(() => {
     const created = rows.filter((row) => row.status === 'create').length
@@ -285,9 +286,10 @@ export function CategoryImportDialog({
           <label className="inline-flex">
             <input
               type="file"
-              accept=".csv,text/csv"
-              className="hidden"
+              accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="sr-only"
               disabled={disabled || isParsing || isSubmitting}
+              ref={inputRef}
               onChange={(event) => {
                 const file = event.target.files?.[0]
                 if (!file) return
@@ -295,7 +297,11 @@ export function CategoryImportDialog({
                 event.currentTarget.value = ''
               }}
             />
-            <Button type="button" disabled={disabled || isParsing || isSubmitting}>
+            <Button
+              type="button"
+              disabled={disabled || isParsing || isSubmitting}
+              onClick={() => inputRef.current?.click()}
+            >
               {isParsing ? <Loader className="mr-2 h-4 w-4" /> : <Upload className="mr-2 h-4 w-4" />}
               Seleccionar archivo
             </Button>
