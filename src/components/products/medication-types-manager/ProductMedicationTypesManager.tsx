@@ -125,16 +125,16 @@ function buildStats(records: MedicationTypeRecord[]): MedicationTypeStatsSnapsho
 function buildTemplate() {
   return [
     ['nombre', 'descripcion', 'estado'],
-    ['Genérico', 'Medicamento comercializado como genérico', 'ACTIVO'],
-    ['Marca', 'Medicamento comercializado bajo marca', 'ACTIVO'],
-    ['Similar', 'Medicamento clasificado como similar', 'ACTIVO'],
+    ['Genérico', 'Producto comercializado como genérico', 'ACTIVO'],
+    ['Marca', 'Producto comercializado bajo una marca comercial', 'ACTIVO'],
+    ['Similar', 'Producto clasificado como similar', 'ACTIVO'],
   ]
 }
 
 function downloadTemplate() {
   const workbook = XLSX.utils.book_new()
   const worksheet = XLSX.utils.aoa_to_sheet(buildTemplate())
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'TiposMedicamento')
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'TiposComerciales')
   const content = XLSX.write(workbook, {
     bookType: 'xlsx',
     type: 'array',
@@ -145,7 +145,7 @@ function downloadTemplate() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'rayego-tipos-medicamento-template.xlsx'
+  link.download = 'rayego-tipos-comerciales-template.xlsx'
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -221,7 +221,7 @@ async function parseMedicationTypeFile(file: File): Promise<ParsedMedicationType
 }
 
 function resolveUniqueCodePreview(name: string, existingCodes: Set<string>, currentCode?: string) {
-  const baseCode = generateMasterCodeFromName(name, 'TIPO_MEDICAMENTO', 30)
+  const baseCode = generateMasterCodeFromName(name, 'TIPO_COMERCIAL', 30)
   const taken = new Set(existingCodes)
   if (currentCode) {
     taken.delete(currentCode)
@@ -277,10 +277,10 @@ function MedicationTypeForm({
         <DialogHeader>
           <DialogTitle>
             {mode === 'edit'
-              ? 'Editar tipo de medicamento'
+              ? 'Editar tipo comercial'
               : mode === 'duplicate'
-                ? 'Duplicar tipo de medicamento'
-                : 'Nuevo tipo de medicamento'}
+                ? 'Duplicar tipo comercial'
+                : 'Nuevo tipo comercial'}
           </DialogTitle>
           <DialogDescription>
             Crea un tipo reutilizable para clasificar productos como Genérico, Marca o Similar.
@@ -410,7 +410,7 @@ function MedicationTypeImportDialog({
             active: true,
             code: '',
             status: 'skip',
-            message: 'Ya existe un tipo de medicamento con este nombre.',
+            message: 'Ya existe un tipo comercial con este nombre.',
           }
         }
 
@@ -426,7 +426,7 @@ function MedicationTypeImportDialog({
           }
         }
 
-        const baseCode = generateMasterCodeFromName(name, 'TIPO_MEDICAMENTO', 30)
+        const baseCode = generateMasterCodeFromName(name, 'TIPO_COMERCIAL', 30)
         const code = generateUniqueMasterCode(baseCode, takenCodes, 30)
         takenCodes.add(code)
 
@@ -464,7 +464,7 @@ function MedicationTypeImportDialog({
         })
       }
 
-      toast.success(`Tipos de medicamento importados: ${createRows.length}`)
+      toast.success(`Tipos comerciales importados: ${createRows.length}`)
       setRows([])
       onOpenChange(false)
       onImported()
@@ -491,7 +491,7 @@ function MedicationTypeImportDialog({
     >
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Importar tipos de medicamento</DialogTitle>
+          <DialogTitle>Importar tipos comerciales</DialogTitle>
           <DialogDescription>
             Importa un catálogo simple para clasificar productos sin fijar opciones en código.
           </DialogDescription>
@@ -638,7 +638,7 @@ export function ProductMedicationTypesManager({
 
   const openCreate = useCallback(() => {
     if (canManage === false) {
-      toast.error('No tienes permisos para gestionar tipos de medicamento.')
+      toast.error('No tienes permisos para gestionar tipos comerciales.')
       return
     }
     setDialog({ open: true, mode: 'create', record: null })
@@ -646,7 +646,7 @@ export function ProductMedicationTypesManager({
 
   const openEdit = useCallback(() => {
     if (canManage === false) {
-      toast.error('No tienes permisos para gestionar tipos de medicamento.')
+      toast.error('No tienes permisos para gestionar tipos comerciales.')
       return
     }
     if (!selected) return
@@ -655,7 +655,7 @@ export function ProductMedicationTypesManager({
 
   const openDuplicate = useCallback(() => {
     if (canManage === false) {
-      toast.error('No tienes permisos para gestionar tipos de medicamento.')
+      toast.error('No tienes permisos para gestionar tipos comerciales.')
       return
     }
     if (!selected) return
@@ -672,14 +672,14 @@ export function ProductMedicationTypesManager({
             descripcion: payload.description || undefined,
             activo: payload.active,
           })
-          toast.success('Tipo de medicamento actualizado.')
+          toast.success('Tipo comercial actualizado.')
         } else {
           await productsService.createMasterMedicationType(accessToken, {
             nombre: payload.name,
             descripcion: payload.description || undefined,
             activo: payload.active,
           })
-          toast.success('Tipo de medicamento creado.')
+          toast.success('Tipo comercial creado.')
         }
 
         setDialog({ open: false, mode: 'create', record: null })
@@ -710,7 +710,7 @@ export function ProductMedicationTypesManager({
     if (!accessToken || !selected) return
     try {
       await productsService.deleteMasterMedicationType(accessToken, selected.id)
-      toast.success('Tipo de medicamento eliminado.')
+      toast.success('Tipo comercial eliminado.')
       setSelectedId(null)
       await loadRecords()
     } catch (nextError) {
@@ -730,7 +730,7 @@ export function ProductMedicationTypesManager({
         descripcion: deleteBlocked.record.description || undefined,
         activo: false,
       })
-      toast.success('Tipo de medicamento marcado como Inactivo.')
+      toast.success('Tipo comercial marcado como inactivo.')
       setDeleteBlocked(null)
       await loadRecords()
     } catch (nextError) {
@@ -792,9 +792,9 @@ export function ProductMedicationTypesManager({
           <Card className="rounded-xl border bg-card p-4 shadow-softSm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
-                <p className="text-base font-semibold text-foreground">Tipos de medicamento</p>
+                  <p className="text-base font-semibold text-foreground">Tipos comerciales</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Administra las clasificaciones reutilizables como Genérico, Marca o Similar.
+                  Administra las clasificaciones comerciales reutilizables como Genérico, Marca o Similar.
                 </p>
               </div>
 
@@ -822,7 +822,7 @@ export function ProductMedicationTypesManager({
 
           {filteredRecords.length === 0 ? (
             <div className="rounded-xl border border-dashed p-8 text-center">
-              <p className="text-sm font-medium text-foreground">No hay tipos de medicamento para mostrar</p>
+              <p className="text-sm font-medium text-foreground">No hay tipos comerciales para mostrar</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Crea el primer tipo o ajusta el criterio de búsqueda.
               </p>

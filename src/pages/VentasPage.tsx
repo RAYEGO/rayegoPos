@@ -273,7 +273,7 @@ export function VentasPage() {
       const response = await salesService.getDashboard(accessToken, {
         search,
         branchId: branchFilter === 'TODAS' ? undefined : branchFilter,
-        medicationTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
+        commercialTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
       })
 
       setDashboard(response)
@@ -290,7 +290,7 @@ export function VentasPage() {
 
   const options = {
     branches: dashboard?.options?.branches ?? [],
-    medicationTypes: dashboard?.options?.medicationTypes ?? [],
+    commercialTypes: dashboard?.options?.commercialTypes ?? dashboard?.options?.medicationTypes ?? [],
     customers: dashboard?.options?.customers ?? [],
     paymentMethods: dashboard?.options?.paymentMethods ?? [],
   }
@@ -733,7 +733,7 @@ export function VentasPage() {
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Buscar por nombre o SKU"
+                  placeholder="Buscar por nombre, código de barras o principio activo"
                   className="pl-9"
                 />
               </div>
@@ -752,11 +752,11 @@ export function VentasPage() {
               </Select>
               <Select value={medicationTypeFilter} onValueChange={setMedicationTypeFilter}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Tipo medicamento" />
+                  <SelectValue placeholder="Tipo comercial" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TODOS">Todos</SelectItem>
-                  {options.medicationTypes.map((type) => (
+                  {options.commercialTypes.map((type) => (
                     <SelectItem key={type.id} value={type.id}>
                       {type.name}
                     </SelectItem>
@@ -806,7 +806,9 @@ export function VentasPage() {
                           <p className="truncate font-medium text-foreground">{product.name}</p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {product.sku}
-                            {product.medicationTypeName ? ` · ${product.medicationTypeName}` : ''}
+                            {(product.commercialTypeName ?? product.medicationTypeName)
+                              ? ` · ${product.commercialTypeName ?? product.medicationTypeName}`
+                              : ''}
                           </p>
                         </div>
                       </div>

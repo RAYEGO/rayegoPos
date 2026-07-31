@@ -49,6 +49,48 @@ export async function apiRequest<T>(
 
     const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null
 
+    // #region debug-point module-white-screen:api-shape
+    ;(() => {
+      const url = 'http://127.0.0.1:7777/event'
+      const sessionId = 'module-white-screen'
+      const runId = 'pre-fix'
+      const shouldReport =
+        path.startsWith('/api/customers') ||
+        path.startsWith('/api/products') ||
+        path.startsWith('/api/sales') ||
+        path.startsWith('/api/purchases') ||
+        path.startsWith('/api/inventory') ||
+        path.startsWith('/api/cashier')
+
+      if (!shouldReport) return
+
+      const keys =
+        payload && typeof payload === 'object'
+          ? Object.keys(payload as Record<string, unknown>)
+          : []
+
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          runId,
+          hypothesisId: 'B',
+          location: 'src/services/apiClient.ts',
+          msg: '[DEBUG] api.response.shape',
+          data: {
+            path,
+            status: response.status,
+            ok: response.ok,
+            keys,
+            hasOptions: Boolean(payload && typeof payload === 'object' && 'options' in payload),
+          },
+          ts: Date.now(),
+        }),
+      }).catch(() => null)
+    })()
+    // #endregion
+
     if (!response.ok) {
       throw new ApiError(
         payload?.message ?? 'La API respondió con un error.',

@@ -98,7 +98,7 @@ import { toast } from 'sonner'
 const createProductSchema = z.object({
   categoriaId: z.string().uuid({ message: 'Selecciona una categoría.' }),
   laboratorioId: z.string().optional(),
-  tipoMedicamentoId: z.string().uuid({ message: 'Selecciona un tipo de medicamento.' }),
+  tipoMedicamentoId: z.string().uuid({ message: 'Selecciona un tipo comercial.' }),
   unidadMedidaId: z.string().uuid({ message: 'Selecciona una unidad.' }),
   compraPresentacionId: z.string().uuid({ message: 'Selecciona una presentación de compra.' }),
   basePresentacionId: z.string().uuid({ message: 'Selecciona una presentación base.' }),
@@ -121,7 +121,7 @@ const createProductSchema = z.object({
       }),
     )
     .min(0),
-  principioActivoId: z.string().optional(),
+  principioActivoId: z.string().uuid({ message: 'Selecciona un principio activo.' }),
   sku: z.string().min(3, 'Ingresa un SKU válido.').max(50),
   codigoBarras: z.string().max(50).optional(),
   nombre: z.string().min(3, 'Ingresa el nombre del producto.').max(180),
@@ -360,6 +360,7 @@ export function ProductosPage() {
   const [options, setOptions] = useState<ProductOptionsResponse>({
     categories: [],
     laboratories: [],
+    commercialTypes: [],
     medicationTypes: [],
     presentations: [],
     units: [],
@@ -533,7 +534,7 @@ export function ProductosPage() {
         status: statusFilter === 'TODOS' ? undefined : statusFilter,
         categoryId: categoryFilter === 'TODAS' ? undefined : categoryFilter,
         laboratoryId: laboratoryFilter === 'TODOS' ? undefined : laboratoryFilter,
-        medicationTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
+        commercialTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
         page,
         pageSize,
         sortBy,
@@ -826,10 +827,10 @@ export function ProductosPage() {
             editingMedicationType.id,
             payload,
           )
-          toast.success('Tipo de medicamento actualizado.')
+          toast.success('Tipo comercial actualizado.')
         } else {
           const created = await productsService.createMasterMedicationType(accessToken, payload)
-          toast.success('Tipo de medicamento creado.')
+          toast.success('Tipo comercial creado.')
           if (masterDialogTargetField === 'tipoMedicamentoId') {
             form.setValue('tipoMedicamentoId', created.id, { shouldValidate: true })
           }
@@ -961,7 +962,7 @@ export function ProductosPage() {
     return {
       categoriaId: product.categoryId,
       laboratorioId: product.laboratoryId ?? '',
-      tipoMedicamentoId: product.medicationTypeId ?? '',
+      tipoMedicamentoId: product.commercialTypeId ?? product.medicationTypeId ?? '',
       unidadMedidaId: product.unitId,
       compraPresentacionId: product.packaging.purchasePresentationId ?? '',
       basePresentacionId: product.packaging.basePresentationId ?? '',
@@ -976,7 +977,7 @@ export function ProductosPage() {
         haciaPresentacionId: entry.toPresentationId,
         cantidad: entry.quantity,
       })),
-      principioActivoId: '',
+      principioActivoId: product.activePrincipleId ?? '',
       sku: product.sku,
       codigoBarras: product.barcode ?? '',
       nombre: product.name,
@@ -1097,8 +1098,8 @@ export function ProductosPage() {
     const payload: CreateProductPayload | UpdateProductPayload = {
       ...values,
       laboratorioId: values.laboratorioId || undefined,
-      tipoMedicamentoId: values.tipoMedicamentoId || undefined,
-      principioActivoId: values.principioActivoId || undefined,
+      tipoComercialId: values.tipoMedicamentoId,
+      principioActivoId: values.principioActivoId,
       codigoBarras: values.codigoBarras?.trim() || undefined,
       descripcion: values.descripcion?.trim() || undefined,
       concentracion: values.concentracion?.trim() || undefined,
@@ -1247,11 +1248,11 @@ export function ProductosPage() {
               </Select>
               <Select value={medicationTypeFilter} onValueChange={setMedicationTypeFilter}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Tipo de medicamento" />
+                  <SelectValue placeholder="Tipo comercial" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TODOS">Todos</SelectItem>
-                  {options.medicationTypes.map((type) => (
+                  {options.commercialTypes.map((type) => (
                     <SelectItem key={type.id} value={type.id}>
                       {type.name}
                     </SelectItem>
@@ -1324,7 +1325,9 @@ export function ProductosPage() {
                           <p className="font-medium text-foreground truncate">{product.name}</p>
                           <p className="text-xs text-muted-foreground mt-1">
                             {product.sku}
-                            {product.medicationType ? ` · ${product.medicationType}` : ''}
+                            {(product.commercialType ?? product.medicationType)
+                              ? ` · ${product.commercialType ?? product.medicationType}`
+                              : ''}
                             {product.presentation ? ` · ${product.presentation}` : ''}
                           </p>
                         </div>
@@ -1445,7 +1448,9 @@ export function ProductosPage() {
                                 <p className="font-medium text-foreground truncate">{product.name}</p>
                                 <p className="text-xs text-muted-foreground truncate">
                                   {product.sku}
-                                  {product.medicationType ? ` · ${product.medicationType}` : ''}
+                                  {(product.commercialType ?? product.medicationType)
+                                    ? ` · ${product.commercialType ?? product.medicationType}`
+                                    : ''}
                                   {product.presentation ? ` · ${product.presentation}` : ''}
                                 </p>
                               </div>
@@ -1740,7 +1745,7 @@ export function ProductosPage() {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium">Tipo de medicamento</label>
+                  <label className="text-xs font-medium">Tipo comercial</label>
                   {canManageMasters ? (
                     <Button
                       type="button"
@@ -1762,7 +1767,7 @@ export function ProductosPage() {
                         <SelectValue placeholder="Selecciona tipo" />
                       </SelectTrigger>
                       <SelectContent>
-                        {options.medicationTypes.map((type) => (
+                        {options.commercialTypes.map((type) => (
                           <SelectItem key={type.id} value={type.id}>
                             {type.name}
                           </SelectItem>
@@ -2185,7 +2190,9 @@ export function ProductosPage() {
                 <p className="font-medium text-foreground">{selectedProductDetail.name}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {selectedProductDetail.category}
-                  {selectedProductDetail.medicationType ? ` · ${selectedProductDetail.medicationType}` : ''}
+                  {(selectedProductDetail.commercialType ?? selectedProductDetail.medicationType)
+                    ? ` · ${selectedProductDetail.commercialType ?? selectedProductDetail.medicationType}`
+                    : ''}
                   {selectedProductDetail.presentation ? ` · ${selectedProductDetail.presentation}` : ''}
                 </p>
               </div>
@@ -2210,9 +2217,9 @@ export function ProductosPage() {
                   <p className="mt-1 font-medium text-foreground">{formatCurrency(selectedProductDetail.costPrice)}</p>
                 </div>
                 <div className="rounded-xl border p-3">
-                  <p className="text-xs text-muted-foreground">Tipo de medicamento</p>
+                  <p className="text-xs text-muted-foreground">Tipo comercial</p>
                   <p className="mt-1 font-medium text-foreground">
-                    {selectedProductDetail.medicationType ?? 'Sin clasificar'}
+                    {selectedProductDetail.commercialType ?? selectedProductDetail.medicationType ?? 'Sin clasificar'}
                   </p>
                 </div>
                 <div className="rounded-xl border p-3">
@@ -2338,7 +2345,7 @@ export function ProductosPage() {
                 : masterDialogType === 'laboratorio'
                   ? 'laboratorio'
                   : masterDialogType === 'tipoMedicamento'
-                    ? 'tipo de medicamento'
+                    ? 'tipo comercial'
                   : masterDialogType === 'presentacion'
                     ? 'presentación'
                     : 'unidad'}

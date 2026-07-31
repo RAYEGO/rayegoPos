@@ -16,10 +16,14 @@ import {
   createMasterLaboratory,
   updateMasterLaboratory,
   deleteMasterLaboratory,
-  listMasterMedicationTypes,
-  createMasterMedicationType,
-  updateMasterMedicationType,
-  deleteMasterMedicationType,
+  listMasterCommercialTypes,
+  createMasterCommercialType,
+  updateMasterCommercialType,
+  deleteMasterCommercialType,
+  listMasterActivePrinciples,
+  createMasterActivePrinciple,
+  updateMasterActivePrinciple,
+  deleteMasterActivePrinciple,
   listMasterPresentations,
   createMasterPresentation,
   updateMasterPresentation,
@@ -34,8 +38,9 @@ const listProductsQuerySchema = z.object({
   search: z.string().optional(),
   status: z.enum(['ACTIVO', 'INACTIVO', 'DESCONTINUADO']).optional(),
   categoryId: z.string().uuid().optional(),
+  commercialTypeId: z.string().uuid().optional(),
+  activePrincipleId: z.string().uuid().optional(),
   laboratoryId: z.string().uuid().optional(),
-  medicationTypeId: z.string().uuid().optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().optional(),
   sortBy: z.enum(['name', 'stockUnits', 'createdAt']).optional(),
@@ -44,8 +49,9 @@ const listProductsQuerySchema = z.object({
 
 const createProductSchema = z.object({
   categoriaId: z.string().uuid(),
+  tipoComercialId: z.string().uuid(),
+  principioActivoId: z.string().uuid(),
   laboratorioId: z.string().uuid().optional(),
-  tipoMedicamentoId: z.string().uuid().optional(),
   presentacionId: z.string().uuid().optional(),
   unidadMedidaId: z.string().uuid(),
   compraPresentacionId: z.string().uuid(),
@@ -69,7 +75,6 @@ const createProductSchema = z.object({
       }),
     )
     .default([]),
-  principioActivoId: z.string().uuid().optional(),
   sku: z.string().min(1).max(50),
   codigoBarras: z.string().max(50).optional(),
   nombre: z.string().min(3).max(180),
@@ -103,13 +108,19 @@ const masterLaboratorySchema = z.object({
   activo: z.boolean().optional(),
 })
 
-const masterPresentationSchema = z.object({
+const masterCommercialTypeSchema = z.object({
   nombre: z.string().min(2).max(120),
   descripcion: z.string().max(255).optional(),
   activo: z.boolean().optional(),
 })
 
-const masterMedicationTypeSchema = z.object({
+const masterActivePrincipleSchema = z.object({
+  nombre: z.string().min(2).max(150),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
+const masterPresentationSchema = z.object({
   nombre: z.string().min(2).max(120),
   descripcion: z.string().max(255).optional(),
   activo: z.boolean().optional(),
@@ -172,22 +183,44 @@ export async function productRoutes(app: FastifyInstance) {
     return deleteMasterLaboratory(params.id, request)
   })
 
-  app.get('/masters/medication-types', async (request) => listMasterMedicationTypes(request))
+  app.get('/masters/commercial-types', async (request) =>
+    listMasterCommercialTypes(request),
+  )
 
-  app.post('/masters/medication-types', async (request) => {
-    const body = masterMedicationTypeSchema.parse(request.body)
-    return createMasterMedicationType(body, request)
+  app.post('/masters/commercial-types', async (request) => {
+    const body = masterCommercialTypeSchema.parse(request.body)
+    return createMasterCommercialType(body, request)
   })
 
-  app.patch('/masters/medication-types/:id', async (request) => {
+  app.patch('/masters/commercial-types/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
-    const body = masterMedicationTypeSchema.parse(request.body)
-    return updateMasterMedicationType(params.id, body, request)
+    const body = masterCommercialTypeSchema.parse(request.body)
+    return updateMasterCommercialType(params.id, body, request)
   })
 
-  app.delete('/masters/medication-types/:id', async (request) => {
+  app.delete('/masters/commercial-types/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
-    return deleteMasterMedicationType(params.id, request)
+    return deleteMasterCommercialType(params.id, request)
+  })
+
+  app.get('/masters/active-principles', async (request) =>
+    listMasterActivePrinciples(request),
+  )
+
+  app.post('/masters/active-principles', async (request) => {
+    const body = masterActivePrincipleSchema.parse(request.body)
+    return createMasterActivePrinciple(body, request)
+  })
+
+  app.patch('/masters/active-principles/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = masterActivePrincipleSchema.parse(request.body)
+    return updateMasterActivePrinciple(params.id, body, request)
+  })
+
+  app.delete('/masters/active-principles/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    return deleteMasterActivePrinciple(params.id, request)
   })
 
   app.get('/masters/presentations', async (request) => listMasterPresentations(request))

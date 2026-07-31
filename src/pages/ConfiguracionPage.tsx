@@ -614,7 +614,8 @@ export function ConfiguracionPage() {
         'nombre',
         'categoria',
         'laboratorio',
-        'tipoMedicamento',
+        'tipoComercial',
+        'principioActivo',
         'presentacion',
         'unidadNombre',
         'unidadSimbolo',
@@ -634,6 +635,7 @@ export function ConfiguracionPage() {
         'ANALGÉSICOS',
         'ACME',
         'Genérico',
+      'Paracetamol',
         'Tabletas',
         'Unidad',
         'und',
@@ -653,6 +655,7 @@ export function ConfiguracionPage() {
         'VITAMINAS',
         '',
         'Marca',
+      'Vitamina C',
         'Tabletas',
         'Unidad',
         'und',
@@ -713,7 +716,7 @@ export function ConfiguracionPage() {
       'nombre',
       'categoria',
       'laboratorio',
-      'tipomedicamento',
+      'principioactivo',
       'presentacion',
       'unidadnombre',
       'unidadsimbolo',
@@ -727,7 +730,12 @@ export function ConfiguracionPage() {
       'observaciones',
     ]
 
+    const hasCommercialTypeHeader =
+      headers.includes('tipocomercial') || headers.includes('tipomedicamento')
     const missing = expectedHeaders.filter((header) => !headers.includes(header))
+    if (!hasCommercialTypeHeader) {
+      missing.push('tipocomercial')
+    }
     if (missing.length) {
       throw new Error(`Faltan columnas en el archivo: ${missing.join(', ')}`)
     }
@@ -764,7 +772,8 @@ export function ConfiguracionPage() {
           nombre: get('nombre'),
           categoria: get('categoria'),
           laboratorio: get('laboratorio'),
-          tipoMedicamento: get('tipomedicamento'),
+          tipoMedicamento: get('tipocomercial') || get('tipomedicamento'),
+          principioActivo: get('principioactivo'),
           presentacion: get('presentacion'),
           unidadNombre: get('unidadnombre'),
           unidadSimbolo: get('unidadsimbolo'),
@@ -805,14 +814,16 @@ export function ConfiguracionPage() {
       const [
         categoriesResponse,
         laboratoriesResponse,
-        medicationTypesResponse,
+        commercialTypesResponse,
+        activePrinciplesResponse,
         presentationsResponse,
         unitsResponse,
       ] =
         await Promise.all([
           productsService.listMasterCategories(accessToken),
           productsService.listMasterLaboratories(accessToken),
-          productsService.listMasterMedicationTypes(accessToken),
+          productsService.listMasterCommercialTypes(accessToken),
+          productsService.listMasterActivePrinciples(accessToken),
           productsService.listMasterPresentations(accessToken),
           productsService.listMasterUnits(accessToken),
         ])
@@ -824,7 +835,10 @@ export function ConfiguracionPage() {
         laboratoriesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
       const medicationTypesByName = new Map(
-        medicationTypesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+        commercialTypesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+      )
+      const activePrinciplesByName = new Map(
+        activePrinciplesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
       const presentationsByName = new Map(
         presentationsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
@@ -1004,7 +1018,7 @@ export function ConfiguracionPage() {
               row.row,
               formatImplementationMessage(
                 'INVALID_REQUIRED_FIELD',
-                'Campo: Tipo de medicamento',
+                'Campo: Tipo comercial',
               ),
             )
             continue
@@ -1013,33 +1027,32 @@ export function ConfiguracionPage() {
           const medicationTypeKey = normalizeMasterKey(medicationTypeName)
           let medicationType = medicationTypesByName.get(medicationTypeKey) ?? null
           if (!medicationType) {
-            try {
-              const result = await productsService.createMasterMedicationType(accessToken, {
-                nombre: medicationTypeName,
-              })
-              const refreshed = await productsService.listMasterMedicationTypes(accessToken)
-              refreshed.rows.forEach((entry) =>
-                medicationTypesByName.set(normalizeMasterKey(entry.nombre), entry),
-              )
-              medicationType =
-                refreshed.rows.find((entry) => entry.id === result.id) ??
-                medicationTypesByName.get(medicationTypeKey) ??
-                null
-            } catch (err) {
-              if (err instanceof ApiError && err.status === 409) {
-                const refreshed = await productsService.listMasterMedicationTypes(accessToken)
-                refreshed.rows.forEach((entry) =>
-                  medicationTypesByName.set(normalizeMasterKey(entry.nombre), entry),
-                )
-                medicationType = medicationTypesByName.get(medicationTypeKey) ?? null
-              } else {
-                throw err
-              }
-            }
+            pushError(
+              row.row,
+              `Tipo comercial inválido: "${medicationTypeName}". Verifica el valor en el maestro.`,
+            )
+            continue
           }
 
-          if (!medicationType) {
-            pushError(row.row, 'No fue posible resolver el tipo de medicamento indicado.')
+          const activePrincipleName = row.principioActivo.trim()
+          if (!activePrincipleName) {
+            pushError(
+              row.row,
+              formatImplementationMessage(
+                'INVALID_REQUIRED_FIELD',
+                'Campo: Principio activo',
+              ),
+            )
+            continue
+          }
+
+          const activePrincipleKey = normalizeMasterKey(activePrincipleName)
+          const activePrinciple = activePrinciplesByName.get(activePrincipleKey) ?? null
+          if (!activePrinciple) {
+            pushError(
+              row.row,
+              `Principio activo inválido: "${activePrincipleName}". Verifica el valor en el maestro.`,
+            )
             continue
           }
 
@@ -1099,7 +1112,8 @@ export function ConfiguracionPage() {
           const payload: CreateProductPayload = {
             categoriaId: category.id,
             laboratorioId: labId,
-            tipoMedicamentoId: medicationType.id,
+            tipoComercialId: medicationType.id,
+            principioActivoId: activePrinciple.id,
             presentacionId: presentationId,
             unidadMedidaId: unit.id,
             compraPresentacionId: presentationId,

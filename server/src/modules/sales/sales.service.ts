@@ -110,7 +110,8 @@ type SaleWithRelations = Prisma.VentaGetPayload<{
 type SalesDashboardFilters = {
   search?: string
   branchId?: string
-  medicationTypeId?: string
+  commercialTypeId?: string
+  activePrincipleId?: string
 }
 
 type CreateSalePayload = {
@@ -454,7 +455,8 @@ export async function getSalesDashboard(
     deletedAt: null,
     empresaId: companyId,
     estado: 'ACTIVO',
-    ...(filters.medicationTypeId ? { tipoMedicamentoId: filters.medicationTypeId } : {}),
+    ...(filters.commercialTypeId ? { tipoComercialId: filters.commercialTypeId } : {}),
+    ...(filters.activePrincipleId ? { principioActivoId: filters.activePrincipleId } : {}),
     ...(search
       ? {
           OR: [
@@ -470,6 +472,28 @@ export async function getSalesDashboard(
                 mode: 'insensitive',
               },
             },
+            {
+              codigoBarras: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+            {
+              principioActivo: {
+                nombre: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+            },
+            {
+              tipoComercial: {
+                nombre: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+            },
           ],
         }
       : {}),
@@ -477,7 +501,6 @@ export async function getSalesDashboard(
 
   const saleWhere: Prisma.VentaWhereInput = {
     deletedAt: null,
-    empresaId: companyId,
     sucursalId: branchId,
     ...(search
       ? {
@@ -521,7 +544,7 @@ export async function getSalesDashboard(
       : {}),
   }
 
-  const [codeMap, branches, customers, paymentMethods, medicationTypes, products, sales] = await Promise.all([
+  const [codeMap, branches, customers, paymentMethods, commercialTypes, products, sales] = await Promise.all([
     buildSaleCodeMap(),
     prisma.sucursal.findMany({
       where: {
@@ -568,13 +591,13 @@ export async function getSalesDashboard(
         permiteVuelto: true,
       },
     }),
-    prisma.tipoMedicamento.findMany({
+    prisma.tipoComercial.findMany({
       where: {
         deletedAt: null,
         activo: true,
         empresaId: companyId,
       },
-      orderBy: { nombre: 'asc' },
+      orderBy: [{ nombre: 'asc' }],
       select: {
         id: true,
         nombre: true,
@@ -588,7 +611,13 @@ export async function getSalesDashboard(
             nombre: true,
           },
         },
-        tipoMedicamento: {
+        tipoComercial: {
+          select: {
+            id: true,
+            nombre: true,
+          },
+        },
+        principioActivo: {
           select: {
             id: true,
             nombre: true,
@@ -707,9 +736,14 @@ export async function getSalesDashboard(
         id: product.id,
         name: product.nombre,
         sku: product.sku,
+        barcode: product.codigoBarras,
         categoryName: product.categoria.nombre,
-        medicationTypeName: product.tipoMedicamento?.nombre ?? null,
-        medicationTypeId: product.tipoMedicamento?.id ?? null,
+        commercialTypeName: product.tipoComercial?.nombre ?? null,
+        commercialTypeId: product.tipoComercial?.id ?? null,
+        medicationTypeName: product.tipoComercial?.nombre ?? null,
+        medicationTypeId: product.tipoComercial?.id ?? null,
+        activePrincipleName: product.principioActivo?.nombre ?? null,
+        activePrincipleId: product.principioActivo?.id ?? null,
         presentationName: product.presentacion?.nombre ?? 'Presentación general',
         unitSymbol: product.unidadMedida.simbolo,
         salePrice: decimalToNumber(product.precioVenta),
@@ -772,9 +806,13 @@ export async function getSalesDashboard(
         id: branch.id,
         name: branch.nombre,
       })),
-      medicationTypes: medicationTypes.map((type) => ({
-        id: type.id,
-        name: type.nombre,
+      commercialTypes: commercialTypes.map((commercialType) => ({
+        id: commercialType.id,
+        name: commercialType.nombre,
+      })),
+      medicationTypes: commercialTypes.map((commercialType) => ({
+        id: commercialType.id,
+        name: commercialType.nombre,
       })),
       customers: customers.map((customer) => ({
         id: customer.id,
@@ -1494,11 +1532,15 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
 export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
+  const { companyId } = await getAuthContext(request)
 
   const sale = await prisma.venta.findFirst({
     where: {
       id: saleId,
       deletedAt: null,
+      sucursal: {
+        empresaId: companyId,
+      },
     },
     select: {
       id: true,

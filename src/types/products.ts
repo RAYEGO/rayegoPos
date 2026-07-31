@@ -21,6 +21,8 @@ export type ProductCatalogItem = {
   laboratory: string | null
   laboratoryId: string | null
   laboratoryCountry: string | null
+  commercialType: string | null
+  commercialTypeId: string | null
   medicationType: string | null
   medicationTypeId: string | null
   presentation: string | null
@@ -47,6 +49,8 @@ export type ProductCatalogItem = {
       quantity: number
     }>
   }
+  activePrinciple: string | null
+  activePrincipleId: string | null
   activePrinciples: Array<{
     id: string
     name: string
@@ -109,6 +113,11 @@ export type ProductOptionsResponse = {
     id: string
     name: string
     country: string | null
+    skuCount: number
+  }>
+  commercialTypes: Array<{
+    id: string
+    name: string
     skuCount: number
   }>
   medicationTypes: Array<{
@@ -185,7 +194,7 @@ export type UpsertMasterLaboratoryPayload = {
   activo?: boolean
 }
 
-export type MasterMedicationTypeRecord = {
+export type MasterCommercialTypeRecord = {
   id: string
   codigo: string
   nombre: string
@@ -196,11 +205,36 @@ export type MasterMedicationTypeRecord = {
   updatedAt: string
 }
 
-export type MasterMedicationTypesResponse = {
-  rows: MasterMedicationTypeRecord[]
+export type MasterCommercialTypesResponse = {
+  rows: MasterCommercialTypeRecord[]
 }
 
-export type UpsertMasterMedicationTypePayload = {
+export type UpsertMasterCommercialTypePayload = {
+  nombre: string
+  descripcion?: string
+  activo?: boolean
+}
+
+export type MasterMedicationTypeRecord = MasterCommercialTypeRecord
+export type MasterMedicationTypesResponse = MasterCommercialTypesResponse
+export type UpsertMasterMedicationTypePayload = UpsertMasterCommercialTypePayload
+
+export type MasterActivePrincipleRecord = {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  activo: boolean
+  productCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MasterActivePrinciplesResponse = {
+  rows: MasterActivePrincipleRecord[]
+}
+
+export type UpsertMasterActivePrinciplePayload = {
   nombre: string
   descripcion?: string
   activo?: boolean
@@ -254,14 +288,14 @@ export type UpsertMasterUnitPayload = {
 export type CreateProductPayload = {
   categoriaId: string
   laboratorioId?: string
-  tipoMedicamentoId?: string
+  tipoComercialId: string
   presentacionId?: string
   unidadMedidaId: string
   compraPresentacionId: string
   basePresentacionId: string
   presentacionesEmpaque: ProductPackagingPresentationInput[]
   conversionesEmpaque?: ProductPackagingConversionInput[]
-  principioActivoId?: string
+  principioActivoId: string
   sku: string
   codigoBarras?: string
   nombre: string

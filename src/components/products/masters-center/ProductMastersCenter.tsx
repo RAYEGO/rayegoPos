@@ -31,7 +31,7 @@ export function ProductMastersCenter({
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/60 p-1.5">
           <TabsTrigger value="categorias">Categorías</TabsTrigger>
           <TabsTrigger value="laboratorios">Laboratorios</TabsTrigger>
-          <TabsTrigger value="tiposMedicamento">Tipos de medicamento</TabsTrigger>
+          <TabsTrigger value="tiposMedicamento">Tipos comerciales</TabsTrigger>
           <TabsTrigger value="presentaciones">Presentaciones</TabsTrigger>
           <TabsTrigger value="unidadesMedida">Unidades de medida</TabsTrigger>
           <TabsTrigger value="tiposEmpaque">Tipos de empaque</TabsTrigger>

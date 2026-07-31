@@ -2,17 +2,19 @@ import { apiRequest } from '@/services/apiClient'
 import type {
   CreateProductPayload,
   MasterCategoriesResponse,
+  MasterActivePrinciplesResponse,
+  MasterCommercialTypesResponse,
   MasterLaboratoriesResponse,
-  MasterMedicationTypesResponse,
   MasterPresentationsResponse,
   MasterUnitsResponse,
   ProductCatalogResponse,
   ProductOptionsResponse,
   ProductStatus,
   UpdateProductPayload,
+  UpsertMasterActivePrinciplePayload,
   UpsertMasterCategoryPayload,
+  UpsertMasterCommercialTypePayload,
   UpsertMasterLaboratoryPayload,
-  UpsertMasterMedicationTypePayload,
   UpsertMasterPresentationPayload,
   UpsertMasterUnitPayload,
 } from '@/types/products'
@@ -22,6 +24,8 @@ type ListProductsFilters = {
   status?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO'
   categoryId?: string
   laboratoryId?: string
+  commercialTypeId?: string
+  activePrincipleId?: string
   medicationTypeId?: string
   page?: number
   pageSize?: number
@@ -48,8 +52,14 @@ function buildQuery(filters: ListProductsFilters) {
     searchParams.set('laboratoryId', filters.laboratoryId)
   }
 
-  if (filters.medicationTypeId) {
-    searchParams.set('medicationTypeId', filters.medicationTypeId)
+  if (filters.commercialTypeId) {
+    searchParams.set('commercialTypeId', filters.commercialTypeId)
+  } else if (filters.medicationTypeId) {
+    searchParams.set('commercialTypeId', filters.medicationTypeId)
+  }
+
+  if (filters.activePrincipleId) {
+    searchParams.set('activePrincipleId', filters.activePrincipleId)
   }
 
   if (typeof filters.page === 'number' && Number.isFinite(filters.page)) {
@@ -183,15 +193,35 @@ export const productsService = {
     })
   },
 
-  listMasterMedicationTypes(accessToken: string) {
-    return apiRequest<MasterMedicationTypesResponse>('/api/products/masters/medication-types', {
+  listMasterCommercialTypes(accessToken: string) {
+    return apiRequest<MasterCommercialTypesResponse>('/api/products/masters/commercial-types', {
       accessToken,
     })
   },
 
-  createMasterMedicationType(accessToken: string, payload: UpsertMasterMedicationTypePayload) {
-    return apiRequest<{ success: boolean; id: string }>('/api/products/masters/medication-types', {
+  listMasterMedicationTypes(accessToken: string) {
+    return productsService.listMasterCommercialTypes(accessToken)
+  },
+
+  createMasterCommercialType(accessToken: string, payload: UpsertMasterCommercialTypePayload) {
+    return apiRequest<{ success: boolean; id: string }>('/api/products/masters/commercial-types', {
       method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  createMasterMedicationType(accessToken: string, payload: UpsertMasterCommercialTypePayload) {
+    return productsService.createMasterCommercialType(accessToken, payload)
+  },
+
+  updateMasterCommercialType(
+    accessToken: string,
+    id: string,
+    payload: UpsertMasterCommercialTypePayload,
+  ) {
+    return apiRequest<{ success: boolean }>(`/api/products/masters/commercial-types/${id}`, {
+      method: 'PATCH',
       accessToken,
       body: payload,
     })
@@ -200,17 +230,50 @@ export const productsService = {
   updateMasterMedicationType(
     accessToken: string,
     id: string,
-    payload: UpsertMasterMedicationTypePayload,
+    payload: UpsertMasterCommercialTypePayload,
   ) {
-    return apiRequest<{ success: boolean }>(`/api/products/masters/medication-types/${id}`, {
+    return productsService.updateMasterCommercialType(accessToken, id, payload)
+  },
+
+  deleteMasterCommercialType(accessToken: string, id: string) {
+    return apiRequest<{ success: boolean }>(`/api/products/masters/commercial-types/${id}`, {
+      method: 'DELETE',
+      accessToken,
+    })
+  },
+
+  deleteMasterMedicationType(accessToken: string, id: string) {
+    return productsService.deleteMasterCommercialType(accessToken, id)
+  },
+
+  listMasterActivePrinciples(accessToken: string) {
+    return apiRequest<MasterActivePrinciplesResponse>('/api/products/masters/active-principles', {
+      accessToken,
+    })
+  },
+
+  createMasterActivePrinciple(accessToken: string, payload: UpsertMasterActivePrinciplePayload) {
+    return apiRequest<{ success: boolean; id: string }>('/api/products/masters/active-principles', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  updateMasterActivePrinciple(
+    accessToken: string,
+    id: string,
+    payload: UpsertMasterActivePrinciplePayload,
+  ) {
+    return apiRequest<{ success: boolean }>(`/api/products/masters/active-principles/${id}`, {
       method: 'PATCH',
       accessToken,
       body: payload,
     })
   },
 
-  deleteMasterMedicationType(accessToken: string, id: string) {
-    return apiRequest<{ success: boolean }>(`/api/products/masters/medication-types/${id}`, {
+  deleteMasterActivePrinciple(accessToken: string, id: string) {
+    return apiRequest<{ success: boolean }>(`/api/products/masters/active-principles/${id}`, {
       method: 'DELETE',
       accessToken,
     })

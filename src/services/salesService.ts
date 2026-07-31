@@ -4,6 +4,8 @@ import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } f
 type SalesDashboardFilters = {
   search?: string
   branchId?: string
+  commercialTypeId?: string
+  activePrincipleId?: string
   medicationTypeId?: string
 }
 
@@ -18,8 +20,14 @@ function buildQuery(filters: SalesDashboardFilters) {
     searchParams.set('branchId', filters.branchId)
   }
 
-  if (filters.medicationTypeId) {
-    searchParams.set('medicationTypeId', filters.medicationTypeId)
+  if (filters.commercialTypeId) {
+    searchParams.set('commercialTypeId', filters.commercialTypeId)
+  } else if (filters.medicationTypeId) {
+    searchParams.set('commercialTypeId', filters.medicationTypeId)
+  }
+
+  if (filters.activePrincipleId) {
+    searchParams.set('activePrincipleId', filters.activePrincipleId)
   }
 
   const query = searchParams.toString()

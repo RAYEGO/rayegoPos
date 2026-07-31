@@ -139,11 +139,11 @@ export const masterCatalogs: MasterCatalogConfig[] = [
   },
   {
     key: 'tipoMedicamento',
-    label: 'Tipo de Medicamento',
+    label: 'Tipo Comercial',
     group: 'farmaceutica',
     icon: Boxes,
-    description: 'Clasificación según el tipo de medicamento para reportes.',
-    searchPlaceholder: 'Buscar tipo...',
+    description: 'Clasificación comercial del producto para ventas, catálogo y reportes.',
+    searchPlaceholder: 'Buscar tipo comercial...',
     codePrefix: 'TM',
   },
   {

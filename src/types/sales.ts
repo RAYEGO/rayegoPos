@@ -15,9 +15,14 @@ export type SalesDashboardResponse = {
     id: string
     name: string
     sku: string
+    barcode: string | null
     categoryName: string
+    commercialTypeName: string | null
+    commercialTypeId: string | null
     medicationTypeName: string | null
     medicationTypeId: string | null
+    activePrincipleName: string | null
+    activePrincipleId: string | null
     presentationName: string
     unitSymbol: string
     salePrice: number
@@ -76,6 +81,10 @@ export type SalesDashboardResponse = {
   }>
   options: {
     branches: Array<{
+      id: string
+      name: string
+    }>
+    commercialTypes: Array<{
       id: string
       name: string
     }>

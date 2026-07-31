@@ -119,7 +119,7 @@ const productCatalog = {
       country: 'Colombia',
     },
   ],
-  medicationTypes: ['Genérico', 'Marca', 'Similar'],
+  commercialTypes: ['Genérico', 'Marca'],
   presentations: [
     'Tabletas',
     'Cápsulas',
@@ -161,7 +161,7 @@ const productCatalog = {
       name: 'Paracetamol 500 mg',
       categoryName: 'Analgésicos',
       laboratoryName: 'AC Farma',
-      medicationTypeName: 'Genérico',
+      commercialTypeName: 'Genérico',
       presentationName: 'Tabletas',
       unitCode: 'TAB',
       activePrincipleName: 'Paracetamol',
@@ -178,7 +178,7 @@ const productCatalog = {
       name: 'Amoxicilina 500 mg',
       categoryName: 'Antibióticos',
       laboratoryName: 'Medifarma',
-      medicationTypeName: 'Genérico',
+      commercialTypeName: 'Genérico',
       presentationName: 'Cápsulas',
       unitCode: 'CAP',
       activePrincipleName: 'Amoxicilina',
@@ -195,7 +195,7 @@ const productCatalog = {
       name: 'Loratadina Jarabe',
       categoryName: 'Cuidado respiratorio',
       laboratoryName: 'Bayer',
-      medicationTypeName: 'Marca',
+      commercialTypeName: 'Marca',
       presentationName: 'Jarabe',
       unitCode: 'FRA',
       activePrincipleName: 'Loratadina',
@@ -212,7 +212,7 @@ const productCatalog = {
       name: 'Vitamina C 1 g',
       categoryName: 'Vitaminas y suplementos',
       laboratoryName: 'MK',
-      medicationTypeName: 'Marca',
+      commercialTypeName: 'Marca',
       presentationName: 'Tabletas',
       unitCode: 'TAB',
       activePrincipleName: 'Vitamina C',
@@ -544,13 +544,13 @@ async function main() {
     })
   }
 
-  for (const medicationTypeName of productCatalog.medicationTypes) {
-    const codigo = normalizeMasterCode(medicationTypeName)
-    await prisma.tipoMedicamento.upsert({
+  for (const commercialTypeName of productCatalog.commercialTypes) {
+    const codigo = normalizeMasterCode(commercialTypeName)
+    await prisma.tipoComercial.upsert({
       where: {
         empresaId_nombre: {
           empresaId: company.id,
-          nombre: medicationTypeName,
+          nombre: commercialTypeName,
         },
       },
       update: {
@@ -561,7 +561,7 @@ async function main() {
       create: {
         empresaId: company.id,
         codigo,
-        nombre: medicationTypeName,
+        nombre: commercialTypeName,
         activo: true,
         createdById: adminUserId,
         updatedById: adminUserId,
@@ -621,6 +621,7 @@ async function main() {
   }
 
   for (const activePrincipleName of productCatalog.activePrinciples) {
+    const codigo = normalizeMasterCode(activePrincipleName)
     await prisma.principioActivo.upsert({
       where: {
         empresaId_nombre: {
@@ -629,11 +630,13 @@ async function main() {
         },
       },
       update: {
+        codigo,
         activo: true,
         updatedById: adminUserId,
       },
       create: {
         empresaId: company.id,
+        codigo,
         nombre: activePrincipleName,
         activo: true,
         createdById: adminUserId,
@@ -643,7 +646,7 @@ async function main() {
   }
 
   for (const product of productCatalog.products) {
-    const [category, laboratory, medicationType, presentation, unit, activePrinciple] =
+    const [category, laboratory, commercialType, presentation, unit, activePrinciple] =
       await Promise.all([
         prisma.categoria.findFirstOrThrow({
           where: {
@@ -659,10 +662,10 @@ async function main() {
             deletedAt: null,
           },
         }),
-        prisma.tipoMedicamento.findFirstOrThrow({
+        prisma.tipoComercial.findFirstOrThrow({
           where: {
             empresaId: company.id,
-            nombre: product.medicationTypeName,
+            nombre: product.commercialTypeName,
             deletedAt: null,
           },
         }),
@@ -704,7 +707,8 @@ async function main() {
       update: {
         categoriaId: category.id,
         laboratorioId: laboratory.id,
-        tipoMedicamentoId: medicationType.id,
+        tipoComercialId: commercialType.id,
+        principioActivoId: activePrinciple.id,
         presentacionId: presentation.id,
         unidadMedidaId: unit.id,
         nombre: product.name,
@@ -722,7 +726,8 @@ async function main() {
         empresaId: company.id,
         categoriaId: category.id,
         laboratorioId: laboratory.id,
-        tipoMedicamentoId: medicationType.id,
+        tipoComercialId: commercialType.id,
+        principioActivoId: activePrinciple.id,
         presentacionId: presentation.id,
         unidadMedidaId: unit.id,
         sku: product.sku,
