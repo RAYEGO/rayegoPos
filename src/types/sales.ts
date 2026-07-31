@@ -16,6 +16,8 @@ export type SalesDashboardResponse = {
     name: string
     sku: string
     categoryName: string
+    medicationTypeName: string | null
+    medicationTypeId: string | null
     presentationName: string
     unitSymbol: string
     salePrice: number
@@ -74,6 +76,10 @@ export type SalesDashboardResponse = {
   }>
   options: {
     branches: Array<{
+      id: string
+      name: string
+    }>
+    medicationTypes: Array<{
       id: string
       name: string
     }>

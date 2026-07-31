@@ -110,6 +110,7 @@ type SaleWithRelations = Prisma.VentaGetPayload<{
 type SalesDashboardFilters = {
   search?: string
   branchId?: string
+  medicationTypeId?: string
 }
 
 type CreateSalePayload = {
@@ -439,7 +440,7 @@ export async function getSalesDashboard(
   request: FastifyRequest,
 ) {
   await ensureDefaultPaymentMethods(prisma)
-  const { branchId } = await getAuthContext(request)
+  const { branchId, companyId } = await getAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -451,7 +452,9 @@ export async function getSalesDashboard(
 
   const productWhere: Prisma.ProductoWhereInput = {
     deletedAt: null,
+    empresaId: companyId,
     estado: 'ACTIVO',
+    ...(filters.medicationTypeId ? { tipoMedicamentoId: filters.medicationTypeId } : {}),
     ...(search
       ? {
           OR: [
@@ -474,6 +477,7 @@ export async function getSalesDashboard(
 
   const saleWhere: Prisma.VentaWhereInput = {
     deletedAt: null,
+    empresaId: companyId,
     sucursalId: branchId,
     ...(search
       ? {
@@ -517,12 +521,13 @@ export async function getSalesDashboard(
       : {}),
   }
 
-  const [codeMap, branches, customers, paymentMethods, products, sales] = await Promise.all([
+  const [codeMap, branches, customers, paymentMethods, medicationTypes, products, sales] = await Promise.all([
     buildSaleCodeMap(),
     prisma.sucursal.findMany({
       where: {
         deletedAt: null,
         activo: true,
+        empresaId: companyId,
       },
       orderBy: {
         nombre: 'asc',
@@ -536,6 +541,7 @@ export async function getSalesDashboard(
       where: {
         deletedAt: null,
         activo: true,
+        empresaId: companyId,
       },
       orderBy: [{ nombreCompleto: 'asc' }, { razonSocial: 'asc' }],
       select: {
@@ -562,11 +568,29 @@ export async function getSalesDashboard(
         permiteVuelto: true,
       },
     }),
+    prisma.tipoMedicamento.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+      orderBy: { nombre: 'asc' },
+      select: {
+        id: true,
+        nombre: true,
+      },
+    }),
     prisma.producto.findMany({
       where: productWhere,
       include: {
         categoria: {
           select: {
+            nombre: true,
+          },
+        },
+        tipoMedicamento: {
+          select: {
+            id: true,
             nombre: true,
           },
         },
@@ -684,6 +708,8 @@ export async function getSalesDashboard(
         name: product.nombre,
         sku: product.sku,
         categoryName: product.categoria.nombre,
+        medicationTypeName: product.tipoMedicamento?.nombre ?? null,
+        medicationTypeId: product.tipoMedicamento?.id ?? null,
         presentationName: product.presentacion?.nombre ?? 'Presentación general',
         unitSymbol: product.unidadMedida.simbolo,
         salePrice: decimalToNumber(product.precioVenta),
@@ -745,6 +771,10 @@ export async function getSalesDashboard(
       branches: branches.map((branch) => ({
         id: branch.id,
         name: branch.nombre,
+      })),
+      medicationTypes: medicationTypes.map((type) => ({
+        id: type.id,
+        name: type.nombre,
       })),
       customers: customers.map((customer) => ({
         id: customer.id,

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,21 +41,28 @@ export type CategoryImportDialogProps = {
 
 function buildTemplate() {
   return [
-    'nombre,descripcion,estado',
-    'ANALGÉSICOS,Medicamentos para dolor,ACTIVO',
-    'ANTIBIÓTICOS,,ACTIVO',
-    'MATERIAL MÉDICO,Suministros varios,INACTIVO',
-    '',
-  ].join('\n')
+    ['nombre', 'descripcion', 'estado'],
+    ['ANALGÉSICOS', 'Medicamentos para dolor', 'ACTIVO'],
+    ['ANTIBIÓTICOS', '', 'ACTIVO'],
+    ['MATERIAL MÉDICO', 'Suministros varios, uso general', 'INACTIVO'],
+  ]
 }
 
 function downloadTemplate() {
-  const content = buildTemplate()
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+  const workbook = XLSX.utils.book_new()
+  const worksheet = XLSX.utils.aoa_to_sheet(buildTemplate())
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Categorias')
+  const content = XLSX.write(workbook, {
+    bookType: 'xlsx',
+    type: 'array',
+  })
+  const blob = new Blob([content], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'rayego-categorias-template.csv'
+  link.download = 'rayego-categorias-template.xlsx'
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -69,39 +77,72 @@ function parseBooleanState(value: string) {
   return null
 }
 
-function parseCsv(content: string) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+type ParsedCategoryEntry = {
+  row: number
+  name: string
+  description: string
+  state: string
+}
 
-  if (!lines.length) {
-    throw new Error('El archivo CSV está vacío.')
-  }
+function normalizeCell(value: unknown) {
+  if (value === null || value === undefined) return ''
+  return String(value).trim()
+}
 
-  const delimiter = lines[0]?.includes(';') ? ';' : ','
-  const headers = lines[0].split(delimiter).map((header) => normalizeCategoryKey(header))
+function ensureHeaders(headers: string[]) {
   const expected = ['nombre', 'descripcion', 'estado']
   const missing = expected.filter((header) => !headers.includes(header))
   if (missing.length) {
-    throw new Error(`Faltan columnas en el CSV: ${missing.join(', ')}`)
+    throw new Error(`Faltan columnas en el archivo: ${missing.join(', ')}`)
+  }
+}
+
+function parseSpreadsheet(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: 'array' })
+  const sheetName = workbook.SheetNames[0]
+  if (!sheetName) {
+    throw new Error('El archivo Excel no contiene hojas.')
   }
 
-  const headerIndex = Object.fromEntries(headers.map((header, index) => [header, index])) as Record<
-    string,
-    number
-  >
+  const sheet = workbook.Sheets[sheetName]
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' })
 
-  return lines.slice(1).map((line, index) => {
-    const cols = line.split(delimiter).map((col) => col.trim())
-    const get = (key: string) => cols[headerIndex[key]] ?? ''
-    return {
-      row: index + 2,
-      name: get('nombre'),
-      description: get('descripcion'),
-      state: get('estado'),
-    }
-  })
+  if (!rows.length) {
+    throw new Error('El archivo Excel está vacío.')
+  }
+
+  const headerRow = rows[0]?.map((cell) => normalizeCategoryKey(normalizeCell(cell))) ?? []
+  ensureHeaders(headerRow)
+
+  const headerIndex = Object.fromEntries(
+    headerRow.map((header, index) => [header, index]),
+  ) as Record<string, number>
+
+  const dataRows = rows.slice(1)
+  return dataRows
+    .map((cols, index): ParsedCategoryEntry => {
+      const get = (key: string) => normalizeCell(cols[headerIndex[key]])
+      return {
+        row: index + 2,
+        name: get('nombre'),
+        description: get('descripcion'),
+        state: get('estado'),
+      }
+    })
+    .filter((entry) => entry.name || entry.description || entry.state)
+}
+
+async function parseCategoryFile(file: File): Promise<ParsedCategoryEntry[]> {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (extension === 'xlsx') {
+    return parseSpreadsheet(await file.arrayBuffer())
+  }
+
+  if (file.type.includes('spreadsheet') || file.type.includes('excel') || file.type === '') {
+    return parseSpreadsheet(await file.arrayBuffer())
+  }
+
+  throw new Error('Formato de archivo no soportado. Usa únicamente archivos Excel (.xlsx).')
 }
 
 function generateUniqueCode(base: string, taken: Set<string>) {
@@ -143,8 +184,7 @@ export function CategoryImportDialog({
     setIsParsing(true)
 
     try {
-      const text = await file.text()
-      const parsed = parseCsv(text)
+      const parsed = await parseCategoryFile(file)
 
       const existingNames = new Set(existing.map((item) => normalizeCategoryKey(item.name)))
       const existingCodes = new Set(existing.map((item) => item.code))
@@ -286,7 +326,7 @@ export function CategoryImportDialog({
           <label className="inline-flex">
             <input
               type="file"
-              accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="sr-only"
               disabled={disabled || isParsing || isSubmitting}
               ref={inputRef}

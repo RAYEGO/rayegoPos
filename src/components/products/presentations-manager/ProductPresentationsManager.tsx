@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Calendar, Clock3, Copy, Download, Edit, MoreVertical, Package, Plus, Power, Search, Trash2, Upload } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -116,21 +117,28 @@ function buildStats(records: PresentationRecord[]): PresentationStatsSnapshot {
 
 function buildTemplate() {
   return [
-    'nombre,descripcion,estado',
-    'TABLETAS,,ACTIVO',
-    'CÁPSULAS,,ACTIVO',
-    'JARABE,,ACTIVO',
-    '',
-  ].join('\n')
+    ['nombre', 'descripcion', 'estado'],
+    ['TABLETAS', '', 'ACTIVO'],
+    ['CÁPSULAS', '', 'ACTIVO'],
+    ['JARABE', '', 'ACTIVO'],
+  ]
 }
 
 function downloadTemplate() {
-  const content = buildTemplate()
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+  const workbook = XLSX.utils.book_new()
+  const worksheet = XLSX.utils.aoa_to_sheet(buildTemplate())
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Presentaciones')
+  const content = XLSX.write(workbook, {
+    bookType: 'xlsx',
+    type: 'array',
+  })
+  const blob = new Blob([content], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'rayego-presentaciones-template.csv'
+  link.download = 'rayego-presentaciones-template.xlsx'
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -145,39 +153,75 @@ function parseBooleanState(value: string) {
   return null
 }
 
-function parseCsv(content: string) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+type ParsedPresentationEntry = {
+  row: number
+  name: string
+  description: string
+  state: string
+}
 
-  if (!lines.length) {
-    throw new Error('El archivo CSV está vacío.')
-  }
+function normalizeCell(value: unknown) {
+  if (value === null || value === undefined) return ''
+  return String(value).trim()
+}
 
-  const delimiter = lines[0]?.includes(';') ? ';' : ','
-  const headers = lines[0].split(delimiter).map((header) => normalizeMasterKey(header))
+function ensureHeaders(headers: string[]) {
   const expected = ['nombre', 'descripcion', 'estado']
   const missing = expected.filter((header) => !headers.includes(header))
   if (missing.length) {
-    throw new Error(`Faltan columnas en el CSV: ${missing.join(', ')}`)
+    throw new Error(`Faltan columnas en el archivo: ${missing.join(', ')}`)
+  }
+}
+
+function parseSpreadsheet(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: 'array' })
+  const sheetName = workbook.SheetNames[0]
+  if (!sheetName) {
+    throw new Error('El archivo Excel no contiene hojas.')
   }
 
-  const headerIndex = Object.fromEntries(headers.map((header, index) => [header, index])) as Record<
+  const sheet = workbook.Sheets[sheetName]
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' })
+
+  if (!rows.length) {
+    throw new Error('El archivo Excel está vacío.')
+  }
+
+  const headerRow = rows[0]?.map((cell) => normalizeMasterKey(normalizeCell(cell))) ?? []
+  ensureHeaders(headerRow)
+
+  const headerIndex = Object.fromEntries(
+    headerRow.map((header, index) => [header, index]),
+  ) as Record<
     string,
     number
   >
 
-  return lines.slice(1).map((line, index) => {
-    const cols = line.split(delimiter).map((col) => col.trim())
-    const get = (key: string) => cols[headerIndex[key]] ?? ''
-    return {
-      row: index + 2,
-      name: get('nombre'),
-      description: get('descripcion'),
-      state: get('estado'),
-    }
-  })
+  const dataRows = rows.slice(1)
+  return dataRows
+    .map((cols, index): ParsedPresentationEntry => {
+      const get = (key: string) => normalizeCell(cols[headerIndex[key]])
+      return {
+        row: index + 2,
+        name: get('nombre'),
+        description: get('descripcion'),
+        state: get('estado'),
+      }
+    })
+    .filter((entry) => entry.name || entry.description || entry.state)
+}
+
+async function parsePresentationFile(file: File): Promise<ParsedPresentationEntry[]> {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (extension === 'xlsx') {
+    return parseSpreadsheet(await file.arrayBuffer())
+  }
+
+  if (file.type.includes('spreadsheet') || file.type.includes('excel') || file.type === '') {
+    return parseSpreadsheet(await file.arrayBuffer())
+  }
+
+  throw new Error('Formato de archivo no soportado. Usa únicamente archivos Excel (.xlsx).')
 }
 
 function resolveUniqueCodePreview(
@@ -331,8 +375,7 @@ function PresentationImportDialog({
     setIsParsing(true)
 
     try {
-      const text = await file.text()
-      const parsed = parseCsv(text)
+      const parsed = await parsePresentationFile(file)
 
       const existingNames = new Set(existing.map((item) => normalizeMasterKey(item.name)))
       const takenCodes = new Set(existing.map((item) => item.code))
@@ -473,7 +516,7 @@ function PresentationImportDialog({
           <label className="inline-flex">
             <input
               type="file"
-              accept=".csv,text/csv"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               disabled={disabled || isParsing || isSubmitting}
               onChange={(event) => {

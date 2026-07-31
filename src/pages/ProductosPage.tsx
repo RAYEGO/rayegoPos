@@ -80,6 +80,7 @@ import type {
   CreateProductPayload,
   MasterCategoryRecord,
   MasterLaboratoryRecord,
+  MasterMedicationTypeRecord,
   MasterPresentationRecord,
   MasterUnitRecord,
   ProductCatalogItem,
@@ -88,6 +89,7 @@ import type {
   UpdateProductPayload,
   UpsertMasterCategoryPayload,
   UpsertMasterLaboratoryPayload,
+  UpsertMasterMedicationTypePayload,
   UpsertMasterPresentationPayload,
   UpsertMasterUnitPayload,
 } from '@/types/products'
@@ -96,6 +98,7 @@ import { toast } from 'sonner'
 const createProductSchema = z.object({
   categoriaId: z.string().uuid({ message: 'Selecciona una categoría.' }),
   laboratorioId: z.string().optional(),
+  tipoMedicamentoId: z.string().uuid({ message: 'Selecciona un tipo de medicamento.' }),
   unidadMedidaId: z.string().uuid({ message: 'Selecciona una unidad.' }),
   compraPresentacionId: z.string().uuid({ message: 'Selecciona una presentación de compra.' }),
   basePresentacionId: z.string().uuid({ message: 'Selecciona una presentación base.' }),
@@ -225,6 +228,12 @@ const masterLaboratorySchema = z.object({
   activo: z.boolean().optional(),
 })
 
+const masterMedicationTypeSchema = z.object({
+  nombre: z.string().min(2, 'El nombre es obligatorio.').max(120),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
 const masterPresentationSchema = z.object({
   nombre: z.string().min(2, 'El nombre es obligatorio.').max(120),
   descripcion: z.string().max(255).optional(),
@@ -241,12 +250,14 @@ const masterUnitSchema = z.object({
 type CreateProductFormValues = z.infer<typeof createProductSchema>
 type MasterCategoryFormValues = z.infer<typeof masterCategorySchema>
 type MasterLaboratoryFormValues = z.infer<typeof masterLaboratorySchema>
+type MasterMedicationTypeFormValues = z.infer<typeof masterMedicationTypeSchema>
 type MasterPresentationFormValues = z.infer<typeof masterPresentationSchema>
 type MasterUnitFormValues = z.infer<typeof masterUnitSchema>
 
 const defaultFormValues: CreateProductFormValues = {
   categoriaId: '',
   laboratorioId: '',
+  tipoMedicamentoId: '',
   unidadMedidaId: '',
   compraPresentacionId: '',
   basePresentacionId: '',
@@ -329,6 +340,7 @@ export function ProductosPage() {
   const [statusFilter, setStatusFilter] = useState<'TODOS' | ProductStatus>('TODOS')
   const [categoryFilter, setCategoryFilter] = useState('TODAS')
   const [laboratoryFilter, setLaboratoryFilter] = useState('TODOS')
+  const [medicationTypeFilter, setMedicationTypeFilter] = useState('TODOS')
   const [showSummary, setShowSummary] = useState(true)
   const [mainTab, setMainTab] = useState<'catalogo' | 'maestros'>('catalogo')
   const [products, setProducts] = useState<ProductCatalogItem[]>([])
@@ -348,6 +360,7 @@ export function ProductosPage() {
   const [options, setOptions] = useState<ProductOptionsResponse>({
     categories: [],
     laboratories: [],
+    medicationTypes: [],
     presentations: [],
     units: [],
     activePrinciples: [],
@@ -374,14 +387,15 @@ export function ProductosPage() {
 
   const [masterDialogOpen, setMasterDialogOpen] = useState(false)
   const [masterDialogType, setMasterDialogType] = useState<
-    'categoria' | 'laboratorio' | 'presentacion' | 'unidad'
+    'categoria' | 'laboratorio' | 'tipoMedicamento' | 'presentacion' | 'unidad'
   >('categoria')
   const [masterDialogMode, setMasterDialogMode] = useState<'create' | 'edit'>('create')
   const [masterDialogTargetField, setMasterDialogTargetField] = useState<
-    'categoriaId' | 'laboratorioId' | 'presentacionId' | 'unidadMedidaId' | null
+    'categoriaId' | 'laboratorioId' | 'tipoMedicamentoId' | 'presentacionId' | 'unidadMedidaId' | null
   >(null)
   const [editingCategory, setEditingCategory] = useState<MasterCategoryRecord | null>(null)
   const [editingLaboratory, setEditingLaboratory] = useState<MasterLaboratoryRecord | null>(null)
+  const [editingMedicationType, setEditingMedicationType] = useState<MasterMedicationTypeRecord | null>(null)
   const [editingPresentation, setEditingPresentation] = useState<MasterPresentationRecord | null>(null)
   const [editingUnit, setEditingUnit] = useState<MasterUnitRecord | null>(null)
 
@@ -443,6 +457,15 @@ export function ProductosPage() {
     defaultValues: {
       nombre: '',
       pais: '',
+      descripcion: '',
+      activo: true,
+    },
+  })
+
+  const medicationTypeForm = useForm<MasterMedicationTypeFormValues>({
+    resolver: zodResolver(masterMedicationTypeSchema),
+    defaultValues: {
+      nombre: '',
       descripcion: '',
       activo: true,
     },
@@ -510,6 +533,7 @@ export function ProductosPage() {
         status: statusFilter === 'TODOS' ? undefined : statusFilter,
         categoryId: categoryFilter === 'TODAS' ? undefined : categoryFilter,
         laboratoryId: laboratoryFilter === 'TODOS' ? undefined : laboratoryFilter,
+        medicationTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
         page,
         pageSize,
         sortBy,
@@ -540,6 +564,7 @@ export function ProductosPage() {
     categoryFilter,
     handleUnauthorized,
     laboratoryFilter,
+    medicationTypeFilter,
     page,
     pageSize,
     search,
@@ -554,7 +579,7 @@ export function ProductosPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [categoryFilter, laboratoryFilter, pageSize, search, sortBy, sortDir, statusFilter])
+  }, [categoryFilter, laboratoryFilter, medicationTypeFilter, pageSize, search, sortBy, sortDir, statusFilter])
 
   useEffect(() => {
     void loadProducts()
@@ -614,20 +639,23 @@ export function ProductosPage() {
     setMasterDialogMode('create')
     setEditingCategory(null)
     setEditingLaboratory(null)
+    setEditingMedicationType(null)
     setEditingPresentation(null)
     setEditingUnit(null)
     categoryForm.reset()
     laboratoryForm.reset()
+    medicationTypeForm.reset()
     presentationForm.reset()
     unitForm.reset()
-  }, [categoryForm, laboratoryForm, presentationForm, unitForm])
+  }, [categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm])
 
   const openCreateMaster = useCallback(
     (
-      type: 'categoria' | 'laboratorio' | 'presentacion' | 'unidad',
+      type: 'categoria' | 'laboratorio' | 'tipoMedicamento' | 'presentacion' | 'unidad',
       targetField:
         | 'categoriaId'
         | 'laboratorioId'
+        | 'tipoMedicamentoId'
         | 'presentacionId'
         | 'unidadMedidaId'
         | null = null,
@@ -637,6 +665,7 @@ export function ProductosPage() {
       setMasterDialogTargetField(targetField)
       setEditingCategory(null)
       setEditingLaboratory(null)
+      setEditingMedicationType(null)
       setEditingPresentation(null)
       setEditingUnit(null)
       categoryForm.reset({
@@ -649,6 +678,11 @@ export function ProductosPage() {
       laboratoryForm.reset({
         nombre: '',
         pais: '',
+        descripcion: '',
+        activo: true,
+      })
+      medicationTypeForm.reset({
+        nombre: '',
         descripcion: '',
         activo: true,
       })
@@ -665,7 +699,7 @@ export function ProductosPage() {
       })
       setMasterDialogOpen(true)
     },
-    [categoryForm, laboratoryForm, presentationForm, unitForm],
+    [categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm],
   )
 
   const handleSaveMasterCategory = useCallback(
@@ -762,6 +796,60 @@ export function ProductosPage() {
     [
       accessToken,
       editingLaboratory,
+      form,
+      handleUnauthorized,
+      loadOptions,
+      masterDialogMode,
+      masterDialogTargetField,
+      resetMasterDialogState,
+    ],
+  )
+
+  const handleSaveMasterMedicationType = useCallback(
+    async (values: MasterMedicationTypeFormValues) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      const payload: UpsertMasterMedicationTypePayload = {
+        nombre: values.nombre.trim(),
+        descripcion: values.descripcion?.trim() || undefined,
+        activo: values.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        if (masterDialogMode === 'edit' && editingMedicationType) {
+          await productsService.updateMasterMedicationType(
+            accessToken,
+            editingMedicationType.id,
+            payload,
+          )
+          toast.success('Tipo de medicamento actualizado.')
+        } else {
+          const created = await productsService.createMasterMedicationType(accessToken, payload)
+          toast.success('Tipo de medicamento creado.')
+          if (masterDialogTargetField === 'tipoMedicamentoId') {
+            form.setValue('tipoMedicamentoId', created.id, { shouldValidate: true })
+          }
+        }
+
+        resetMasterDialogState()
+        await loadOptions()
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [
+      accessToken,
+      editingMedicationType,
       form,
       handleUnauthorized,
       loadOptions,
@@ -873,6 +961,7 @@ export function ProductosPage() {
     return {
       categoriaId: product.categoryId,
       laboratorioId: product.laboratoryId ?? '',
+      tipoMedicamentoId: product.medicationTypeId ?? '',
       unidadMedidaId: product.unitId,
       compraPresentacionId: product.packaging.purchasePresentationId ?? '',
       basePresentacionId: product.packaging.basePresentationId ?? '',
@@ -1008,6 +1097,7 @@ export function ProductosPage() {
     const payload: CreateProductPayload | UpdateProductPayload = {
       ...values,
       laboratorioId: values.laboratorioId || undefined,
+      tipoMedicamentoId: values.tipoMedicamentoId || undefined,
       principioActivoId: values.principioActivoId || undefined,
       codigoBarras: values.codigoBarras?.trim() || undefined,
       descripcion: values.descripcion?.trim() || undefined,
@@ -1110,7 +1200,7 @@ export function ProductosPage() {
 
         <TabsContent value="catalogo" className="space-y-4 pt-4">
           <Card className="p-4">
-            <div className="grid gap-3 md:grid-cols-4 lg:grid-cols-7">
+            <div className="grid gap-3 md:grid-cols-4 lg:grid-cols-8">
               <div className="md:col-span-2">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1152,6 +1242,19 @@ export function ProductosPage() {
                   <SelectItem value="TODOS">Todos</SelectItem>
                   {options.laboratories.map((lab) => (
                     <SelectItem key={lab.id} value={lab.id}>{lab.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={medicationTypeFilter} onValueChange={setMedicationTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Tipo de medicamento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos</SelectItem>
+                  {options.medicationTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.id}>
+                      {type.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1221,6 +1324,8 @@ export function ProductosPage() {
                           <p className="font-medium text-foreground truncate">{product.name}</p>
                           <p className="text-xs text-muted-foreground mt-1">
                             {product.sku}
+                            {product.medicationType ? ` · ${product.medicationType}` : ''}
+                            {product.presentation ? ` · ${product.presentation}` : ''}
                           </p>
                         </div>
                         <DropdownMenu>
@@ -1340,6 +1445,7 @@ export function ProductosPage() {
                                 <p className="font-medium text-foreground truncate">{product.name}</p>
                                 <p className="text-xs text-muted-foreground truncate">
                                   {product.sku}
+                                  {product.medicationType ? ` · ${product.medicationType}` : ''}
                                   {product.presentation ? ` · ${product.presentation}` : ''}
                                 </p>
                               </div>
@@ -1630,6 +1736,42 @@ export function ProductosPage() {
                   )}
                 />
                 <FieldError message={form.formState.errors.unidadMedidaId?.message} />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium">Tipo de medicamento</label>
+                  {canManageMasters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openCreateMaster('tipoMedicamento', 'tipoMedicamentoId')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
+                <Controller
+                  control={form.control}
+                  name="tipoMedicamentoId"
+                  render={({ field }) => (
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona tipo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {options.medicationTypes.map((type) => (
+                          <SelectItem key={type.id} value={type.id}>
+                            {type.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <FieldError message={form.formState.errors.tipoMedicamentoId?.message} />
               </div>
 
               <div className="space-y-1.5">
@@ -2043,6 +2185,7 @@ export function ProductosPage() {
                 <p className="font-medium text-foreground">{selectedProductDetail.name}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {selectedProductDetail.category}
+                  {selectedProductDetail.medicationType ? ` · ${selectedProductDetail.medicationType}` : ''}
                   {selectedProductDetail.presentation ? ` · ${selectedProductDetail.presentation}` : ''}
                 </p>
               </div>
@@ -2065,6 +2208,18 @@ export function ProductosPage() {
                 <div className="rounded-xl border p-3">
                   <p className="text-xs text-muted-foreground">Costo referencial</p>
                   <p className="mt-1 font-medium text-foreground">{formatCurrency(selectedProductDetail.costPrice)}</p>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Tipo de medicamento</p>
+                  <p className="mt-1 font-medium text-foreground">
+                    {selectedProductDetail.medicationType ?? 'Sin clasificar'}
+                  </p>
+                </div>
+                <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Laboratorio</p>
+                  <p className="mt-1 font-medium text-foreground">
+                    {selectedProductDetail.laboratory ?? 'Sin laboratorio'}
+                  </p>
                 </div>
               </div>
 
@@ -2182,6 +2337,8 @@ export function ProductosPage() {
                 ? 'categoría'
                 : masterDialogType === 'laboratorio'
                   ? 'laboratorio'
+                  : masterDialogType === 'tipoMedicamento'
+                    ? 'tipo de medicamento'
                   : masterDialogType === 'presentacion'
                     ? 'presentación'
                     : 'unidad'}
@@ -2288,6 +2445,61 @@ export function ProductosPage() {
                     <div>
                       <p className="text-sm font-medium text-foreground">Activo</p>
                       <p className="text-xs text-muted-foreground">Disponible en selects de Producto.</p>
+                    </div>
+                    <Switch
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                      disabled={isMasterSubmitting}
+                    />
+                  </label>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={resetMasterDialogState}
+                  disabled={isMasterSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={!canManageMasters || isMasterSubmitting}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+
+          {masterDialogType === 'tipoMedicamento' ? (
+            <form className="grid gap-4" onSubmit={medicationTypeForm.handleSubmit(handleSaveMasterMedicationType)}>
+              <div className="grid gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Nombre</label>
+                  <Input
+                    {...medicationTypeForm.register('nombre')}
+                    placeholder="Genérico"
+                    disabled={isMasterSubmitting}
+                  />
+                  <FieldError message={medicationTypeForm.formState.errors.nombre?.message} />
+                  <p className="text-xs text-muted-foreground">Código generado automáticamente desde el nombre.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea {...medicationTypeForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <FieldError message={medicationTypeForm.formState.errors.descripcion?.message} />
+                </div>
+              </div>
+
+              <Controller
+                control={medicationTypeForm.control}
+                name="activo"
+                render={({ field }) => (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Activo</p>
+                      <p className="text-xs text-muted-foreground">Disponible en selects de Producto y filtros de Venta.</p>
                     </div>
                     <Switch
                       checked={field.value ?? true}

@@ -21,6 +21,8 @@ export type ProductCatalogItem = {
   laboratory: string | null
   laboratoryId: string | null
   laboratoryCountry: string | null
+  medicationType: string | null
+  medicationTypeId: string | null
   presentation: string | null
   presentationId: string | null
   unit: string
@@ -109,6 +111,11 @@ export type ProductOptionsResponse = {
     country: string | null
     skuCount: number
   }>
+  medicationTypes: Array<{
+    id: string
+    name: string
+    skuCount: number
+  }>
   presentations: Array<{
     id: string
     name: string
@@ -178,6 +185,27 @@ export type UpsertMasterLaboratoryPayload = {
   activo?: boolean
 }
 
+export type MasterMedicationTypeRecord = {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  activo: boolean
+  productCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MasterMedicationTypesResponse = {
+  rows: MasterMedicationTypeRecord[]
+}
+
+export type UpsertMasterMedicationTypePayload = {
+  nombre: string
+  descripcion?: string
+  activo?: boolean
+}
+
 export type MasterPresentationRecord = {
   id: string
   codigo: string
@@ -226,6 +254,7 @@ export type UpsertMasterUnitPayload = {
 export type CreateProductPayload = {
   categoriaId: string
   laboratorioId?: string
+  tipoMedicamentoId?: string
   presentacionId?: string
   unidadMedidaId: string
   compraPresentacionId: string

@@ -1,5 +1,6 @@
 import { ProductCategoriesManager } from '@/components/products/categories-manager/ProductCategoriesManager'
 import { ProductLaboratoriesManager } from '@/components/products/laboratories-manager/ProductLaboratoriesManager'
+import { ProductMedicationTypesManager } from '@/components/products/medication-types-manager/ProductMedicationTypesManager'
 import { ProductPresentationsManager } from '@/components/products/presentations-manager/ProductPresentationsManager'
 import { ProductUnitsManager } from '@/components/products/units-manager/ProductUnitsManager'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,7 @@ export function ProductMastersCenter({
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/60 p-1.5">
           <TabsTrigger value="categorias">Categorías</TabsTrigger>
           <TabsTrigger value="laboratorios">Laboratorios</TabsTrigger>
+          <TabsTrigger value="tiposMedicamento">Tipos de medicamento</TabsTrigger>
           <TabsTrigger value="presentaciones">Presentaciones</TabsTrigger>
           <TabsTrigger value="unidadesMedida">Unidades de medida</TabsTrigger>
           <TabsTrigger value="tiposEmpaque">Tipos de empaque</TabsTrigger>
@@ -45,6 +47,10 @@ export function ProductMastersCenter({
 
         <TabsContent value="laboratorios" className="mt-4">
           <ProductLaboratoriesManager accessToken={accessToken} canManage={canManageMasters} />
+        </TabsContent>
+
+        <TabsContent value="tiposMedicamento" className="mt-4">
+          <ProductMedicationTypesManager accessToken={accessToken} canManage={canManageMasters} />
         </TabsContent>
 
         <TabsContent value="presentaciones" className="mt-4">

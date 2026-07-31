@@ -3,6 +3,7 @@ import type {
   CreateProductPayload,
   MasterCategoriesResponse,
   MasterLaboratoriesResponse,
+  MasterMedicationTypesResponse,
   MasterPresentationsResponse,
   MasterUnitsResponse,
   ProductCatalogResponse,
@@ -11,6 +12,7 @@ import type {
   UpdateProductPayload,
   UpsertMasterCategoryPayload,
   UpsertMasterLaboratoryPayload,
+  UpsertMasterMedicationTypePayload,
   UpsertMasterPresentationPayload,
   UpsertMasterUnitPayload,
 } from '@/types/products'
@@ -20,6 +22,7 @@ type ListProductsFilters = {
   status?: 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO'
   categoryId?: string
   laboratoryId?: string
+  medicationTypeId?: string
   page?: number
   pageSize?: number
   sortBy?: 'name' | 'stockUnits' | 'createdAt'
@@ -43,6 +46,10 @@ function buildQuery(filters: ListProductsFilters) {
 
   if (filters.laboratoryId) {
     searchParams.set('laboratoryId', filters.laboratoryId)
+  }
+
+  if (filters.medicationTypeId) {
+    searchParams.set('medicationTypeId', filters.medicationTypeId)
   }
 
   if (typeof filters.page === 'number' && Number.isFinite(filters.page)) {
@@ -171,6 +178,39 @@ export const productsService = {
 
   deleteMasterLaboratory(accessToken: string, id: string) {
     return apiRequest<{ success: boolean }>(`/api/products/masters/laboratories/${id}`, {
+      method: 'DELETE',
+      accessToken,
+    })
+  },
+
+  listMasterMedicationTypes(accessToken: string) {
+    return apiRequest<MasterMedicationTypesResponse>('/api/products/masters/medication-types', {
+      accessToken,
+    })
+  },
+
+  createMasterMedicationType(accessToken: string, payload: UpsertMasterMedicationTypePayload) {
+    return apiRequest<{ success: boolean; id: string }>('/api/products/masters/medication-types', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  updateMasterMedicationType(
+    accessToken: string,
+    id: string,
+    payload: UpsertMasterMedicationTypePayload,
+  ) {
+    return apiRequest<{ success: boolean }>(`/api/products/masters/medication-types/${id}`, {
+      method: 'PATCH',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  deleteMasterMedicationType(accessToken: string, id: string) {
+    return apiRequest<{ success: boolean }>(`/api/products/masters/medication-types/${id}`, {
       method: 'DELETE',
       accessToken,
     })

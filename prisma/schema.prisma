@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 /// Acciones auditables del sistema.
@@ -227,6 +226,7 @@ model Empresa {
   proveedores       Proveedor[]
   categorias        Categoria[]
   laboratorios      Laboratorio[]
+  tiposMedicamento  TipoMedicamento[]
   presentaciones    Presentacion[]
   unidadesMedida    UnidadMedida[]
   principiosActivos PrincipioActivo[]
@@ -331,6 +331,8 @@ model Usuario {
   categoriasActualizadas                      Categoria[]                     @relation("CategoriaUpdatedBy")
   laboratoriosCreados                         Laboratorio[]                   @relation("LaboratorioCreatedBy")
   laboratoriosActualizados                    Laboratorio[]                   @relation("LaboratorioUpdatedBy")
+  tiposMedicamentoCreados                     TipoMedicamento[]               @relation("TipoMedicamentoCreatedBy")
+  tiposMedicamentoActualizados                TipoMedicamento[]               @relation("TipoMedicamentoUpdatedBy")
   presentacionesCreadas                       Presentacion[]                  @relation("PresentacionCreatedBy")
   presentacionesActualizadas                  Presentacion[]                  @relation("PresentacionUpdatedBy")
   productoPresentacionesCreadas               ProductoPresentacion[]          @relation("ProductoPresentacionCreatedBy")
@@ -587,6 +589,31 @@ model Laboratorio {
   @@map("laboratorios")
 }
 
+model TipoMedicamento {
+  id          String    @id @default(uuid()) @db.Uuid
+  empresaId   String    @map("empresa_id") @db.Uuid
+  codigo      String    @db.VarChar(30)
+  nombre      String    @db.VarChar(120)
+  descripcion String?   @db.VarChar(255)
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  createdById String?   @map("created_by") @db.Uuid
+  updatedById String?   @map("updated_by") @db.Uuid
+
+  empresa   Empresa           @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy Usuario?          @relation("TipoMedicamentoCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  updatedBy Usuario?          @relation("TipoMedicamentoUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  productos Producto[]
+
+  @@unique([empresaId, codigo])
+  @@unique([empresaId, nombre])
+  @@index([empresaId])
+  @@index([deletedAt])
+  @@map("tipos_medicamento")
+}
+
 model Presentacion {
   id          String    @id @default(uuid()) @db.Uuid
   empresaId   String    @map("empresa_id") @db.Uuid
@@ -674,6 +701,7 @@ model Producto {
   empresaId            String              @map("empresa_id") @db.Uuid
   categoriaId          String              @map("categoria_id") @db.Uuid
   laboratorioId        String?             @map("laboratorio_id") @db.Uuid
+  tipoMedicamentoId    String?             @map("tipo_medicamento_id") @db.Uuid
   presentacionId       String?             @map("presentacion_id") @db.Uuid
   compraPresentacionId String?             @map("compra_presentacion_id") @db.Uuid
   unidadMedidaId       String              @map("unidad_medida_id") @db.Uuid
@@ -704,6 +732,7 @@ model Producto {
   empresa                        Empresa                         @relation(fields: [empresaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   categoria                      Categoria                       @relation(fields: [categoriaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   laboratorio                    Laboratorio?                    @relation(fields: [laboratorioId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  tipoMedicamento                TipoMedicamento?                @relation(fields: [tipoMedicamentoId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   presentacion                   Presentacion?                   @relation(fields: [presentacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   compraPresentacion             Presentacion?                   @relation("ProductoCompraPresentacion", fields: [compraPresentacionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   unidadMedida                   UnidadMedida                    @relation(fields: [unidadMedidaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -726,6 +755,7 @@ model Producto {
   @@index([empresaId])
   @@index([categoriaId, estado])
   @@index([laboratorioId])
+  @@index([tipoMedicamentoId])
   @@index([compraPresentacionId])
   @@index([nombre])
   @@index([deletedAt])

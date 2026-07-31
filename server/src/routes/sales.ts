@@ -6,6 +6,7 @@ import { cancelSale, createSale, getSaleReceipt, getSalesDashboard } from '../mo
 const salesDashboardQuerySchema = z.object({
   search: z.string().optional(),
   branchId: z.string().uuid().optional(),
+  medicationTypeId: z.string().uuid().optional(),
   status: z.nativeEnum(EstadoVenta).optional(),
 })
 
@@ -47,6 +48,7 @@ export async function salesRoutes(app: FastifyInstance) {
     return getSalesDashboard({
       search: query.search,
       branchId: query.branchId,
+      medicationTypeId: query.medicationTypeId,
     }, request)
   })
 

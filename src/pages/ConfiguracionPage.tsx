@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { Download, ImageUp, Plus, RefreshCcw, Trash2, Upload, X } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -605,7 +606,7 @@ export function ConfiguracionPage() {
     }
   }
 
-  function buildProductCatalogCsvTemplate() {
+  function buildProductCatalogTemplate() {
     return [
       [
         'sku',
@@ -613,6 +614,7 @@ export function ConfiguracionPage() {
         'nombre',
         'categoria',
         'laboratorio',
+        'tipoMedicamento',
         'presentacion',
         'unidadNombre',
         'unidadSimbolo',
@@ -624,13 +626,14 @@ export function ConfiguracionPage() {
         'concentracion',
         'registroSanitario',
         'observaciones',
-      ].join(','),
+      ],
       [
         'PARA-500-CAJA',
         '',
         'Paracetamol 500mg',
         'ANALGÉSICOS',
         'ACME',
+        'Genérico',
         'Tabletas',
         'Unidad',
         'und',
@@ -642,13 +645,14 @@ export function ConfiguracionPage() {
         '500mg',
         '',
         '',
-      ].join(','),
+      ],
       [
         'VITC-1G-UND',
         '',
         'Vitamina C 1g',
         'VITAMINAS',
         '',
+        'Marca',
         'Tabletas',
         'Unidad',
         'und',
@@ -660,18 +664,25 @@ export function ConfiguracionPage() {
         '1g',
         '',
         '',
-      ].join(','),
-      '',
-    ].join('\n')
+      ],
+    ]
   }
 
   function downloadProductCatalogTemplate() {
-    const content = buildProductCatalogCsvTemplate()
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+    const workbook = XLSX.utils.book_new()
+    const worksheet = XLSX.utils.aoa_to_sheet(buildProductCatalogTemplate())
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Productos')
+    const content = XLSX.write(workbook, {
+      bookType: 'xlsx',
+      type: 'array',
+    })
+    const blob = new Blob([content], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'rayego-importar-catalogo-productos-template.csv'
+    link.download = 'rayego-importar-catalogo-productos-template.xlsx'
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -690,67 +701,99 @@ export function ConfiguracionPage() {
     return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   }
 
-  function parseProductCatalogCsv(content: string) {
-    const lines = content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
+  function normalizeCell(value: unknown) {
+    if (value === null || value === undefined) return ''
+    return String(value).trim()
+  }
 
-    if (!lines.length) {
-      throw new Error('El archivo CSV está vacío.')
-    }
-
-    const delimiter = lines[0]?.includes(';') ? ';' : ','
-    const headers = lines[0].split(delimiter).map((header) => header.trim())
-    const normalizedHeaders = headers.map((header) => header.toLowerCase())
-
+  function ensureProductCatalogHeaders(headers: string[]) {
     const expectedHeaders = [
       'sku',
+      'codigobarras',
       'nombre',
       'categoria',
+      'laboratorio',
+      'tipomedicamento',
       'presentacion',
       'unidadnombre',
       'unidadsimbolo',
       'precioventa',
       'costoreferencia',
-      'requiereReceta'.toLowerCase(),
+      'requierereceta',
       'escontrolado',
-    ].map((header) => header.toLowerCase())
+      'descripcion',
+      'concentracion',
+      'registrosanitario',
+      'observaciones',
+    ]
 
-    const missing = expectedHeaders.filter((header) => !normalizedHeaders.includes(header))
+    const missing = expectedHeaders.filter((header) => !headers.includes(header))
     if (missing.length) {
-      throw new Error(`Faltan columnas en el CSV: ${missing.join(', ')}`)
+      throw new Error(`Faltan columnas en el archivo: ${missing.join(', ')}`)
     }
+  }
+
+  function parseProductCatalogSpreadsheet(buffer: ArrayBuffer) {
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName) {
+      throw new Error('El archivo Excel no contiene hojas.')
+    }
+
+    const sheet = workbook.Sheets[sheetName]
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' })
+    if (!rows.length) {
+      throw new Error('El archivo Excel está vacío.')
+    }
+
+    const normalizedHeaders = rows[0]?.map((cell) => normalizeMasterKey(normalizeCell(cell))) ?? []
+    ensureProductCatalogHeaders(normalizedHeaders)
 
     const headerIndex = Object.fromEntries(
       normalizedHeaders.map((header, index) => [header, index]),
     ) as Record<string, number>
 
-    const get = (columns: string[], key: string) => columns[headerIndex[key]] ?? ''
+    return rows
+      .slice(1)
+      .map((cols, rowIndex) => {
+        const get = (key: string) => normalizeCell(cols[headerIndex[key]])
+        return {
+          row: rowIndex + 2,
+          sku: get('sku'),
+          codigoBarras: get('codigobarras'),
+          nombre: get('nombre'),
+          categoria: get('categoria'),
+          laboratorio: get('laboratorio'),
+          tipoMedicamento: get('tipomedicamento'),
+          presentacion: get('presentacion'),
+          unidadNombre: get('unidadnombre'),
+          unidadSimbolo: get('unidadsimbolo'),
+          precioVenta: get('precioventa'),
+          costoReferencia: get('costoreferencia'),
+          requiereReceta: get('requierereceta'),
+          esControlado: get('escontrolado'),
+          descripcion: get('descripcion'),
+          concentracion: get('concentracion'),
+          registroSanitario: get('registrosanitario'),
+          observaciones: get('observaciones'),
+        }
+      })
+      .filter((entry) =>
+        Object.entries(entry).some(([key, value]) => key !== 'row' && String(value).trim() !== ''),
+      )
+  }
 
-    return lines.slice(1).map((line, rowIndex) => {
-      const columns = line.split(delimiter).map((col) => col.trim())
-      const value = (key: string) => get(columns, key)
-      return {
-        row: rowIndex + 2,
-        sku: value('sku'),
-        codigoBarras: value('codigobarras'),
-        nombre: value('nombre'),
-        categoria: value('categoria'),
-        laboratorio: value('laboratorio'),
-        presentacion: value('presentacion'),
-        unidadNombre: value('unidadnombre'),
-        unidadSimbolo: value('unidadsimbolo'),
-        precioVenta: value('precioventa'),
-        costoReferencia: value('costoreferencia'),
-        requiereReceta: value('requierereceta'),
-        esControlado: value('escontrolado'),
-        descripcion: value('descripcion'),
-        concentracion: value('concentracion'),
-        registroSanitario: value('registrosanitario'),
-        observaciones: value('observaciones'),
-      }
-    })
+  async function parseProductCatalogFile(file: File) {
+    const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+    if (extension === 'xlsx') {
+      return parseProductCatalogSpreadsheet(await file.arrayBuffer())
+    }
+
+    if (file.type.includes('spreadsheet') || file.type.includes('excel') || file.type === '') {
+      return parseProductCatalogSpreadsheet(await file.arrayBuffer())
+    }
+
+    throw new Error('Formato de archivo no soportado. Usa únicamente archivos Excel (.xlsx).')
   }
 
   async function handleProductCatalogImport(file: File) {
@@ -759,10 +802,17 @@ export function ConfiguracionPage() {
     setCatalogImportSummary(null)
 
     try {
-      const [categoriesResponse, laboratoriesResponse, presentationsResponse, unitsResponse] =
+      const [
+        categoriesResponse,
+        laboratoriesResponse,
+        medicationTypesResponse,
+        presentationsResponse,
+        unitsResponse,
+      ] =
         await Promise.all([
           productsService.listMasterCategories(accessToken),
           productsService.listMasterLaboratories(accessToken),
+          productsService.listMasterMedicationTypes(accessToken),
           productsService.listMasterPresentations(accessToken),
           productsService.listMasterUnits(accessToken),
         ])
@@ -773,6 +823,9 @@ export function ConfiguracionPage() {
       const labsByName = new Map(
         laboratoriesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
+      const medicationTypesByName = new Map(
+        medicationTypesResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
+      )
       const presentationsByName = new Map(
         presentationsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
@@ -780,8 +833,7 @@ export function ConfiguracionPage() {
         unitsResponse.rows.map((row) => [normalizeMasterKey(row.nombre), row]),
       )
 
-      const text = await file.text()
-      const rows = parseProductCatalogCsv(text)
+      const rows = await parseProductCatalogFile(file)
 
       let created = 0
       let skipped = 0
@@ -946,6 +998,51 @@ export function ConfiguracionPage() {
             labId = lab.id
           }
 
+          const medicationTypeName = row.tipoMedicamento.trim()
+          if (!medicationTypeName) {
+            pushError(
+              row.row,
+              formatImplementationMessage(
+                'INVALID_REQUIRED_FIELD',
+                'Campo: Tipo de medicamento',
+              ),
+            )
+            continue
+          }
+
+          const medicationTypeKey = normalizeMasterKey(medicationTypeName)
+          let medicationType = medicationTypesByName.get(medicationTypeKey) ?? null
+          if (!medicationType) {
+            try {
+              const result = await productsService.createMasterMedicationType(accessToken, {
+                nombre: medicationTypeName,
+              })
+              const refreshed = await productsService.listMasterMedicationTypes(accessToken)
+              refreshed.rows.forEach((entry) =>
+                medicationTypesByName.set(normalizeMasterKey(entry.nombre), entry),
+              )
+              medicationType =
+                refreshed.rows.find((entry) => entry.id === result.id) ??
+                medicationTypesByName.get(medicationTypeKey) ??
+                null
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 409) {
+                const refreshed = await productsService.listMasterMedicationTypes(accessToken)
+                refreshed.rows.forEach((entry) =>
+                  medicationTypesByName.set(normalizeMasterKey(entry.nombre), entry),
+                )
+                medicationType = medicationTypesByName.get(medicationTypeKey) ?? null
+              } else {
+                throw err
+              }
+            }
+          }
+
+          if (!medicationType) {
+            pushError(row.row, 'No fue posible resolver el tipo de medicamento indicado.')
+            continue
+          }
+
           const presentationName = row.presentacion.trim()
           if (!presentationName) {
             pushError(row.row, 'La presentación es obligatoria para configurar el empaque del producto.')
@@ -1002,6 +1099,7 @@ export function ConfiguracionPage() {
           const payload: CreateProductPayload = {
             categoriaId: category.id,
             laboratorioId: labId,
+            tipoMedicamentoId: medicationType.id,
             presentacionId: presentationId,
             unidadMedidaId: unit.id,
             compraPresentacionId: presentationId,
@@ -1715,7 +1813,7 @@ export function ConfiguracionPage() {
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" onClick={() => downloadProductCatalogTemplate()}>
                   <Download className="mr-2 h-4 w-4" />
-                  Descargar plantilla CSV
+                  Descargar plantilla Excel
                 </Button>
                 <Button type="button" onClick={() => setIsCatalogDrawerOpen(true)}>
                   <Upload className="mr-2 h-4 w-4" />
@@ -1765,21 +1863,21 @@ export function ConfiguracionPage() {
                     <CardHeader>
                       <CardTitle className="text-sm">Plantilla e importación</CardTitle>
                       <CardDescription>
-                        La plantilla incluye configuración de empaque (Caja/Blíster/Unidad) y crea categorías,
-                        laboratorios, presentaciones y unidades si no existen.
+                        La plantilla incluye configuración de empaque y crea categorías, laboratorios, tipos de
+                        medicamento, presentaciones y unidades si no existen.
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <div className="flex flex-col gap-2 sm:flex-row">
                         <Button type="button" variant="outline" onClick={() => downloadProductCatalogTemplate()}>
                           <Download className="mr-2 h-4 w-4" />
-                          Descargar plantilla CSV
+                          Descargar plantilla Excel
                         </Button>
 
                         <input
                           ref={catalogCsvInputRef}
                           type="file"
-                          accept=".csv,text/csv"
+                          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                           className="hidden"
                           onChange={(event) => {
                             const file = event.target.files?.[0]
@@ -1793,7 +1891,7 @@ export function ConfiguracionPage() {
                           onClick={() => catalogCsvInputRef.current?.click()}
                         >
                           {isCatalogImporting ? <Loader className="mr-2 h-4 w-4" /> : <Upload className="mr-2 h-4 w-4" />}
-                          Importar CSV
+                          Importar Excel
                         </Button>
                       </div>
 

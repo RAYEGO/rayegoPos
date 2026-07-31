@@ -16,6 +16,10 @@ import {
   createMasterLaboratory,
   updateMasterLaboratory,
   deleteMasterLaboratory,
+  listMasterMedicationTypes,
+  createMasterMedicationType,
+  updateMasterMedicationType,
+  deleteMasterMedicationType,
   listMasterPresentations,
   createMasterPresentation,
   updateMasterPresentation,
@@ -31,6 +35,7 @@ const listProductsQuerySchema = z.object({
   status: z.enum(['ACTIVO', 'INACTIVO', 'DESCONTINUADO']).optional(),
   categoryId: z.string().uuid().optional(),
   laboratoryId: z.string().uuid().optional(),
+  medicationTypeId: z.string().uuid().optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().optional(),
   sortBy: z.enum(['name', 'stockUnits', 'createdAt']).optional(),
@@ -40,6 +45,7 @@ const listProductsQuerySchema = z.object({
 const createProductSchema = z.object({
   categoriaId: z.string().uuid(),
   laboratorioId: z.string().uuid().optional(),
+  tipoMedicamentoId: z.string().uuid().optional(),
   presentacionId: z.string().uuid().optional(),
   unidadMedidaId: z.string().uuid(),
   compraPresentacionId: z.string().uuid(),
@@ -103,6 +109,12 @@ const masterPresentationSchema = z.object({
   activo: z.boolean().optional(),
 })
 
+const masterMedicationTypeSchema = z.object({
+  nombre: z.string().min(2).max(120),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
 const masterUnitSchema = z.object({
   codigo: z.string().min(1).max(20).optional(),
   nombre: z.string().min(2).max(80),
@@ -158,6 +170,24 @@ export async function productRoutes(app: FastifyInstance) {
   app.delete('/masters/laboratories/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
     return deleteMasterLaboratory(params.id, request)
+  })
+
+  app.get('/masters/medication-types', async (request) => listMasterMedicationTypes(request))
+
+  app.post('/masters/medication-types', async (request) => {
+    const body = masterMedicationTypeSchema.parse(request.body)
+    return createMasterMedicationType(body, request)
+  })
+
+  app.patch('/masters/medication-types/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = masterMedicationTypeSchema.parse(request.body)
+    return updateMasterMedicationType(params.id, body, request)
+  })
+
+  app.delete('/masters/medication-types/:id', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    return deleteMasterMedicationType(params.id, request)
   })
 
   app.get('/masters/presentations', async (request) => listMasterPresentations(request))

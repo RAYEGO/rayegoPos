@@ -221,6 +221,7 @@ export function VentasPage() {
   const [dashboard, setDashboard] = useState<SalesDashboardResponse | null>(null)
   const [search, setSearch] = useState('')
   const [branchFilter, setBranchFilter] = useState<string>('TODAS')
+  const [medicationTypeFilter, setMedicationTypeFilter] = useState<string>('TODOS')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [cartItems, setCartItems] = useState<LocalCartItem[]>([])
@@ -272,6 +273,7 @@ export function VentasPage() {
       const response = await salesService.getDashboard(accessToken, {
         search,
         branchId: branchFilter === 'TODAS' ? undefined : branchFilter,
+        medicationTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
       })
 
       setDashboard(response)
@@ -280,7 +282,7 @@ export function VentasPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, branchFilter, search])
+  }, [accessToken, branchFilter, medicationTypeFilter, search])
 
   useEffect(() => {
     void loadDashboard()
@@ -288,6 +290,7 @@ export function VentasPage() {
 
   const options = {
     branches: dashboard?.options?.branches ?? [],
+    medicationTypes: dashboard?.options?.medicationTypes ?? [],
     customers: dashboard?.options?.customers ?? [],
     paymentMethods: dashboard?.options?.paymentMethods ?? [],
   }
@@ -724,7 +727,7 @@ export function VentasPage() {
 
         <TabsContent value="mostrador" className="space-y-4 pt-4">
           <Card className="p-4">
-            <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_220px]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -743,6 +746,19 @@ export function VentasPage() {
                   {options.branches.map((branch) => (
                     <SelectItem key={branch.id} value={branch.id}>
                       {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={medicationTypeFilter} onValueChange={setMedicationTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Tipo medicamento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos</SelectItem>
+                  {options.medicationTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.id}>
+                      {type.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -788,7 +804,10 @@ export function VentasPage() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-foreground">{product.name}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{product.sku}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {product.sku}
+                            {product.medicationTypeName ? ` · ${product.medicationTypeName}` : ''}
+                          </p>
                         </div>
                       </div>
 

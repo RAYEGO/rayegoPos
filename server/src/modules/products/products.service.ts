@@ -26,6 +26,12 @@ const productInclude = {
       pais: true,
     },
   },
+  tipoMedicamento: {
+    select: {
+      id: true,
+      nombre: true,
+    },
+  },
   presentacion: {
     select: {
       id: true,
@@ -123,6 +129,7 @@ type ListProductsFilters = {
   status?: string
   categoryId?: string
   laboratoryId?: string
+  medicationTypeId?: string
   page?: number
   pageSize?: number
   sortBy?: 'name' | 'stockUnits' | 'createdAt'
@@ -132,6 +139,7 @@ type ListProductsFilters = {
 type CreateProductPayload = {
   categoriaId: string
   laboratorioId?: string
+  tipoMedicamentoId?: string
   presentacionId?: string
   unidadMedidaId: string
   compraPresentacionId: string
@@ -402,6 +410,8 @@ function mapProduct(product: ProductWithRelations) {
     laboratory: product.laboratorio?.nombre ?? null,
     laboratoryId: product.laboratorio?.id ?? null,
     laboratoryCountry: product.laboratorio?.pais ?? null,
+    medicationType: product.tipoMedicamento?.nombre ?? null,
+    medicationTypeId: product.tipoMedicamento?.id ?? null,
     presentation: basePackaging?.presentacion.nombre ?? product.presentacion?.nombre ?? null,
     presentationId: basePackaging?.presentacion.id ?? product.presentacion?.id ?? null,
     unit: product.unidadMedida.nombre,
@@ -468,6 +478,7 @@ export async function listProductCatalog(
     ...(filters.status ? { estado: filters.status as never } : {}),
     ...(filters.categoryId ? { categoriaId: filters.categoryId } : {}),
     ...(filters.laboratoryId ? { laboratorioId: filters.laboratoryId } : {}),
+    ...(filters.medicationTypeId ? { tipoMedicamentoId: filters.medicationTypeId } : {}),
     ...(search
       ? {
           OR: [
@@ -717,7 +728,7 @@ export async function listProductCatalog(
 
 export async function getProductOptions(request: FastifyRequest) {
   const { companyId } = await getAuthContext(request)
-  const [categories, laboratories, presentations, units, activePrinciples] =
+  const [categories, laboratories, medicationTypes, presentations, units, activePrinciples] =
     await Promise.all([
       prisma.categoria.findMany({
         where: {
@@ -744,6 +755,27 @@ export async function getProductOptions(request: FastifyRequest) {
         },
       }),
       prisma.laboratorio.findMany({
+        where: {
+          deletedAt: null,
+          activo: true,
+          empresaId: companyId,
+        },
+        orderBy: {
+          nombre: 'asc',
+        },
+        include: {
+          _count: {
+            select: {
+              productos: {
+                where: {
+                  deletedAt: null,
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.tipoMedicamento.findMany({
         where: {
           deletedAt: null,
           activo: true,
@@ -824,6 +856,11 @@ export async function getProductOptions(request: FastifyRequest) {
       country: laboratory.pais,
       skuCount: laboratory._count.productos,
     })),
+    medicationTypes: medicationTypes.map((type) => ({
+      id: type.id,
+      name: type.nombre,
+      skuCount: type._count.productos,
+    })),
     presentations: presentations.map((presentation) => ({
       id: presentation.id,
       name: presentation.nombre,
@@ -855,6 +892,12 @@ type MasterCategoryPayload = {
 type MasterLaboratoryPayload = {
   nombre: string
   pais?: string
+  descripcion?: string
+  activo?: boolean
+}
+
+type MasterMedicationTypePayload = {
+  nombre: string
   descripcion?: string
   activo?: boolean
 }
@@ -970,6 +1013,34 @@ async function resolveUniqueCodeForPresentation(
     const candidate = `${trimmed}${suffix}`.slice(0, 30)
 
     const exists = await prisma.presentacion.findFirst({
+      where: {
+        deletedAt: null,
+        empresaId: companyId,
+        codigo: candidate,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    })
+
+    if (!exists) return candidate
+  }
+
+  return normalized.slice(0, 30)
+}
+
+async function resolveUniqueCodeForMedicationType(
+  companyId: string,
+  baseCode: string,
+  excludeId?: string,
+) {
+  const normalized = normalizeCode(baseCode, 30)
+
+  for (let attempt = 0; attempt < 99; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${attempt + 1}`
+    const trimmed = normalized.slice(0, Math.max(1, 30 - suffix.length))
+    const candidate = `${trimmed}${suffix}`.slice(0, 30)
+
+    const exists = await prisma.tipoMedicamento.findFirst({
       where: {
         deletedAt: null,
         empresaId: companyId,
@@ -1382,6 +1453,153 @@ export async function deleteMasterLaboratory(
   return { success: true }
 }
 
+export async function listMasterMedicationTypes(request: FastifyRequest) {
+  const { companyId } = await getAuthContext(request)
+  const medicationTypes = await prisma.tipoMedicamento.findMany({
+    where: {
+      deletedAt: null,
+      empresaId: companyId,
+    },
+    orderBy: [{ nombre: 'asc' }],
+    include: {
+      _count: {
+        select: {
+          productos: true,
+        },
+      },
+    },
+  })
+
+  return {
+    rows: medicationTypes.map((type) => ({
+      id: type.id,
+      codigo: type.codigo,
+      nombre: type.nombre,
+      descripcion: type.descripcion,
+      activo: type.activo,
+      productCount: type._count.productos,
+      createdAt: type.createdAt.toISOString(),
+      updatedAt: type.updatedAt.toISOString(),
+    })),
+  }
+}
+
+export async function createMasterMedicationType(
+  payload: MasterMedicationTypePayload,
+  request: FastifyRequest,
+) {
+  const { userId, companyId } = await getAuthContext(request)
+
+  try {
+    const codigo = await resolveUniqueCodeForMedicationType(companyId, payload.nombre)
+    const created = await prisma.tipoMedicamento.create({
+      data: {
+        empresaId: companyId,
+        codigo,
+        nombre: normalizeName(payload.nombre),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true, id: created.id }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe un tipo de medicamento con ese código o nombre.')
+    }
+    throw error
+  }
+}
+
+export async function updateMasterMedicationType(
+  medicationTypeId: string,
+  payload: MasterMedicationTypePayload,
+  request: FastifyRequest,
+) {
+  const { userId, companyId } = await getAuthContext(request)
+
+  try {
+    const codigo = await resolveUniqueCodeForMedicationType(
+      companyId,
+      payload.nombre,
+      medicationTypeId,
+    )
+    await prisma.tipoMedicamento.update({
+      where: {
+        id: medicationTypeId,
+        deletedAt: null,
+        empresaId: companyId,
+      },
+      data: {
+        codigo,
+        nombre: normalizeName(payload.nombre),
+        descripcion: toOptionalString(payload.descripcion),
+        activo: payload.activo ?? true,
+        updatedById: userId,
+      },
+    })
+
+    return { success: true }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw createHttpError(409, 'Ya existe un tipo de medicamento con ese código o nombre.')
+    }
+    throw error
+  }
+}
+
+export async function deleteMasterMedicationType(
+  medicationTypeId: string,
+  request: FastifyRequest,
+) {
+  const { companyId } = await getAuthContext(request)
+
+  const medicationType = await prisma.tipoMedicamento.findFirst({
+    where: {
+      id: medicationTypeId,
+      deletedAt: null,
+      empresaId: companyId,
+    },
+    select: { id: true },
+  })
+
+  if (!medicationType) {
+    throw createHttpError(404, 'El tipo de medicamento no existe.')
+  }
+
+  const productCount = await prisma.producto.count({
+    where: {
+      tipoMedicamentoId: medicationTypeId,
+      empresaId: companyId,
+    },
+  })
+
+  if (productCount > 0) {
+    throw createHttpError(
+      409,
+      buildMasterInUseDeleteMessage(
+        `Referencias detectadas: ${productCount} producto(s) asociado(s).`,
+      ),
+    )
+  }
+
+  await prisma.tipoMedicamento.delete({
+    where: {
+      id: medicationTypeId,
+    },
+  })
+
+  return { success: true }
+}
+
 export async function listMasterPresentations(request: FastifyRequest) {
   const { companyId } = await getAuthContext(request)
   const presentations = await prisma.presentacion.findMany({
@@ -1707,6 +1925,7 @@ export async function createProduct(
           empresaId: companyId,
           categoriaId: payload.categoriaId,
           laboratorioId: toOptionalString(payload.laboratorioId),
+          tipoMedicamentoId: toOptionalString(payload.tipoMedicamentoId),
           presentacionId: toOptionalString(payload.presentacionId),
           compraPresentacionId: payload.compraPresentacionId,
           unidadMedidaId: payload.unidadMedidaId,
@@ -1836,6 +2055,7 @@ export async function updateProduct(
         data: {
           categoriaId: payload.categoriaId,
           laboratorioId: toOptionalString(payload.laboratorioId),
+          tipoMedicamentoId: toOptionalString(payload.tipoMedicamentoId),
           presentacionId: toOptionalString(payload.presentacionId),
           compraPresentacionId: payload.compraPresentacionId,
           unidadMedidaId: payload.unidadMedidaId,
