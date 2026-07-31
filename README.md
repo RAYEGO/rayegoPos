@@ -15,7 +15,7 @@ npm run dev
 npm run dev:server
 npm run build
 npm run build:server
-npm run env:check:dev
+npm run env:current
 npm run prisma:validate
 npm run lint
 npm run prisma:seed
@@ -41,6 +41,7 @@ Usa `.env.example` como referencia de variables requeridas sin credenciales.
 
 - `APP_ENV`
 - `DATABASE_URL`
+- `DIRECT_URL`
 - `JWT_SECRET`
 - `PORT`
 - `HOST`
@@ -53,10 +54,55 @@ Usa `.env.example` como referencia de variables requeridas sin credenciales.
 
 ### Cómo funciona la carga automática
 
-- Los scripts locales usan `dotenv-cli` para cargar automáticamente `.env.development`.
-- Los scripts `*:prod-local` cargan `.env.production` para pruebas locales de producción.
-- Prisma sigue leyendo `env("DATABASE_URL")` desde `schema.prisma`, pero ahora el valor correcto se inyecta según el script ejecutado.
+- Los scripts locales usan `scripts/run-with-project-env.mjs` para resolver el entorno antes de ejecutar Vite, Fastify o Prisma.
+- Regla de ramas:
+  - `main` o `master` -> `.env.production`
+  - `develop` -> `.env.development`
+  - cualquier otra rama local -> `.env.development`
+- Los scripts `*:prod-local` fuerzan `.env.production` sin depender de la rama actual.
+- Prisma CLI usa `prisma.config.ts`, resuelve automáticamente el archivo `.env` correcto según la rama y deja de depender del `.env` raíz.
+- Dentro de `prisma.config.ts`, Rayego POS remapea `DATABASE_URL` hacia `DIRECT_URL` cuando Prisma CLI está corriendo en local. Eso evita que `migrate`, `db pull` y `db push` caigan en el pooler de Supabase.
+- `DATABASE_URL` queda como conexión principal del entorno activo.
+- `DATABASE_URL` se usa para runtime y tráfico pooled del backend local.
+- `DIRECT_URL` se usa exclusivamente para Prisma CLI cuando el proveedor requiere conexión directa, como Supabase.
 - Railway no usa `.env.development` ni `.env.production`; en deploy usa únicamente las variables definidas en Railway.
+- Vercel tampoco usa archivos `.env*` del repositorio; usa solo sus variables configuradas en Vercel.
+
+### Comandos útiles
+
+```bash
+npm run env:current
+npm run env:current:prod-local
+```
+
+Estos comandos muestran qué archivo `.env` resolverá el proyecto según la rama actual.
+
+### Prisma + Supabase DEV
+
+En `develop`, Rayego POS usa dos URLs distintas:
+
+```env
+# Runtime local / backend
+DATABASE_URL="postgresql://...@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=require"
+
+# Prisma CLI en red IPv4-only
+DIRECT_URL="postgresql://...@aws-0-[region].pooler.supabase.com:5432/postgres?sslmode=require&connect_timeout=30"
+```
+
+Uso operativo:
+
+- `npm run dev:server` / backend local -> `DATABASE_URL`
+- `npx prisma migrate status` -> `DIRECT_URL`
+- `npx prisma db pull` -> `DIRECT_URL`
+- `npx prisma migrate dev` -> `DIRECT_URL`
+- `npx prisma db push` -> `DIRECT_URL`
+
+Importante:
+
+- El pooler transaccional de Supabase (`:6543`) es correcto para runtime.
+- Prisma CLI no debe usar el pooler transaccional `:6543`.
+- En redes solo IPv4, Prisma CLI puede usar el session pooler `:5432` de Supavisor.
+- Si el entorno dispone de IPv6 o el proyecto tiene el IPv4 add-on de Supabase, `DIRECT_URL` puede volver al host directo `db.[project-ref].supabase.co:5432`.
 
 ## Autenticación
 
@@ -120,5 +166,5 @@ Comportamiento en Railway:
 
 Detalles:
 
-- `railway:build` ejecuta scripts sin `dotenv-cli`, por lo que Railway depende solo de sus variables de entorno reales.
+- `railway:build` ejecuta scripts sin el resolvedor local, por lo que Railway depende solo de sus variables de entorno reales.
 - `start:railway` también arranca sin leer archivos `.env*` del repositorio.

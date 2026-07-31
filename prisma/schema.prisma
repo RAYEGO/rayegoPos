@@ -37,12 +37,12 @@ model Empresa {
   impuestos         Impuesto[]
   laboratorios      Laboratorio[]
   presentaciones    Presentacion[]
-  tiposComerciales  TipoComercial[]
   principiosActivos PrincipioActivo[]
   productos         Producto[]
   proveedores       Proveedor[]
   seriesDocumentos  SerieDocumento[]
   sucursales        Sucursal[]
+  tiposComerciales  TipoComercial[]
   unidadesMedida    UnidadMedida[]
   usuarios          Usuario[]
 
@@ -178,8 +178,6 @@ model Usuario {
   permisosActualizados                        Permiso[]                       @relation("PermisoUpdatedBy")
   presentacionesCreadas                       Presentacion[]                  @relation("PresentacionCreatedBy")
   presentacionesActualizadas                  Presentacion[]                  @relation("PresentacionUpdatedBy")
-  tiposComercialesCreados                     TipoComercial[]                 @relation("TipoComercialCreatedBy")
-  tiposComercialesActualizados                TipoComercial[]                 @relation("TipoComercialUpdatedBy")
   principiosCreados                           PrincipioActivo[]               @relation("PrincipioActivoCreatedBy")
   principiosActualizados                      PrincipioActivo[]               @relation("PrincipioActivoUpdatedBy")
   productoImpuestosCreados                    ProductoImpuesto[]              @relation("ProductoImpuestoCreatedBy")
@@ -198,6 +196,8 @@ model Usuario {
   seriesActualizadas                          SerieDocumento[]                @relation("SerieDocumentoUpdatedBy")
   sucursalesCreadas                           Sucursal[]                      @relation("SucursalCreatedBy")
   sucursalesActualizadas                      Sucursal[]                      @relation("SucursalUpdatedBy")
+  tiposComercialesCreados                     TipoComercial[]                 @relation("TipoComercialCreatedBy")
+  tiposComercialesActualizados                TipoComercial[]                 @relation("TipoComercialUpdatedBy")
   unidadesCreadas                             UnidadMedida[]                  @relation("UnidadMedidaCreatedBy")
   unidadesActualizadas                        UnidadMedida[]                  @relation("UnidadMedidaUpdatedBy")
   usuarioRolesCreados                         UsuarioRol[]                    @relation("UsuarioRolCreatedBy")
@@ -448,6 +448,7 @@ model UnidadMedida {
 
 model TipoComercial {
   id          String     @id @default(uuid()) @db.Uuid
+  empresaId   String     @map("empresa_id") @db.Uuid
   codigo      String     @db.VarChar(30)
   nombre      String     @db.VarChar(120)
   descripcion String?    @db.VarChar(255)
@@ -457,11 +458,10 @@ model TipoComercial {
   deletedAt   DateTime?  @map("deleted_at")
   createdById String?    @map("created_by") @db.Uuid
   updatedById String?    @map("updated_by") @db.Uuid
-  empresaId   String     @map("empresa_id") @db.Uuid
+  productos   Producto[]
   createdBy   Usuario?   @relation("TipoComercialCreatedBy", fields: [createdById], references: [id])
   empresa     Empresa    @relation(fields: [empresaId], references: [id])
   updatedBy   Usuario?   @relation("TipoComercialUpdatedBy", fields: [updatedById], references: [id])
-  productos   Producto[]
 
   @@unique([empresaId, codigo])
   @@unique([empresaId, nombre])
@@ -471,22 +471,22 @@ model TipoComercial {
 }
 
 model PrincipioActivo {
-  id          String                    @id @default(uuid()) @db.Uuid
-  codigo      String                    @db.VarChar(30)
-  nombre      String                    @unique @db.VarChar(150)
-  descripcion String?                   @db.VarChar(255)
-  activo      Boolean                   @default(true)
-  createdAt   DateTime                  @default(now()) @map("created_at")
-  updatedAt   DateTime                  @updatedAt @map("updated_at")
-  deletedAt   DateTime?                 @map("deleted_at")
-  createdById String?                   @map("created_by") @db.Uuid
-  updatedById String?                   @map("updated_by") @db.Uuid
-  empresaId   String                    @map("empresa_id") @db.Uuid
-  createdBy   Usuario?                  @relation("PrincipioActivoCreatedBy", fields: [createdById], references: [id])
-  empresa     Empresa                   @relation(fields: [empresaId], references: [id])
-  updatedBy         Usuario?                  @relation("PrincipioActivoUpdatedBy", fields: [updatedById], references: [id])
-  productosPrincipal Producto[]                 @relation("ProductoPrincipioActivoPrincipal")
-  productos         ProductoPrincipioActivo[]
+  id                 String                    @id @default(uuid()) @db.Uuid
+  nombre             String                    @unique @db.VarChar(150)
+  descripcion        String?                   @db.VarChar(255)
+  activo             Boolean                   @default(true)
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  deletedAt          DateTime?                 @map("deleted_at")
+  createdById        String?                   @map("created_by") @db.Uuid
+  updatedById        String?                   @map("updated_by") @db.Uuid
+  empresaId          String                    @map("empresa_id") @db.Uuid
+  codigo             String                    @db.VarChar(30)
+  createdBy          Usuario?                  @relation("PrincipioActivoCreatedBy", fields: [createdById], references: [id])
+  empresa            Empresa                   @relation(fields: [empresaId], references: [id])
+  updatedBy          Usuario?                  @relation("PrincipioActivoUpdatedBy", fields: [updatedById], references: [id])
+  productos          ProductoPrincipioActivo[]
+  productosPrincipal Producto[]                @relation("ProductoPrincipioActivoPrincipal")
 
   @@unique([empresaId, nombre])
   @@index([empresaId])
@@ -498,8 +498,6 @@ model PrincipioActivo {
 model Producto {
   id                             String                          @id @default(uuid()) @db.Uuid
   categoriaId                    String                          @map("categoria_id") @db.Uuid
-  tipoComercialId                String?                         @map("tipo_comercial_id") @db.Uuid
-  principioActivoId              String?                         @map("principio_activo_id") @db.Uuid
   laboratorioId                  String?                         @map("laboratorio_id") @db.Uuid
   presentacionId                 String?                         @map("presentacion_id") @db.Uuid
   unidadMedidaId                 String                          @map("unidad_medida_id") @db.Uuid
@@ -528,6 +526,8 @@ model Producto {
   unidadesPorBlister             Int?                            @map("unidades_por_blister")
   empresaId                      String                          @map("empresa_id") @db.Uuid
   compraPresentacionId           String?                         @map("compra_presentacion_id") @db.Uuid
+  tipoComercialId                String?                         @map("tipo_comercial_id") @db.Uuid
+  principioActivoId              String?                         @map("principio_activo_id") @db.Uuid
   cargasInventarioInicialDetalle CargaInventarioInicialDetalle[]
   detalleCompras                 DetalleCompra[]
   detalleVentas                  DetalleVenta[]
