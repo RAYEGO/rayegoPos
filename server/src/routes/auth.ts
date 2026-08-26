@@ -4,6 +4,7 @@ import {
   getCurrentSession,
   login,
   logout,
+  refreshSession,
   requestPasswordReset,
   resetPassword,
 } from '../modules/auth/auth.service.js'
@@ -12,6 +13,10 @@ const loginSchema = z.object({
   email: z.string().min(1),
   password: z.string().min(1),
   branchId: z.string().uuid().optional(),
+})
+
+const refreshSchema = z.object({
+  refreshToken: z.string().min(1),
 })
 
 const forgotPasswordSchema = z.object({
@@ -32,6 +37,11 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/me', async (request, reply) => getCurrentSession(request, reply))
 
   app.post('/logout', async (request, reply) => logout(request, reply))
+
+  app.post('/refresh', async (request, reply) => {
+    const body = refreshSchema.parse(request.body)
+    return refreshSession(body, request, reply)
+  })
 
   app.post('/forgot-password', async (request, reply) => {
     const body = forgotPasswordSchema.parse(request.body)

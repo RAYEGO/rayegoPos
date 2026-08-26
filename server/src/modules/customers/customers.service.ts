@@ -1,7 +1,17 @@
-import { EstadoVenta, Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
+import {
+  CodigoFormaPago,
+  EstadoAperturaCaja,
+  EstadoVenta,
+  OperacionCaja,
+  Prisma,
+  TipoDocumentoIdentidad,
+  TipoMovimientoCaja,
+  TipoPersona,
+} from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
+import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
 type CustomersFilters = {
   search?: string
@@ -26,6 +36,13 @@ type CreateCustomerPayload = {
 }
 
 type UpdateCustomerPayload = Partial<CreateCustomerPayload> & { activo?: boolean }
+
+type RegisterCustomerPaymentPayload = {
+  monto: number
+  formaPagoId: string
+  referenciaExterna?: string | null
+  observaciones?: string | null
+}
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -470,15 +487,31 @@ export async function getCustomerSales(customerId: string, request: FastifyReque
 export async function getCustomerAccountStatement(customerId: string, request: FastifyRequest) {
   const { companyId } = await getAuthContext(request)
 
-  const customer = await prisma.cliente.findFirst({
-    where: { id: customerId, deletedAt: null, empresaId: companyId },
-    select: {
-      id: true,
-      permitirCredito: true,
-      limiteCredito: true,
-      saldoPendiente: true,
-    },
-  })
+  const [customer, paymentMethods] = await Promise.all([
+    prisma.cliente.findFirst({
+      where: { id: customerId, deletedAt: null, empresaId: companyId },
+      select: {
+        id: true,
+        permitirCredito: true,
+        limiteCredito: true,
+        saldoPendiente: true,
+      },
+    }),
+    prisma.formaPago.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+      },
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        requiereReferencia: true,
+        permiteVuelto: true,
+      },
+      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+    }),
+  ])
 
   if (!customer) {
     throw createHttpError(404, 'El cliente no fue encontrado.')
@@ -488,33 +521,37 @@ export async function getCustomerAccountStatement(customerId: string, request: F
   const outstandingAmount = toMoney(customer.saldoPendiente)
   const availableCredit = toMoney(Math.max(0, creditLimit - outstandingAmount))
 
-  const creditSales = await prisma.venta.findMany({
+  const allCustomerSales = await prisma.venta.findMany({
     where: {
       deletedAt: null,
       clienteId: customerId,
       sucursal: {
         empresaId: companyId,
       },
-      saldoPendiente: {
-        gt: 0,
-      },
       estado: {
         in: [EstadoVenta.EMITIDA, EstadoVenta.COBRADA, EstadoVenta.BORRADOR, EstadoVenta.ANULADA],
       },
     },
-    select: {
-      id: true,
-      serie: true,
-      numero: true,
-      fechaEmision: true,
-      updatedAt: true,
-      estado: true,
-      saldoPendiente: true,
+    include: {
+      pagos: {
+        where: {
+          deletedAt: null,
+        },
+        include: {
+          formaPago: {
+            select: {
+              nombre: true,
+              codigo: true,
+            },
+          },
+        },
+        orderBy: [{ fechaPago: 'asc' }, { createdAt: 'asc' }],
+      },
     },
     orderBy: [{ fechaEmision: 'asc' }, { createdAt: 'asc' }],
   })
 
-  const movements: Array<{
+  type AccountMovement = {
     id: string
     createdAt: string
     movement: string
@@ -523,31 +560,79 @@ export async function getCustomerAccountStatement(customerId: string, request: F
     paymentAmount: number
     balanceAmount: number
     saleId: string
+    paymentMethodName: string | null
+    paymentMethodCode: string | null
+    reference: string | null
+  }
+
+  const movements: AccountMovement[] = []
+  const pendingSales: Array<{
+    saleId: string
+    document: string
+    issueDate: string
+    outstandingAmount: number
   }> = []
 
-  for (const sale of creditSales) {
-    const chargeAmount = toMoney(sale.saldoPendiente)
+  let totalPurchased = 0
+  let totalPaid = 0
+
+  for (const sale of allCustomerSales) {
+    const isBorradorOAnulada =
+      sale.estado === EstadoVenta.ANULADA || sale.estado === EstadoVenta.BORRADOR
+    const saleTotal = toMoney(sale.total)
+    const saleOutstanding = toMoney(sale.saldoPendiente)
+
+    if (!isBorradorOAnulada) {
+      totalPurchased += saleTotal
+    }
+
+    if (isBorradorOAnulada) {
+      continue
+    }
+
+    const documentNumber = formatDocumentNumber(sale)
+
     movements.push({
       id: `sale-${sale.id}`,
       createdAt: sale.fechaEmision.toISOString(),
-      movement: 'Venta a crédito',
-      document: formatDocumentNumber(sale),
-      chargeAmount,
+      movement: 'Venta',
+      document: documentNumber,
+      chargeAmount: saleTotal,
       paymentAmount: 0,
       balanceAmount: 0,
       saleId: sale.id,
+      paymentMethodName: null,
+      paymentMethodCode: null,
+      reference: null,
     })
 
-    if (sale.estado === EstadoVenta.ANULADA) {
+    for (const payment of sale.pagos) {
+      const paymentAmount = toMoney(payment.monto)
+      if (paymentAmount <= 0.0001) {
+        continue
+      }
+      totalPaid += paymentAmount
       movements.push({
-        id: `cancel-${sale.id}`,
-        createdAt: sale.updatedAt.toISOString(),
-        movement: 'Anulación de venta',
-        document: formatDocumentNumber(sale),
+        id: `sale-payment-${payment.id}`,
+        createdAt: payment.fechaPago.toISOString(),
+        movement: payment.referenciaExterna ? 'Pago de deuda' : 'Pago de deuda',
+        document: documentNumber,
         chargeAmount: 0,
-        paymentAmount: chargeAmount,
+        paymentAmount,
         balanceAmount: 0,
         saleId: sale.id,
+        paymentMethodName: payment.formaPago?.nombre ?? null,
+        paymentMethodCode: payment.formaPago?.codigo ?? null,
+        reference: payment.referenciaExterna ?? null,
+      })
+    }
+
+    if (saleOutstanding > 0.0001) {
+      pendingSales.push({
+        saleId: sale.id,
+        document: documentNumber,
+        issueDate: sale.fechaEmision.toISOString(),
+        outstandingAmount: saleOutstanding,
       })
     }
   }
@@ -560,12 +645,325 @@ export async function getCustomerAccountStatement(customerId: string, request: F
       return { ...item, balanceAmount: runningBalance }
     })
 
+  const outstanding = Math.max(0, totalPurchased - totalPaid)
+  totalPaid = Number(totalPaid.toFixed(2))
+  totalPurchased = Number(totalPurchased.toFixed(2))
+  const totals = {
+    totalPurchased,
+    totalPaid,
+    outstandingAmount: Number(outstanding.toFixed(2)),
+  }
+
   return {
     summary: {
       creditLimit,
       outstandingAmount,
       availableCredit,
     },
+    totals,
+    options: {
+      paymentMethods: paymentMethods.map((method) => {
+        const classification = classifyPaymentMethod(method.codigo)
+        return {
+          id: method.id,
+          name: method.nombre,
+          code: method.codigo,
+          category: classification.category,
+          digitalSubmethod: classification.digitalSubmethod ?? undefined,
+          requiresReference: method.requiereReferencia,
+          allowsChange: method.permiteVuelto,
+        }
+      }),
+    },
+    pendingSales: pendingSales.sort((a, b) => a.issueDate.localeCompare(b.issueDate)),
     movements: mappedMovements,
   }
+}
+
+export async function registerCustomerPayment(
+  customerId: string,
+  payload: RegisterCustomerPaymentPayload,
+  request: FastifyRequest,
+) {
+  const { userId, branchId, companyId } = await getAuthContext(request)
+
+  const amountRaw = Number(payload.monto)
+  if (!Number.isFinite(amountRaw) || amountRaw <= 0) {
+    throw createHttpError(400, 'El monto del pago debe ser mayor a 0.')
+  }
+  const amount = Number(amountRaw.toFixed(2))
+
+  const paymentMethodId = payload.formaPagoId?.trim()
+  if (!paymentMethodId) {
+    throw createHttpError(400, 'Selecciona un medio de pago.')
+  }
+
+  const customer = await prisma.cliente.findFirst({
+    where: { id: customerId, deletedAt: null, empresaId: companyId },
+    select: {
+      id: true,
+      saldoPendiente: true,
+    },
+  })
+
+  if (!customer) {
+    throw createHttpError(404, 'El cliente no fue encontrado.')
+  }
+
+  const paymentMethod = await prisma.formaPago.findFirst({
+    where: {
+      id: paymentMethodId,
+      deletedAt: null,
+      activo: true,
+    },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+    },
+  })
+
+  if (!paymentMethod) {
+    throw createHttpError(404, 'El medio de pago seleccionado no está disponible.')
+  }
+
+  const pendingSales = await prisma.venta.findMany({
+    where: {
+      deletedAt: null,
+      clienteId: customer.id,
+      sucursal: {
+        empresaId: companyId,
+      },
+      saldoPendiente: {
+        gt: 0,
+      },
+      estado: {
+        in: [EstadoVenta.EMITIDA, EstadoVenta.COBRADA],
+      },
+    },
+    select: {
+      id: true,
+      serie: true,
+      numero: true,
+      saldoPendiente: true,
+      estado: true,
+    },
+    orderBy: [{ fechaEmision: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+  })
+
+  const totalPending = Number(
+    pendingSales.reduce((sum, sale) => sum.plus(sale.saldoPendiente), new Prisma.Decimal(0)).toFixed(2),
+  )
+
+  if (totalPending <= 0) {
+    throw createHttpError(400, 'El cliente no registra saldo pendiente para cobrar.')
+  }
+
+  if (amount > totalPending + 0.0001) {
+    const formatted = new Intl.NumberFormat('es-PE', {
+      style: 'currency',
+      currency: 'PEN',
+      minimumFractionDigits: 2,
+    }).format(totalPending)
+    throw createHttpError(
+      400,
+      `El monto no puede superar el saldo pendiente de ${formatted}.`,
+    )
+  }
+
+  const pendingOpening = await prisma.aperturaCaja.findFirst({
+    where: {
+      deletedAt: null,
+      estado: EstadoAperturaCaja.ABIERTA,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+      },
+    },
+    select: {
+      id: true,
+      fechaApertura: true,
+      cierrePendiente: true,
+    },
+  })
+
+  function isSameDateInTimeZone(one: Date, two: Date) {
+    const oneLima = new Date(one.toLocaleString('en-US', { timeZone: 'America/Lima' }))
+    const twoLima = new Date(two.toLocaleString('en-US', { timeZone: 'America/Lima' }))
+    return (
+      oneLima.getFullYear() === twoLima.getFullYear() &&
+      oneLima.getMonth() === twoLima.getMonth() &&
+      oneLima.getDate() === twoLima.getDate()
+    )
+  }
+
+  if (pendingOpening) {
+    const now = new Date()
+    const closePending =
+      pendingOpening.cierrePendiente || !isSameDateInTimeZone(pendingOpening.fechaApertura, now)
+
+    if (closePending) {
+      if (!pendingOpening.cierrePendiente) {
+        await prisma.aperturaCaja.update({
+          where: { id: pendingOpening.id },
+          data: {
+            cierrePendiente: true,
+            updatedById: userId,
+          },
+        })
+      }
+
+      throw createHttpError(
+        409,
+        'Caja pendiente de cierre. Cierra la caja del día anterior para registrar pagos.',
+      )
+    }
+  }
+
+  const isCashPayment = paymentMethod.codigo === CodigoFormaPago.EFECTIVO
+
+  let effectiveOpening = pendingOpening
+  if (!effectiveOpening) {
+    if (isCashPayment) {
+      throw createHttpError(
+        400,
+        'No hay una caja abierta para esta sucursal. Abre la caja antes de registrar pagos en efectivo.',
+      )
+    }
+
+    effectiveOpening =
+      (await prisma.aperturaCaja.findFirst({
+        where: {
+          caja: {
+            sucursalId: branchId,
+          },
+          estado: EstadoAperturaCaja.ABIERTA,
+          deletedAt: null,
+          cierrePendiente: false,
+        },
+        orderBy: { fechaApertura: 'desc' },
+      })) ?? null
+  }
+
+  if (!effectiveOpening) {
+    throw createHttpError(
+      400,
+      'No hay una caja abierta para esta sucursal. Abre una caja antes de registrar pagos.',
+    )
+  }
+
+  const reference = toOptionalString(payload.referenciaExterna)
+  const notes = toOptionalString(payload.observaciones)
+
+  const result = await prisma.$transaction(
+    async (tx) => {
+      let remaining = amount
+      const createdVentaPagos: Array<{
+        id: string
+        ventaId: string
+        monto: number
+        serie: string | null
+        numero: string | null
+      }> = []
+
+      for (const sale of pendingSales) {
+        if (remaining <= 0.0001) {
+          break
+        }
+        const saleOutstanding = Number(Number(sale.saldoPendiente).toFixed(2))
+        if (saleOutstanding <= 0) {
+          continue
+        }
+        const applyAmount = Number(Math.min(remaining, saleOutstanding).toFixed(2))
+        const newSaleOutstanding = Number(Math.max(0, saleOutstanding - applyAmount).toFixed(2))
+        const newState =
+          newSaleOutstanding <= 0.0001 ? EstadoVenta.COBRADA : sale.estado === EstadoVenta.COBRADA ? EstadoVenta.COBRADA : EstadoVenta.EMITIDA
+
+        const ventaPago = await tx.ventaPago.create({
+          data: {
+            ventaId: sale.id,
+            formaPagoId: paymentMethod.id,
+            monto: toDecimal(applyAmount, 2),
+            referenciaExterna: reference,
+            observaciones: notes,
+            createdById: userId,
+            updatedById: userId,
+          },
+          select: {
+            id: true,
+            ventaId: true,
+            monto: true,
+          },
+        })
+
+        await tx.venta.update({
+          where: { id: sale.id },
+          data: {
+            saldoPendiente: toDecimal(newSaleOutstanding, 2),
+            estado: newState,
+            updatedById: userId,
+          },
+        })
+
+        createdVentaPagos.push({
+          id: ventaPago.id,
+          ventaId: sale.id,
+          monto: applyAmount,
+          serie: sale.serie,
+          numero: sale.numero,
+        })
+
+        remaining = Number((remaining - applyAmount).toFixed(2))
+      }
+
+      const newCustomerOutstanding = Number(Math.max(0, totalPending - amount).toFixed(2))
+      await tx.cliente.update({
+        where: { id: customer.id },
+        data: {
+          saldoPendiente: toDecimal(newCustomerOutstanding, 2),
+          updatedById: userId,
+        },
+      })
+
+      const firstVentaPago = createdVentaPagos[0]
+      const mainDocument =
+        firstVentaPago && firstVentaPago.serie && firstVentaPago.numero
+          ? `${firstVentaPago.serie}-${firstVentaPago.numero}`
+          : `CLT-${customer.id.slice(0, 8).toUpperCase()}`
+
+      const movementNotesParts: string[] = []
+      movementNotesParts.push('Pago de deuda de cliente')
+      if (notes) movementNotesParts.push(notes)
+      if (createdVentaPagos.length > 1) {
+        movementNotesParts.push(`Aplicado a ${createdVentaPagos.length} comprobantes`)
+      }
+
+      await tx.movimientoCaja.create({
+        data: {
+          aperturaCajaId: effectiveOpening.id,
+          tipo: TipoMovimientoCaja.VENTA,
+          operacion: OperacionCaja.INGRESO,
+          monto: toDecimal(amount, 2),
+          referencia: mainDocument,
+          formaPagoId: paymentMethod.id,
+          ventaPagoId: firstVentaPago?.id ?? null,
+          observaciones: movementNotesParts.join(' · '),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+
+      return {
+        payments: createdVentaPagos,
+        newBalance: newCustomerOutstanding,
+        totalPaid: amount,
+      }
+    },
+    {
+      maxWait: 10_000,
+      timeout: 20_000,
+    },
+  )
+
+  return result
 }

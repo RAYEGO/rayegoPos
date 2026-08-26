@@ -1,3 +1,5 @@
+import type { PaymentMethodCode, PaymentCategory, DigitalSubmethod } from './cashier'
+
 export type SaleStatus = 'BORRADOR' | 'EMITIDA' | 'COBRADA' | 'ANULADA'
 
 export type SalesDashboardResponse = {
@@ -62,7 +64,7 @@ export type SalesDashboardResponse = {
     createdAt: string | null
     totalAmount: number
     outstandingAmount: number
-    paymentMethods: Array<'EFECTIVO' | 'TARJETA' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'OTRO'>
+    paymentMethods: PaymentMethodCode[]
     itemCount: number
     status: SaleStatus
   }>
@@ -84,6 +86,10 @@ export type SalesDashboardResponse = {
       id: string
       name: string
     }>
+    categories: Array<{
+      id: string
+      name: string
+    }>
     commercialTypes: Array<{
       id: string
       name: string
@@ -102,8 +108,10 @@ export type SalesDashboardResponse = {
     }>
     paymentMethods: Array<{
       id: string
-      code: 'EFECTIVO' | 'TARJETA' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'OTRO'
+      code: PaymentMethodCode
       name: string
+      category: PaymentCategory
+      digitalSubmethod: DigitalSubmethod | null
       requiresReference: boolean
       allowsChange: boolean
     }>

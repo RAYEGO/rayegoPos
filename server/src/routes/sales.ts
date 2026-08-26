@@ -8,6 +8,8 @@ const salesDashboardQuerySchema = z.object({
   branchId: z.string().uuid().optional(),
   commercialTypeId: z.string().uuid().optional(),
   activePrincipleId: z.string().uuid().optional(),
+  categoryId: z.string().uuid().optional(),
+  availability: z.enum(['TODOS', 'CON_STOCK', 'SIN_STOCK']).optional(),
   status: z.nativeEnum(EstadoVenta).optional(),
 })
 
@@ -51,6 +53,8 @@ export async function salesRoutes(app: FastifyInstance) {
       branchId: query.branchId,
       commercialTypeId: query.commercialTypeId,
       activePrincipleId: query.activePrincipleId,
+      categoryId: query.categoryId,
+      availability: query.availability,
     }, request)
   })
 

@@ -80,6 +80,28 @@ export type CustomerAccountStatementResponse = {
     outstandingAmount: number
     availableCredit: number
   }
+  totals: {
+    totalPurchased: number
+    totalPaid: number
+    outstandingAmount: number
+  }
+  options: {
+    paymentMethods: Array<{
+      id: string
+      name: string
+      code: string
+      category: 'CASH' | 'DIGITAL' | 'CARD'
+      digitalSubmethod?: 'YAPE' | 'PLIN' | 'BANK_TRANSFER'
+      requiresReference: boolean
+      allowsChange: boolean
+    }>
+  }
+  pendingSales: Array<{
+    saleId: string
+    document: string
+    issueDate: string
+    outstandingAmount: number
+  }>
   movements: Array<{
     id: string
     createdAt: string
@@ -89,5 +111,25 @@ export type CustomerAccountStatementResponse = {
     paymentAmount: number
     balanceAmount: number
     saleId: string
+    paymentMethodName: string | null
+    paymentMethodCode: string | null
+    reference: string | null
   }>
+}
+
+export type RegisterCustomerPaymentPayload = {
+  monto: number
+  formaPagoId: string
+  referenciaExterna?: string | null
+  observaciones?: string | null
+}
+
+export type RegisterCustomerPaymentResponse = {
+  payments: Array<{
+    id: string
+    ventaId: string
+    monto: number
+  }>
+  newBalance: number
+  totalPaid: number
 }

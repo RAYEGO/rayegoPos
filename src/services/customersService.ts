@@ -5,6 +5,8 @@ import type {
   CustomerAccountStatementResponse,
   CustomerSalesResponse,
   CustomersDashboardResponse,
+  RegisterCustomerPaymentPayload,
+  RegisterCustomerPaymentResponse,
   UpdateCustomerPayload,
 } from '@/types/customers'
 
@@ -77,6 +79,21 @@ export const customersService = {
     return apiRequest<CustomerAccountStatementResponse>(
       `/api/customers/${customerId}/account-statement`,
       { accessToken },
+    )
+  },
+
+  registerPayment(
+    accessToken: string,
+    customerId: string,
+    payload: RegisterCustomerPaymentPayload,
+  ) {
+    return apiRequest<RegisterCustomerPaymentResponse>(
+      `/api/customers/${customerId}/payments`,
+      {
+        method: 'POST',
+        accessToken,
+        body: payload,
+      },
     )
   },
 }

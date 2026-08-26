@@ -54,6 +54,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import {
   supplierAlerts,
 } from '@/modules/suppliers/mock-data'
@@ -174,7 +175,7 @@ function FieldError({ message }: { message?: string }) {
 }
 
 export function ProveedoresPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
   const [search, setSearch] = useState('')
@@ -203,10 +204,7 @@ export function ProveedoresPage() {
     [dashboard],
   )
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('ProveedoresPage')
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {

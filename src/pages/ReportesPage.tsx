@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { reportsService } from '@/services/reportsService'
 import type {
@@ -38,7 +39,6 @@ import type {
   ReportsCategory,
   SalesReportResponse,
 } from '@/types/reports'
-import { toast } from 'sonner'
 
 type ReportPayload =
   | SalesReportResponse
@@ -82,7 +82,7 @@ const categories: Array<{
 ]
 
 export function ReportesPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
   const [category, setCategory] = useState<ReportsCategory>('VENTAS')
@@ -98,10 +98,7 @@ export function ReportesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('ReportesPage')
 
   const loadReport = useCallback(async () => {
     if (!accessToken) {

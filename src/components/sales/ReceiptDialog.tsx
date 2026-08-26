@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Loader } from '@/components/ui/loader'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { salesService } from '@/services/salesService'
 import { auditService } from '@/services/auditService'
 import { createReceiptPdf } from '@/lib/receiptPdf'
@@ -29,7 +30,7 @@ export type ReceiptDialogProps = {
   accessToken: string
   sale: ReceiptSaleRef | null
   initialReceipt?: SaleReceiptResponse | null
-  onUnauthorized?: () => Promise<void> | void
+  onUnauthorized?: () => Promise<unknown> | unknown
 }
 
 function formatCurrency(value: number) {
@@ -93,6 +94,8 @@ export function ReceiptDialog({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [hasLoggedView, setHasLoggedView] = useState(false)
 
+  const internalHandleUnauthorized = useHandleUnauthorized('ReceiptDialog')
+
   useEffect(() => {
     setReceipt(initialReceipt)
   }, [initialReceipt, sale?.id])
@@ -153,8 +156,10 @@ export function ReceiptDialog({
       })
       .catch(async (nextError) => {
         if (nextError instanceof ApiError && nextError.status === 401) {
-          toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-          await onUnauthorized?.()
+          const { handledAsMock } = await internalHandleUnauthorized()
+          if (!handledAsMock) {
+            void onUnauthorized?.()
+          }
           return
         }
 
@@ -164,7 +169,7 @@ export function ReceiptDialog({
       .finally(() => {
         setIsLoading(false)
       })
-  }, [accessToken, hasLoggedView, onUnauthorized, open, receipt, sale?.id])
+  }, [accessToken, hasLoggedView, internalHandleUnauthorized, onUnauthorized, open, receipt, sale?.id])
 
   const handlePrint = useCallback(() => {
     if (!sale?.id || !accessToken) return
@@ -227,14 +232,16 @@ export function ReceiptDialog({
       toast.success('PDF descargado. Mensaje copiado para compartir.')
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-        await onUnauthorized?.()
+        const { handledAsMock } = await internalHandleUnauthorized()
+        if (!handledAsMock) {
+          void onUnauthorized?.()
+        }
         return
       }
 
       toast.error(getApiErrorMessage(nextError))
     }
-  }, [accessToken, message, onUnauthorized, receipt, sale?.id])
+  }, [accessToken, internalHandleUnauthorized, message, onUnauthorized, receipt, sale?.id])
 
   const handleToggleFullscreen = useCallback(() => {
     setIsFullscreen((current) => !current)

@@ -1,11 +1,30 @@
+import type {
+  PaymentCategory as SharedPaymentCategory,
+  DigitalSubmethod as SharedDigitalSubmethod,
+} from '@/lib/payment-methods'
+
 export type CashDrawerStatus = 'ABIERTA' | 'EN_CIERRE' | 'CERRADA'
 
-export type CashMovementType =
-  | 'VENTA'
-  | 'INGRESO_MANUAL'
-  | 'EGRESO'
-  | 'RETIRO'
-  | 'CUADRE'
+export type PaymentMethodCode =
+  | 'EFECTIVO'
+  | 'TARJETA'
+  | 'YAPE'
+  | 'PLIN'
+  | 'TRANSFERENCIA'
+  | 'OTRO'
+
+export type PaymentCategory = SharedPaymentCategory
+export type DigitalSubmethod = SharedDigitalSubmethod
+
+export type CashDrawerBalanceByMethod = {
+  paymentMethodId: string
+  code: PaymentMethodCode
+  name: string
+  expectedAmount: number
+  openingBase: number
+  income: number
+  expense: number
+}
 
 export type CashDrawerRecord = {
   id: string
@@ -20,6 +39,7 @@ export type CashDrawerRecord = {
   differenceAmount: number
   status: CashDrawerStatus
   closePending: boolean
+  balances: CashDrawerBalanceByMethod[]
 }
 
 export type CashMovementRecord = {
@@ -29,20 +49,13 @@ export type CashMovementRecord = {
   type: CashMovementType
   description: string
   reference: string
-  paymentMethod:
-    | 'EFECTIVO'
-    | 'TARJETA'
-    | 'YAPE'
-    | 'PLIN'
-    | 'TRANSFERENCIA'
-    | 'OTRO'
-    | 'INTERNO'
+  paymentMethod: PaymentMethodCode | 'INTERNO'
   amount: number
   actorName: string
 }
 
 export type CashPaymentSummaryRecord = {
-  method: 'EFECTIVO' | 'TARJETA' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'OTRO'
+  method: PaymentMethodCode
   salesAmount: number
   collectedAmount: number
   operations: number
@@ -50,7 +63,7 @@ export type CashPaymentSummaryRecord = {
 
 export type CashReconciliationRow = {
   paymentMethodId: string
-  code: 'EFECTIVO' | 'TARJETA' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'OTRO'
+  code: PaymentMethodCode
   name: string
   expectedAmount: number
   countedAmount: number
@@ -147,6 +160,13 @@ export interface BranchOption {
 
 export interface CashierDashboardOptions {
   branches: BranchOption[]
+  paymentMethods: Array<{
+    id: string
+    code: PaymentMethodCode
+    name: string
+    category: PaymentCategory
+    digitalSubmethod: DigitalSubmethod | null
+  }>
 }
 
 export type CashierDashboardResponse = {
@@ -162,7 +182,7 @@ export type CashierDashboardResponse = {
 }
 
 export type OpenCashDrawerPayload = {
-  branchId: string
+  branchId?: string
   openingAmount: number
   observations?: string
 }
@@ -176,6 +196,7 @@ export type CloseCashDrawerPayload = {
 export type CreateCashMovementPayload = {
   openingId: string
   type: 'INGRESO' | 'EGRESO'
+  paymentMethodId?: string
   amount: number
   concept: string
   reference?: string

@@ -7,6 +7,7 @@ import {
   getCustomerAccountStatement,
   getCustomerSales,
   getCustomersDashboard,
+  registerCustomerPayment,
   updateCustomer,
 } from '../modules/customers/customers.service.js'
 
@@ -16,9 +17,17 @@ const getCustomersQuerySchema = z.object({
 })
 
 const createCustomerSchema = z.object({
-  tipoPersona: z.nativeEnum(TipoPersona).optional(),
-  tipoDocumento: z.nativeEnum(TipoDocumentoIdentidad).optional(),
-  numeroDocumento: z.string().max(20).optional(),
+  tipoPersona: z.nativeEnum(TipoPersona, {
+    message: 'Selecciona el tipo de persona.',
+  }),
+  tipoDocumento: z.nativeEnum(TipoDocumentoIdentidad, {
+    message: 'Selecciona el tipo de documento.',
+  }),
+  numeroDocumento: z
+    .string()
+    .trim()
+    .min(1, 'Ingresa el número de documento.')
+    .max(20),
   nombres: z.string().max(120).optional(),
   apellidos: z.string().max(120).optional(),
   razonSocial: z.string().max(200).optional(),
@@ -34,6 +43,15 @@ const createCustomerSchema = z.object({
 
 const updateCustomerSchema = createCustomerSchema.partial().extend({
   activo: z.boolean().optional(),
+})
+
+const registerCustomerPaymentSchema = z.object({
+  monto: z
+    .number()
+    .min(0.01, 'El monto debe ser mayor a 0.'),
+  formaPagoId: z.string().uuid('Selecciona un medio de pago.'),
+  referenciaExterna: z.string().max(120).trim().optional().nullable(),
+  observaciones: z.string().max(255).trim().optional().nullable(),
 })
 
 export default async function customersRoutes(app: FastifyInstance) {
@@ -66,5 +84,11 @@ export default async function customersRoutes(app: FastifyInstance) {
   app.delete('/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
     return deleteCustomer(params.id, request)
+  })
+
+  app.post('/:id/payments', async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = registerCustomerPaymentSchema.parse(request.body)
+    return registerCustomerPayment(params.id, body, request)
   })
 }

@@ -1,21 +1,28 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Controller, useFieldArray, useForm } from 'react-hook-form'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import {
   ChevronDown,
   ClipboardCheck,
   CreditCard,
+  Edit3,
+  Eye,
+  FileDown,
   FileSpreadsheet,
   Loader2,
   PackageCheck,
+  PackageOpen,
   Plus,
+  Printer,
   RotateCcw,
   Search,
+  Share2,
   ShoppingCart,
   Trash2,
   Truck,
+  Wallet,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -55,16 +62,25 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
+import { classifyPaymentMethod, labelForMethodCode, getMethodVariant } from '@/lib/payment-methods'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
 import { purchasesService } from '@/services/purchasesService'
 import { paths } from '@/routes/paths'
+import {
+  buildPackagingSummary,
+  buildPurchasePresentationChain,
+  resolveLabelForPresentationId,
+  type PurchasePresentationOption,
+} from '@/utils/packaging'
 import type {
   CreatePurchaseReceptionPayload,
   CreatePurchaseOrderPayload,
   PurchaseFinancialStatus,
   PurchaseLogisticsStatus,
+  PurchaseOrderDetail,
   PurchaseReceiptStatus,
   PurchasesDashboardResponse,
   RegisterPurchasePaymentPayload,
@@ -73,6 +89,14 @@ import type {
 } from '@/types/purchases'
 import type { CreateCashMovementPayload } from '@/types/cashier'
 import { toast } from 'sonner'
+import { PurchaseOrderDocument } from '@/components/purchases/PurchaseOrderDocument'
+import {
+  copyPurchaseOrderText,
+  generatePurchaseOrderPDFBlob,
+  printPurchaseOrderFromElement,
+  sharePurchaseOrder,
+} from '@/utils/purchaseDocument'
+import { formatCurrency, formatQuantity } from '@/lib/utils'
 
 const createPurchaseSchema = z.object({
   proveedorId: z.string().uuid({ message: 'Selecciona un proveedor.' }),
@@ -129,6 +153,7 @@ const registerPaymentSchema = z.object({
 type RegisterPaymentFormValues = z.infer<typeof registerPaymentSchema>
 
 const registerCashIncomeSchema = z.object({
+  paymentMethodId: z.string().min(1, 'Selecciona un medio de dinero.'),
   amount: z.number().positive('El monto debe ser mayor a 0.'),
   concept: z.string().min(1, 'Selecciona un motivo de ingreso.').max(120),
   reference: z.string().max(120).optional(),
@@ -137,23 +162,50 @@ const registerCashIncomeSchema = z.object({
 
 type RegisterCashIncomeFormValues = z.infer<typeof registerCashIncomeSchema>
 
-type OrderReceiptDraft = {
-  detailId: string
-  productName: string
-  pendingUnits: number
-  presentationFactor: number | null
-  pendingQuantity: number
-  unitLabel: string
-  include: boolean
+type LoteReceiptDraft = {
+  id: string
   numeroLote: string
   fechaFabricacion: string
   fechaVencimiento: string
   cantidadRecibida: number
   stockReservado: number
   stockBloqueado: number
-  almacen: string
-  observaciones: string
+  costoUnitarioRecepcion: number
 }
+
+type LineReceiptDraft = {
+  detailId: string
+  productId: string
+  productName: string
+  sku: string
+  unitSymbol: string
+  presentationId: string
+  presentationName: string
+  presentationFactor: number
+  requestedPresentationQty: number
+  requestedBaseUnits: number
+  previouslyReceivedPresentationUnits: number
+  previouslyReceivedBaseUnits: number
+  pendingPresentationUnits: number
+  pendingBaseUnits: number
+  receivedPresentationQty: number
+  receivedBaseUnits: number
+  missingPresentationQty: number
+  missingBaseUnits: number
+  unitCostPresentation: number
+  packaging: {
+    basePresentationId: string | null
+    purchasePresentationId: string | null
+    presentations: PurchasePresentationOption[]
+  } | null
+  include: boolean
+  almacen: string
+  observacionesLinea: string
+  lotes: LoteReceiptDraft[]
+  equivalenceText: string
+}
+
+const RECEPTION_LOTES_DEFAULT_LIMIT = 5
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -163,14 +215,7 @@ const defaultFormValues: CreatePurchaseFormValues = {
   fechaRecepcion: '',
   estado: 'REGISTRADA',
   observaciones: '',
-  items: [
-    {
-      productoId: '',
-      cantidad: 1,
-      costoUnitario: 0,
-      porcentajeImpuesto: 18,
-    },
-  ],
+  items: [],
 }
 
 const defaultReceiveFormValues: ReceivePurchaseFormValues = {
@@ -199,18 +244,11 @@ const defaultPaymentFormValues: RegisterPaymentFormValues = {
 }
 
 const defaultCashIncomeFormValues: RegisterCashIncomeFormValues = {
+  paymentMethodId: '',
   amount: 0,
   concept: 'Fondo adicional',
   reference: '',
   observations: '',
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('es-PE', {
-    style: 'currency',
-    currency: 'PEN',
-    minimumFractionDigits: 2,
-  }).format(value)
 }
 
 function formatDate(value: string | null) {
@@ -313,7 +351,12 @@ export function ComprasPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [editingPurchaseOrderId, setEditingPurchaseOrderId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [selectedViewOrderId, setSelectedViewOrderId] = useState<string | null>(null)
+  const [selectedOrderDetail, setSelectedOrderDetail] = useState<PurchaseOrderDetail | null>(null)
+  const [isOrderDetailLoading, setIsOrderDetailLoading] = useState(false)
+  const orderDocumentRef = useRef<HTMLDivElement>(null)
   const [ordersPage, setOrdersPage] = useState(1)
   const ordersPageSize = 4
   const [isReceiveDialogOpen, setIsReceiveDialogOpen] = useState(false)
@@ -328,7 +371,7 @@ export function ComprasPage() {
   const [isOrderReceiveDialogOpen, setIsOrderReceiveDialogOpen] = useState(false)
   const [isClosingOrderReceipt, setIsClosingOrderReceipt] = useState(false)
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
-  const [orderReceiptDrafts, setOrderReceiptDrafts] = useState<OrderReceiptDraft[]>([])
+  const [orderReceiptDrafts, setOrderReceiptDrafts] = useState<LineReceiptDraft[]>([])
   const [isOrderSummaryDialogOpen, setIsOrderSummaryDialogOpen] = useState(false)
   const [selectedSummaryOrderId, setSelectedSummaryOrderId] = useState<string | null>(null)
   const [showSummary, setShowSummary] = useState(false)
@@ -339,9 +382,16 @@ export function ComprasPage() {
     required: number
     missing: number
   } | null>(null)
+  const [incomeMethodBalance, setIncomeMethodBalance] = useState<{
+    available: number
+    loading: boolean
+  } | null>(null)
   const [isCashIncomeDialogOpen, setIsCashIncomeDialogOpen] = useState(false)
   const [isRegisteringCashIncome, setIsRegisteringCashIncome] = useState(false)
   const [isMissingCashDrawerDialogOpen, setIsMissingCashDrawerDialogOpen] = useState(false)
+  const [globalProductoSearchQuery, setGlobalProductoSearchQuery] = useState<string>('')
+  const [globalProductoSearchOpen, setGlobalProductoSearchOpen] = useState<boolean>(false)
+  const [createLineaPresentacionId, setCreateLineaPresentacionId] = useState<Record<number, string>>({})
 
   const form = useForm<CreatePurchaseFormValues>({
     resolver: zodResolver(createPurchaseSchema),
@@ -373,7 +423,16 @@ export function ComprasPage() {
     name: 'items',
   })
 
-  const watchedItems = form.watch('items')
+  const watchedItems =
+    useWatch({
+      control: form.control,
+      name: 'items',
+    }) ?? []
+  const watchedFechaEmision =
+    useWatch({
+      control: form.control,
+      name: 'fechaEmision',
+    }) ?? today
   const watchedReceivedUnits = Number(receiveForm.watch('cantidadRecibida')) || 0
   const watchedReservedUnits = Number(receiveForm.watch('stockReservado')) || 0
   const watchedBlockedUnits = Number(receiveForm.watch('stockBloqueado')) || 0
@@ -381,24 +440,38 @@ export function ComprasPage() {
   const watchedReturnQuantity = Number(returnForm.watch('quantity')) || 0
   const watchedPaymentMethodId = paymentForm.watch('formaPagoId')
   const watchedPaymentAmount = Number(paymentForm.watch('monto')) || 0
+  const watchedIncomePaymentMethodId = cashIncomeForm.watch('paymentMethodId')
+
+  const draftLineTotals = useMemo(
+    () =>
+      watchedItems.map((item) => {
+        const quantity = Number(item.cantidad)
+        const unitCost = Number(item.costoUnitario)
+        const taxRate = Number(item.porcentajeImpuesto)
+
+        const safeQuantity = Number.isFinite(quantity) ? quantity : 0
+        const safeUnitCost = Number.isFinite(unitCost) ? unitCost : 0
+        const safeTaxRate = Number.isFinite(taxRate) ? taxRate : 0
+        const subtotal = safeQuantity * safeUnitCost
+        const igv = subtotal * (safeTaxRate / 100)
+        const total = subtotal + igv
+
+        return { subtotal, igv, total }
+      }),
+    [watchedItems],
+  )
 
   const draftTotals = useMemo(() => {
-    return watchedItems.reduce(
+    return draftLineTotals.reduce(
       (summary, item) => {
-        const quantity = Number(item.cantidad) || 0
-        const unitCost = Number(item.costoUnitario) || 0
-        const taxRate = Number(item.porcentajeImpuesto) || 0
-        const baseAmount = quantity * unitCost
-        const taxAmount = baseAmount * (taxRate / 100)
-
-        summary.subtotal += baseAmount
-        summary.tax += taxAmount
-        summary.total += baseAmount + taxAmount
+        summary.subtotal += item.subtotal
+        summary.tax += item.igv
+        summary.total += item.total
         return summary
       },
       { subtotal: 0, tax: 0, total: 0 },
     )
-  }, [watchedItems])
+  }, [draftLineTotals])
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -425,6 +498,34 @@ export function ComprasPage() {
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
+
+  useEffect(() => {
+    if (!selectedViewOrderId) {
+      setSelectedOrderDetail(null)
+      return
+    }
+    if (!accessToken) return
+
+    let cancelled = false
+    async function run() {
+      setIsOrderDetailLoading(true)
+      try {
+        const detail = await purchasesService.getOrderById(accessToken, selectedViewOrderId!)
+        if (cancelled) return
+        setSelectedOrderDetail(detail)
+      } catch (nextError) {
+        if (cancelled) return
+        toast.error(getApiErrorMessage(nextError))
+        setSelectedViewOrderId(null)
+      } finally {
+        if (!cancelled) setIsOrderDetailLoading(false)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedViewOrderId, accessToken, loadDashboard])
 
   useEffect(() => {
     if (!dashboard) {
@@ -455,6 +556,38 @@ export function ComprasPage() {
       window.sessionStorage.removeItem('pos_pending_purchase_payment')
     }
   }, [dashboard, paymentForm])
+
+  useEffect(() => {
+    if (!isCashIncomeDialogOpen || !watchedIncomePaymentMethodId || !accessToken) {
+      setIncomeMethodBalance(null)
+      return
+    }
+
+    let cancelled = false
+    setIncomeMethodBalance({ available: 0, loading: true })
+
+    async function run() {
+      try {
+        const activeDrawer = await cashierService.getActiveDrawer(
+          accessToken,
+          watchedIncomePaymentMethodId,
+        )
+        if (cancelled) return
+        setIncomeMethodBalance({
+          available: Number(activeDrawer.expectedAmount.toFixed(2)),
+          loading: false,
+        })
+      } catch {
+        if (cancelled) return
+        setIncomeMethodBalance({ available: 0, loading: false })
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [watchedIncomePaymentMethodId, isCashIncomeDialogOpen, accessToken])
 
   useEffect(() => {
     setOrdersPage(1)
@@ -546,14 +679,22 @@ export function ComprasPage() {
     ? receiptGroupsByOrder[selectedSummaryOrderId]
     : null
 
-  const selectedOrderAvailableUnits = orderReceiptDrafts.reduce((sum, item) => {
-    if (!item.include) {
+  const selectedOrderAvailableUnits = orderReceiptDrafts.reduce((sum, line) => {
+    if (!line.include) {
       return sum
     }
 
-    const received = Math.max(0, item.cantidadRecibida - item.stockReservado - item.stockBloqueado)
-    const factor = item.presentationFactor ?? 1
-    return sum + received * factor
+    const lineTotalReceived = line.lotes.reduce(
+      (loteSum, lote) =>
+        loteSum +
+        Math.max(
+          0,
+          (lote.cantidadRecibida || 0) - (lote.stockReservado || 0) - (lote.stockBloqueado || 0),
+        ),
+      0,
+    )
+    const factor = line.presentationFactor ?? 1
+    return sum + lineTotalReceived * factor
   }, 0)
 
   const selectedSummaryTotals = selectedSummaryReceiptGroup
@@ -610,14 +751,25 @@ export function ComprasPage() {
     setIsSubmitting(true)
 
     try {
-      await purchasesService.createOrder(accessToken, payload)
-      toast.success('Orden de compra registrada correctamente.')
+      const response = editingPurchaseOrderId
+        ? await purchasesService.updateOrder(accessToken, editingPurchaseOrderId, payload)
+        : await purchasesService.createOrder(accessToken, payload)
+
+      toast.success(
+        editingPurchaseOrderId
+          ? 'Orden de compra actualizada correctamente.'
+          : 'Orden de compra registrada correctamente. Ya puedes compartirla o preparar la recepción.',
+      )
       setIsCreateDialogOpen(false)
+      setEditingPurchaseOrderId(null)
       form.reset({
         ...defaultFormValues,
         fechaEmision: new Date().toISOString().slice(0, 10),
       })
       await loadDashboard()
+      if (response?.item?.id) {
+        setSelectedViewOrderId(response.item.id)
+      }
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
         toast.error('Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar compras.')
@@ -628,6 +780,43 @@ export function ComprasPage() {
       toast.error(getApiErrorMessage(nextError))
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  async function openEditOrder(orderId: string) {
+    if (!accessToken) {
+      toast.error('La sesión no está disponible.')
+      return
+    }
+
+    try {
+      const detail = await purchasesService.getOrderById(accessToken, orderId)
+      const formValues: CreatePurchaseFormValues = {
+        proveedorId: detail.supplier.id,
+        fechaEmision: detail.fechaEmision ?? new Date().toISOString().slice(0, 10),
+        fechaRecepcion: detail.fechaRecepcionEsperada ?? '',
+        estado: (detail.order.status === 'BORRADOR' || detail.order.status === 'REGISTRADA'
+          ? detail.order.status
+          : 'REGISTRADA') as CreatePurchaseFormValues['estado'],
+        observaciones: detail.observaciones ?? '',
+        items: detail.items.map((item) => ({
+          productoId: item.productId,
+          cantidad: item.presentationQuantity,
+          costoUnitario: item.unitCostPresentation,
+          porcentajeImpuesto: item.taxRate,
+        })),
+      }
+
+      form.reset(formValues)
+      setEditingPurchaseOrderId(orderId)
+      setIsCreateDialogOpen(true)
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        toast.error('Tu sesión venció. Ingresa nuevamente.')
+        await logout()
+        return
+      }
+      toast.error(getApiErrorMessage(nextError))
     }
   }
 
@@ -880,10 +1069,15 @@ export function ComprasPage() {
       toast.error('No hay una caja activa disponible para registrar el ingreso.')
       return
     }
+    if (!values.paymentMethodId) {
+      toast.error('Selecciona el medio de dinero del ingreso.')
+      return
+    }
 
     const payload: CreateCashMovementPayload = {
       openingId: cashShortage.openingId,
       type: 'INGRESO',
+      paymentMethodId: values.paymentMethodId,
       amount: Number(values.amount),
       concept: values.concept,
       reference: values.reference?.trim() || undefined,
@@ -915,49 +1109,277 @@ export function ComprasPage() {
 
   function updateOrderReceiptDraft(
     detailId: string,
-    patch: Partial<OrderReceiptDraft>,
+    patch: Partial<LineReceiptDraft> | null,
+    opts?: { loteId?: string; lotePatch?: Partial<LoteReceiptDraft> },
   ) {
     setOrderReceiptDrafts((current) =>
-      current.map((item) =>
-        item.detailId === detailId ? { ...item, ...patch } : item,
-      ),
+      current.map((line) => {
+        if (line.detailId !== detailId) return line
+
+        let nextLine = patch ? { ...line, ...patch } : line
+
+        if (opts?.loteId && opts.lotePatch) {
+          nextLine = {
+            ...nextLine,
+            lotes: nextLine.lotes.map((lote) =>
+              lote.id === opts.loteId ? { ...lote, ...opts.lotePatch } : lote,
+            ),
+          }
+
+          const totalReceivedPresentation = nextLine.lotes.reduce(
+            (sum, l) => sum + (Number(l.cantidadRecibida) || 0),
+            0,
+          )
+          const totalReceivedBase = totalReceivedPresentation * (nextLine.presentationFactor ?? 1)
+          nextLine = {
+            ...nextLine,
+            receivedPresentationQty: totalReceivedPresentation,
+            receivedBaseUnits: totalReceivedBase,
+            missingPresentationQty: Math.max(
+              0,
+              nextLine.pendingPresentationUnits - totalReceivedPresentation,
+            ),
+            missingBaseUnits: Math.max(
+              0,
+              nextLine.pendingBaseUnits - totalReceivedBase,
+            ),
+          }
+        }
+
+        return nextLine
+      }),
+    )
+  }
+
+  function addLoteToReceiptDraft(detailId: string) {
+    setOrderReceiptDrafts((current) =>
+      current.map((line) => {
+        if (line.detailId !== detailId) return line
+        if (line.lotes.length >= RECEPTION_LOTES_DEFAULT_LIMIT) {
+          toast.warning(
+            `Se alcanzó el límite de ${RECEPTION_LOTES_DEFAULT_LIMIT} lotes por línea en esta recepción.`,
+          )
+          return line
+        }
+
+        const nextLoteIndex = line.lotes.length + 1
+        const remaining = Math.max(
+          0,
+          line.pendingPresentationUnits -
+            line.lotes.reduce((sum, l) => sum + (Number(l.cantidadRecibida) || 0), 0),
+        )
+        const newLote: LoteReceiptDraft = {
+          id: crypto.randomUUID(),
+          numeroLote: `LOTE-${Date.now().toString().slice(-6)}-${nextLoteIndex}`,
+          fechaFabricacion: '',
+          fechaVencimiento: '',
+          cantidadRecibida: Math.max(1, Math.min(remaining, line.pendingPresentationUnits)),
+          stockReservado: 0,
+          stockBloqueado: 0,
+          costoUnitarioRecepcion: line.unitCostPresentation ?? 0,
+        }
+        const nextLotes = [...line.lotes, newLote]
+        const totalReceived = nextLotes.reduce(
+          (sum, l) => sum + (Number(l.cantidadRecibida) || 0),
+          0,
+        )
+        const totalBase = totalReceived * (line.presentationFactor ?? 1)
+        return {
+          ...line,
+          lotes: nextLotes,
+          receivedPresentationQty: totalReceived,
+          receivedBaseUnits: totalBase,
+          missingPresentationQty: Math.max(0, line.pendingPresentationUnits - totalReceived),
+          missingBaseUnits: Math.max(0, line.pendingBaseUnits - totalBase),
+        }
+      }),
+    )
+  }
+
+  function removeLoteFromReceiptDraft(detailId: string, loteId: string) {
+    setOrderReceiptDrafts((current) =>
+      current.map((line) => {
+        if (line.detailId !== detailId) return line
+        if (line.lotes.length <= 1) {
+          toast.error('Cada línea debe tener al menos un lote para la recepción.')
+          return line
+        }
+        const nextLotes = line.lotes.filter((l) => l.id !== loteId)
+        const totalReceived = nextLotes.reduce(
+          (sum, l) => sum + (Number(l.cantidadRecibida) || 0),
+          0,
+        )
+        const totalBase = totalReceived * (line.presentationFactor ?? 1)
+        return {
+          ...line,
+          lotes: nextLotes,
+          receivedPresentationQty: totalReceived,
+          receivedBaseUnits: totalBase,
+          missingPresentationQty: Math.max(0, line.pendingPresentationUnits - totalReceived),
+          missingBaseUnits: Math.max(0, line.pendingBaseUnits - totalBase),
+        }
+      }),
     )
   }
 
   function openOrderReceiveDialog(orderId: string) {
     const order = orders.find((entry) => entry.id === orderId)
-    const pendingReceipts =
-      receiptGroupsByOrder[orderId]?.pendingReceipts ?? []
+    const detailItems =
+      selectedOrderDetail && selectedOrderDetail.order.id === orderId
+        ? selectedOrderDetail.items
+        : null
+    const pendingReceipts = receiptGroupsByOrder[orderId]?.pendingReceipts ?? []
 
-    if (!order || pendingReceipts.length === 0) {
+    if (!order) {
+      toast.error('La orden seleccionada no está disponible.')
+      return
+    }
+
+    if (detailItems) {
+      const pendingItems = detailItems.filter(
+        (item) => item.baseQuantity - item.receivedBaseUnits > 0,
+      )
+
+      if (pendingItems.length === 0) {
+        toast.error('La orden seleccionada ya no tiene líneas pendientes por recepcionar.')
+        return
+      }
+
+      const nextDrafts: LineReceiptDraft[] = pendingItems.map((item, index) => {
+        const requestedPresentationQty = item.presentationQuantity
+        const requestedBaseUnits = item.baseQuantity
+        const previouslyReceivedPresentationUnits = item.receivedPresentationUnits
+        const previouslyReceivedBaseUnits = item.receivedBaseUnits
+        const pendingPresentationUnits =
+          requestedPresentationQty - previouslyReceivedPresentationUnits
+        const pendingBaseUnits = requestedBaseUnits - previouslyReceivedBaseUnits
+
+        const packagingObj = item.packaging ?? null
+        const presentationsArr = packagingObj?.presentations ?? []
+        const purchasePresId = packagingObj?.purchasePresentationId ?? item.presentationId
+        const chain = buildPurchasePresentationChain(presentationsArr, purchasePresId)
+
+        const labelFn = (id?: string | null) =>
+          resolveLabelForPresentationId(presentationsArr.length > 0 ? presentationsArr : null, id)
+        const summary = buildPackagingSummary(chain, labelFn)
+
+        const fallbackEquivalence =
+          pendingPresentationUnits > 0 && item.presentationFactor > 1
+            ? `1 ${item.presentationName} = ${formatQuantity(item.presentationFactor, 0)} ${item.unitSymbol}`
+            : pendingPresentationUnits > 0
+              ? `${formatQuantity(pendingPresentationUnits, 0)} ${item.presentationName} = ${formatQuantity(pendingBaseUnits, 0)} ${item.unitSymbol}`
+              : ''
+        const equivalenceText =
+          summary && summary.hasEnoughData ? summary.equivalenceText : fallbackEquivalence
+
+        const initialQty = Math.max(1, Math.floor(pendingPresentationUnits))
+        const initialLote: LoteReceiptDraft = {
+          id: crypto.randomUUID(),
+          numeroLote: `${order.code.replace('CMP-', 'RCP-')}-${index + 1}`,
+          fechaFabricacion: '',
+          fechaVencimiento: '',
+          cantidadRecibida: initialQty,
+          stockReservado: 0,
+          stockBloqueado: 0,
+          costoUnitarioRecepcion: item.unitCostPresentation ?? 0,
+        }
+        const initialReceivedBase = initialQty * item.presentationFactor
+
+        return {
+          detailId: item.detailId,
+          productId: item.productId,
+          productName: item.productName,
+          sku: item.sku,
+          unitSymbol: item.unitSymbol,
+          presentationId: item.presentationId,
+          presentationName: item.presentationName,
+          presentationFactor: item.presentationFactor,
+          requestedPresentationQty,
+          requestedBaseUnits,
+          previouslyReceivedPresentationUnits,
+          previouslyReceivedBaseUnits,
+          pendingPresentationUnits,
+          pendingBaseUnits,
+          receivedPresentationQty: initialQty,
+          receivedBaseUnits: initialReceivedBase,
+          missingPresentationQty: Math.max(0, pendingPresentationUnits - initialQty),
+          missingBaseUnits: Math.max(0, pendingBaseUnits - initialReceivedBase),
+          unitCostPresentation: item.unitCostPresentation ?? 0,
+          packaging: packagingObj,
+          include: true,
+          almacen: order.branchName === 'Sucursal Principal' ? 'Mostrador principal' : '',
+          observacionesLinea: '',
+          lotes: [initialLote],
+          equivalenceText,
+        }
+      })
+
+      setSelectedOrderId(orderId)
+      setOrderReceiptDrafts(nextDrafts)
+      setIsOrderReceiveDialogOpen(true)
+      return
+    }
+
+    if (pendingReceipts.length === 0) {
       toast.error('La orden seleccionada ya no tiene líneas pendientes por recepcionar.')
       return
     }
 
-    const nextDrafts: OrderReceiptDraft[] = pendingReceipts.map((receipt, index) => {
-      const pendingQuantity =
+    const nextDrafts: LineReceiptDraft[] = pendingReceipts.map((receipt, index) => {
+      const pendingPresentationUnits =
         typeof receipt.pendingPresentationQuantity === 'number' &&
         receipt.pendingPresentationQuantity > 0
           ? receipt.pendingPresentationQuantity
-          : receipt.pendingUnits
-      const unitLabel = receipt.presentationName ?? 'Unidades'
+          : receipt.pendingUnits / (receipt.presentationFactor ?? 1)
+      const pendingBaseUnits = receipt.pendingUnits
+      const presentationFactor = receipt.presentationFactor ?? 1
+      const presentationName = receipt.presentationName ?? 'Presentación'
 
-      return {
-        detailId: receipt.id,
-        productName: receipt.productName,
-        pendingUnits: receipt.pendingUnits,
-        presentationFactor: receipt.presentationFactor,
-        pendingQuantity,
-        unitLabel,
-        include: true,
+      const initialQty = Math.max(1, Math.floor(pendingPresentationUnits))
+      const initialLote: LoteReceiptDraft = {
+        id: crypto.randomUUID(),
         numeroLote: `${receipt.purchaseCode.replace('CMP-', 'RCP-')}-${index + 1}`,
         fechaFabricacion: '',
         fechaVencimiento: '',
-        cantidadRecibida: Math.max(1, Math.floor(pendingQuantity)),
+        cantidadRecibida: initialQty,
         stockReservado: 0,
         stockBloqueado: 0,
+        costoUnitarioRecepcion: 0,
+      }
+      const initialReceivedBase = initialQty * presentationFactor
+      const fallbackEquivalence =
+        pendingPresentationUnits > 0 && presentationFactor > 1
+          ? `1 ${presentationName} = ${formatQuantity(presentationFactor, 0)} Unidades`
+          : pendingPresentationUnits > 0
+            ? `${formatQuantity(pendingPresentationUnits, 0)} ${presentationName} = ${formatQuantity(pendingBaseUnits, 0)} Unidades`
+            : ''
+
+      return {
+        detailId: receipt.id,
+        productId: receipt.productId ?? '',
+        productName: receipt.productName,
+        sku: '',
+        unitSymbol: 'Unidades',
+        presentationId: '',
+        presentationName,
+        presentationFactor,
+        requestedPresentationQty: receipt.orderedPresentationQuantity ?? pendingPresentationUnits,
+        requestedBaseUnits: receipt.orderedUnits ?? pendingBaseUnits,
+        previouslyReceivedPresentationUnits: receipt.receivedPresentationQuantity ?? 0,
+        previouslyReceivedBaseUnits: receipt.receivedUnits ?? 0,
+        pendingPresentationUnits,
+        pendingBaseUnits,
+        receivedPresentationQty: initialQty,
+        receivedBaseUnits: initialReceivedBase,
+        missingPresentationQty: Math.max(0, pendingPresentationUnits - initialQty),
+        missingBaseUnits: Math.max(0, pendingBaseUnits - initialReceivedBase),
+        unitCostPresentation: 0,
+        packaging: null,
+        include: true,
         almacen: receipt.branchName === 'Sucursal Principal' ? 'Mostrador principal' : '',
-        observaciones: '',
+        observacionesLinea: '',
+        lotes: [initialLote],
+        equivalenceText: fallbackEquivalence,
       }
     })
 
@@ -972,81 +1394,123 @@ export function ComprasPage() {
   }
 
   async function handleCloseOrderReceipt() {
-    if (!accessToken || !selectedOrder || !selectedOrderReceiptGroup) {
+    if (!accessToken || !selectedOrderId || !selectedOrder) {
       toast.error('La orden seleccionada no está disponible.')
       return
     }
 
-    const linesToReceive = orderReceiptDrafts.filter((item) => item.include)
+    const linesToReceive = orderReceiptDrafts.filter((line) => line.include)
 
     if (linesToReceive.length === 0) {
       toast.error('Selecciona al menos una línea pendiente para recepcionar.')
       return
     }
 
+    const payloadItems: ReceivePurchaseItemPayload[] = []
+
     for (const line of linesToReceive) {
-      if (!line.numeroLote.trim()) {
-        toast.error(`Ingresa el lote para ${line.productName}.`)
+      if (line.lotes.length === 0) {
+        toast.error(`Agrega al menos un lote para ${line.productName}.`)
         return
       }
 
-      if (!line.fechaVencimiento.trim()) {
-        toast.error(`Ingresa el vencimiento para ${line.productName}.`)
-        return
-      }
+      const totalLineQty = line.lotes.reduce(
+        (sum, lote) => sum + (Number(lote.cantidadRecibida) || 0),
+        0,
+      )
 
-      if (
-        !Number.isFinite(line.cantidadRecibida) ||
-        !Number.isInteger(line.cantidadRecibida) ||
-        line.cantidadRecibida <= 0
-      ) {
+      if (totalLineQty <= 0) {
         toast.error(`La cantidad recibida de ${line.productName} debe ser mayor a 0.`)
         return
       }
 
-      if (line.cantidadRecibida > line.pendingQuantity) {
-        toast.error(`La cantidad de ${line.productName} supera el saldo pendiente.`)
+      if (totalLineQty > line.pendingPresentationUnits) {
+        toast.error(
+          `La cantidad de ${line.productName} (${formatQuantity(totalLineQty)} ${line.presentationName}) supera el saldo pendiente (${formatQuantity(line.pendingPresentationUnits)} ${line.presentationName}).`,
+        )
         return
       }
 
-      if (
-        !Number.isInteger(line.stockReservado) ||
-        !Number.isInteger(line.stockBloqueado) ||
-        line.stockReservado < 0 ||
-        line.stockBloqueado < 0
-      ) {
-        toast.error(`Los stocks reservados o bloqueados de ${line.productName} no son válidos.`)
-        return
-      }
+      for (const lote of line.lotes) {
+        if (!lote.numeroLote.trim()) {
+          toast.error(`Ingresa el número de lote para ${line.productName}.`)
+          return
+        }
 
-      if (line.stockReservado + line.stockBloqueado > line.cantidadRecibida) {
-        toast.error(`La reserva y bloqueo de ${line.productName} superan lo recibido.`)
-        return
+        if (!lote.fechaVencimiento.trim()) {
+          toast.error(`Ingresa la fecha de vencimiento para el lote ${lote.numeroLote} de ${line.productName}.`)
+          return
+        }
+
+        const qty = Number(lote.cantidadRecibida)
+        const reserved = Number(lote.stockReservado)
+        const blocked = Number(lote.stockBloqueado)
+
+        if (
+          !Number.isFinite(qty) ||
+          !Number.isInteger(qty) ||
+          qty <= 0
+        ) {
+          toast.error(
+            `La cantidad recibida en el lote ${lote.numeroLote} de ${line.productName} debe ser un entero mayor a 0.`,
+          )
+          return
+        }
+
+        if (
+          !Number.isInteger(reserved) ||
+          !Number.isInteger(blocked) ||
+          reserved < 0 ||
+          blocked < 0
+        ) {
+          toast.error(
+            `Los stocks reservados o bloqueados del lote ${lote.numeroLote} (${line.productName}) no son válidos.`,
+          )
+          return
+        }
+
+        if (reserved + blocked > qty) {
+          toast.error(
+            `La reserva y bloqueo del lote ${lote.numeroLote} (${line.productName}) superan la cantidad recibida.`,
+          )
+          return
+        }
+
+        payloadItems.push({
+          detalleCompraId: line.detailId,
+          numeroLote: lote.numeroLote.trim(),
+          fechaFabricacion: lote.fechaFabricacion.trim() || undefined,
+          fechaVencimiento: lote.fechaVencimiento.trim(),
+          cantidadRecibida: qty,
+          costoUnitarioRecepcion:
+            lote.costoUnitarioRecepcion > 0 ? lote.costoUnitarioRecepcion : undefined,
+          stockReservado: reserved > 0 ? reserved : undefined,
+          stockBloqueado: blocked > 0 ? blocked : undefined,
+          almacen: line.almacen.trim() || undefined,
+          observaciones: line.observacionesLinea.trim() || undefined,
+        })
       }
     }
 
     setIsClosingOrderReceipt(true)
 
     try {
-      const closedOrderId = selectedOrder.id
-      const items: ReceivePurchaseItemPayload[] = linesToReceive.map((line) => ({
-        detalleCompraId: line.detailId,
-        numeroLote: line.numeroLote.trim(),
-        fechaFabricacion: line.fechaFabricacion.trim() || undefined,
-        fechaVencimiento: line.fechaVencimiento,
-        cantidadRecibida: Number(line.cantidadRecibida),
-        stockReservado: Number(line.stockReservado),
-        stockBloqueado: Number(line.stockBloqueado),
-        almacen: line.almacen.trim() || undefined,
-        observaciones: line.observaciones.trim() || undefined,
-      }))
-
+      const closedOrderId = selectedOrderId
       const payload: CreatePurchaseReceptionPayload = {
         compraId: closedOrderId,
-        items,
+        items: payloadItems,
       }
 
       await purchasesService.createReception(accessToken, payload)
+
+      if (selectedViewOrderId === closedOrderId && selectedOrderDetail) {
+        try {
+          const refreshed = await purchasesService.getOrderById(accessToken, closedOrderId)
+          setSelectedOrderDetail(refreshed)
+        } catch {
+          // ignore refresh errors; dashboard will still reload
+        }
+      }
 
       await loadDashboard()
 
@@ -1056,8 +1520,18 @@ export function ComprasPage() {
       setSelectedSummaryOrderId(closedOrderId)
       setIsOrderSummaryDialogOpen(true)
 
-      toast.success(
+      const allPendingIncluded =
+        selectedOrderReceiptGroup &&
         selectedOrderReceiptGroup.pendingLines === linesToReceive.length
+
+      const anyMissing = linesToReceive.some(
+        (line) =>
+          line.lotes.reduce((sum, l) => sum + (Number(l.cantidadRecibida) || 0), 0) <
+          line.pendingPresentationUnits,
+      )
+
+      toast.success(
+        allPendingIncluded && !anyMissing
           ? 'Recepción completa registrada. La orden quedó actualizada.'
           : 'Recepción parcial registrada para la orden.',
       )
@@ -1207,7 +1681,7 @@ export function ComprasPage() {
                         <TableHead>Entrega esperada</TableHead>
                         <TableHead>Totales</TableHead>
                         <TableHead>Estados</TableHead>
-                        <TableHead className="text-right">Acción</TableHead>
+                        <TableHead className="text-center">Acción</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1274,64 +1748,67 @@ export function ComprasPage() {
                               ) : null}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
-                            {receiptGroupsByOrder[order.id]?.pendingLines > 0 &&
-                            order.status !== 'BORRADOR' &&
-                            order.status !== 'ANULADA' &&
-                            order.logisticsStatus !== 'CANCELADA' ? (
-                              <div className="flex justify-end gap-2">
+                          <TableCell className="text-center">
+                            <div className="flex flex-col items-center justify-center gap-1.5 min-w-[120px]">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setSelectedViewOrderId(order.id)}
+                              >
+                                <Eye className="h-4 w-4 mr-1" /> Ver orden
+                              </Button>
+                              <div className="flex items-center justify-center gap-2">
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant="outline"
-                                  onClick={() => openOrderSummaryDialog(order.id)}
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 text-slate-600 hover:text-slate-800 hover:bg-slate-100"
+                                  title="Imprimir orden"
+                                  onClick={async () => {
+                                    try {
+                                      if (!accessToken) return
+                                      const det =
+                                        order.id === selectedOrderDetail?.order.id
+                                          ? selectedOrderDetail
+                                          : await purchasesService.getOrderById(accessToken, order.id)
+                                      await printPurchaseOrderFromElement(
+                                        { detail: det },
+                                        { title: `Orden de compra ${det.order.code}` },
+                                      )
+                                    } catch (nextErr) {
+                                      toast.error(getApiErrorMessage(nextErr))
+                                    }
+                                  }}
                                 >
-                                  Ver detalle
+                                  <Printer className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   type="button"
                                   size="sm"
-                                  variant="outline"
-                                  onClick={() => openPaymentDialog(order)}
-                                  disabled={order.adjustedPendingAmount <= 0}
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                                  title="Descargar PDF"
+                                  onClick={async () => {
+                                    try {
+                                      if (!accessToken) return
+                                      const det =
+                                        order.id === selectedOrderDetail?.order.id
+                                          ? selectedOrderDetail
+                                          : await purchasesService.getOrderById(accessToken, order.id)
+                                      await generatePurchaseOrderPDFBlob(
+                                        { detail: det },
+                                        { filename: `orden-de-compra-${det.order.code.toLowerCase()}.pdf` },
+                                      )
+                                    } catch (nextErr) {
+                                      toast.error(getApiErrorMessage(nextErr))
+                                    }
+                                  }}
                                 >
-                                  Registrar pago
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openOrderReceiveDialog(order.id)}
-                                >
-                                  Cerrar recepción
+                                  <FileDown className="h-4 w-4" />
                                 </Button>
                               </div>
-                            ) : (
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openPaymentDialog(order)}
-                                  disabled={order.adjustedPendingAmount <= 0}
-                                >
-                                  {order.adjustedPendingAmount > 0
-                                    ? 'Registrar pago'
-                                    : 'Sin saldo'}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openOrderSummaryDialog(order.id)}
-                                >
-                                  Ver detalle
-                                </Button>
-                                <span className="self-center text-small text-muted-foreground">
-                                  Sin pendientes
-                                </span>
-                              </div>
-                            )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1770,6 +2247,7 @@ export function ComprasPage() {
         onOpenChange={(open) => {
           setIsCreateDialogOpen(open)
           if (!open) {
+            setEditingPurchaseOrderId(null)
             form.reset({
               ...defaultFormValues,
               fechaEmision: new Date().toISOString().slice(0, 10),
@@ -1781,9 +2259,17 @@ export function ComprasPage() {
           <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateOrder)}>
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">Registrar orden de compra</p>
+                <p className="text-base font-semibold text-foreground">
+                  {editingPurchaseOrderId
+                    ? selectedOrderDetail?.order?.code
+                      ? `Editar orden ${selectedOrderDetail.order.code}`
+                      : 'Editar orden de compra'
+                    : 'Registrar orden de compra'}
+                </p>
                 <p className="text-sm text-muted-foreground">
-                  Alta inicial de la orden con proveedor, costos e impuestos por línea.
+                  {editingPurchaseOrderId
+                    ? 'Modifica los datos y líneas de la orden. Los totales se recalculan automáticamente.'
+                    : 'Alta inicial de la orden con proveedor, costos e impuestos por línea.'}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Esta orden de compra será registrada para la sucursal:{' '}
@@ -1803,284 +2289,585 @@ export function ComprasPage() {
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="grid gap-6">
                 <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Proveedor</label>
-                <Controller
-                  control={form.control}
-                  name="proveedorId"
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona proveedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {options.suppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>
-                            {supplier.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={form.formState.errors.proveedorId?.message} />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Proveedor</label>
+                    <Controller
+                      control={form.control}
+                      name="proveedorId"
+                      render={({ field }) => (
+                        <Select value={field.value || undefined} onValueChange={field.onChange}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona proveedor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {options.suppliers.map((supplier) => (
+                              <SelectItem key={supplier.id} value={supplier.id}>
+                                {supplier.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <FieldError message={form.formState.errors.proveedorId?.message} />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Fecha de emisión</label>
-                <Input type="date" {...form.register('fechaEmision')} />
-                <FieldError message={form.formState.errors.fechaEmision?.message} />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Fecha de emisión</label>
+                    <div className="rounded-md border border-input bg-muted/40 px-3 py-2 text-sm">
+                      <span className="font-medium text-foreground">
+                        {new Date(watchedFechaEmision).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                      </span>
+                    </div>
+                    <FieldError message={form.formState.errors.fechaEmision?.message} />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Recepción esperada</label>
-                <Input type="date" {...form.register('fechaRecepcion')} />
-                <FieldError message={form.formState.errors.fechaRecepcion?.message} />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Recepción esperada</label>
+                    <Input type="date" {...form.register('fechaRecepcion')} />
+                    <FieldError message={form.formState.errors.fechaRecepcion?.message} />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Estado inicial</label>
-                <Controller
-                  control={form.control}
-                  name="estado"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="BORRADOR">Borrador</SelectItem>
-                        <SelectItem value="REGISTRADA">Registrada</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Estado inicial</label>
+                    <Controller
+                      control={form.control}
+                      name="estado"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="BORRADOR">Borrador</SelectItem>
+                            <SelectItem value="REGISTRADA">Registrada</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Observaciones</label>
-                <Textarea
-                  {...form.register('observaciones')}
-                  placeholder="Notas operativas para abastecimiento o recepción"
-                  className="min-h-24"
-                />
-                <FieldError message={form.formState.errors.observaciones?.message} />
-              </div>
-            </div>
-
-            <div className="space-y-4 rounded-2xl border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium text-foreground">Líneas de compra</p>
-                  <p className="text-small text-muted-foreground">
-                    Registra productos, cantidades y costo unitario para calcular la orden.
-                  </p>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-sm font-medium">Observaciones</label>
+                    <Textarea
+                      {...form.register('observaciones')}
+                      placeholder="Notas operativas para abastecimiento o recepción"
+                      rows={3}
+                      className="resize-y"
+                    />
+                    <FieldError message={form.formState.errors.observaciones?.message} />
+                  </div>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    append({
-                      productoId: '',
-                      cantidad: 1,
-                      costoUnitario: 0,
-                      porcentajeImpuesto: 18,
-                    })
-                  }
-                >
-                  <Plus className="h-4 w-4" />
-                  Agregar línea
-                </Button>
-              </div>
 
-              <div className="space-y-4">
-                {fields.map((field, index) => {
-                  const selectedProductId = form.watch(`items.${index}.productoId`)
-                  const selectedProduct = options.products.find(
-                    (product) => product.id === selectedProductId,
-                  )
-                  const purchasePresentationId =
-                    selectedProduct?.packaging?.purchasePresentationId ?? null
-                  const purchasePresentation =
-                    purchasePresentationId && selectedProduct?.packaging?.presentations?.length
-                      ? selectedProduct.packaging.presentations.find(
-                          (entry) => entry.id === purchasePresentationId,
-                        ) ?? null
-                      : null
-                  const purchasePresentationName = purchasePresentation?.name ?? null
-                  const purchasePresentationFactor =
-                    purchasePresentation?.factorToBase && purchasePresentation.factorToBase > 0
-                      ? purchasePresentation.factorToBase
-                      : null
-
-                  return (
-                    <div key={field.id} className="grid gap-4 rounded-2xl border p-4 lg:grid-cols-[1.6fr_0.45fr_0.55fr_0.45fr_auto]">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Producto</label>
-                        <Controller
-                          control={form.control}
-                          name={`items.${index}.productoId`}
-                          render={({ field: productField }) => (
-                            <Select
-                              value={productField.value || undefined}
-                              onValueChange={(value) => {
-                                productField.onChange(value)
-
-                                const product = options.products.find(
-                                  (entry) => entry.id === value,
-                                )
-                                const currentCost = form.getValues(
-                                  `items.${index}.costoUnitario`,
-                                )
-
-                                if (product && (!currentCost || currentCost === 0)) {
-                                  form.setValue(
-                                    `items.${index}.costoUnitario`,
-                                    product.referenceCost,
-                                    { shouldDirty: true },
-                                  )
-                                }
-
-                                if (product) {
-                                }
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Selecciona producto" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {options.products.map((product) => (
-                                  <SelectItem key={product.id} value={product.id}>
-                                    {product.name} · {product.sku}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        <FieldError
-                          message={form.formState.errors.items?.[index]?.productoId?.message}
-                        />
-                        {selectedProduct ? (
-                          <p className="text-small text-muted-foreground">
-                            {selectedProduct.sku} · costo ref. {formatCurrency(selectedProduct.referenceCost)}
-                          </p>
-                        ) : null}
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Productos</p>
+                    <p className="text-xs text-muted-foreground">
+                      Busca un producto y agrégalo a la orden. Después configura presentación, cantidad y costo en cada línea.
+                    </p>
+                  </div>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={globalProductoSearchQuery}
+                      onChange={(event) => {
+                        const next = event.target.value
+                        setGlobalProductoSearchQuery(next)
+                        if (next.trim().length >= 0) {
+                          setGlobalProductoSearchOpen(true)
+                        }
+                      }}
+                      onFocus={() => setGlobalProductoSearchOpen(true)}
+                      onBlur={() =>
+                        window.setTimeout(() => {
+                          setGlobalProductoSearchOpen(false)
+                        }, 200)
+                      }
+                      placeholder="Buscar por nombre, SKU, código o laboratorio"
+                      className="h-12 pl-11 pr-4 text-base"
+                    />
+                    {globalProductoSearchOpen ? (
+                      <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 max-h-96 overflow-y-auto rounded-xl border bg-popover p-2 shadow-xl">
+                        {((): typeof options.products => {
+                          const q = globalProductoSearchQuery.trim().toLowerCase()
+                          if (!q) return options.products.slice(0, 60)
+                          return options.products
+                            .filter((entry) => {
+                              const haystack = [
+                                entry.name,
+                                entry.sku,
+                                entry.internalCode,
+                                entry.barcode,
+                                entry.laboratory,
+                              ]
+                                .filter(Boolean)
+                                .join(' ')
+                                .toLowerCase()
+                              return haystack.includes(q)
+                            })
+                            .slice(0, 80)
+                        })().length === 0 ? (
+                          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                            No se encontraron productos con ese criterio.
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {((): typeof options.products => {
+                              const q = globalProductoSearchQuery.trim().toLowerCase()
+                              if (!q) return options.products.slice(0, 60)
+                              return options.products
+                                .filter((entry) => {
+                                  const haystack = [
+                                    entry.name,
+                                    entry.sku,
+                                    entry.internalCode,
+                                    entry.barcode,
+                                    entry.laboratory,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')
+                                    .toLowerCase()
+                                  return haystack.includes(q)
+                                })
+                                .slice(0, 80)
+                            })().map((product) => {
+                              const alreadyInOrder = watchedItems.some(
+                                (it) => it.productoId === product.id,
+                              )
+                              const presentations: PurchasePresentationOption[] =
+                                product.packaging?.presentations ?? []
+                              const basePresentationName =
+                                presentations.find((p) => p.isBase)?.name ?? product.unitSymbol ?? 'Unidad'
+                              return (
+                                <div
+                                  key={product.id}
+                                  className="grid gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/40 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                                >
+                                  <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="text-sm font-semibold leading-tight text-foreground">
+                                        {product.name}
+                                      </p>
+                                      {alreadyInOrder ? (
+                                        <Badge variant="outline" className="text-[10px] uppercase tracking-[0.1em]">
+                                          Ya agregado
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                      <span className="font-mono">SKU {product.sku}</span>
+                                      {product.laboratory ? (
+                                        <span>Laboratorio: {product.laboratory}</span>
+                                      ) : null}
+                                      <span>Unidad base: {basePresentationName}</span>
+                                      {product.barcode ? (
+                                        <span className="font-mono">Código {product.barcode}</span>
+                                      ) : null}
+                                    </div>
+                                    {product.lastPurchaseCost > 0 ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        Último costo:{' '}
+                                        <span className="font-medium text-foreground">
+                                          {formatCurrency(product.lastPurchaseCost)}
+                                        </span>
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  <div className="shrink-0">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      disabled={alreadyInOrder}
+                                      onMouseDown={(event) => {
+                                        event.preventDefault()
+                                      }}
+                                      onClick={() => {
+                                        const newIndex = fields.length
+                                        append({
+                                          productoId: product.id,
+                                          cantidad: 1,
+                                          costoUnitario:
+                                            typeof product.lastPurchaseCost === 'number' &&
+                                            Number.isFinite(product.lastPurchaseCost)
+                                              ? product.lastPurchaseCost
+                                              : 0,
+                                          porcentajeImpuesto: 0,
+                                        })
+                                        const autoPres =
+                                          product.packaging?.purchasePresentationId ??
+                                          product.packaging?.presentations?.find(
+                                            (p) => p.allowsPurchase,
+                                          )?.id ??
+                                          null
+                                        if (autoPres) {
+                                          setCreateLineaPresentacionId((cur) => ({
+                                            ...cur,
+                                            [newIndex]: autoPres,
+                                          }))
+                                        }
+                                        setGlobalProductoSearchOpen(false)
+                                        setGlobalProductoSearchQuery('')
+                                      }}
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                      Agregar
+                                    </Button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
+                    ) : null}
+                  </div>
+                </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Cantidad</label>
-                        <Input
-                          type="number"
-                          step="1"
-                          {...form.register(`items.${index}.cantidad`, {
-                            valueAsNumber: true,
-                          })}
-                        />
-                        <FieldError
-                          message={form.formState.errors.items?.[index]?.cantidad?.message}
-                        />
-                        {selectedProduct && purchasePresentationFactor ? (
-                          <p className="text-small text-muted-foreground">
-                            1 {purchasePresentationName ?? 'presentación'} = {purchasePresentationFactor} unidades base
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Costo unitario</label>
-                        <Input
-                          type="number"
-                          step="0.000001"
-                          {...form.register(`items.${index}.costoUnitario`, {
-                            valueAsNumber: true,
-                          })}
-                        />
-                        <FieldError
-                          message={
-                            form.formState.errors.items?.[index]?.costoUnitario?.message
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">IGV %</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          {...form.register(`items.${index}.porcentajeImpuesto`, {
-                            valueAsNumber: true,
-                          })}
-                        />
-                        <FieldError
-                          message={
-                            form.formState.errors.items?.[index]?.porcentajeImpuesto?.message
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-end justify-between gap-3 lg:flex-col lg:justify-end">
-                        <div className="text-right text-small text-muted-foreground">
-                          Total
-                          <p className="font-medium text-foreground">
-                            {formatCurrency(
-                              (Number(watchedItems[index]?.cantidad) || 0) *
-                                (Number(watchedItems[index]?.costoUnitario) || 0) *
-                                (1 +
-                                  (Number(watchedItems[index]?.porcentajeImpuesto) || 0) / 100),
-                            )}
-                          </p>
-                          {selectedProduct ? (
-                            <p>
-                              {purchasePresentationName
-                                ? purchasePresentationName
-                                : selectedProduct.unitSymbol}
-                            </p>
-                          ) : null}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => remove(index)}
-                          disabled={fields.length === 1}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Líneas de compra</p>
+                        <p className="text-xs text-muted-foreground">
+                          {fields.length === 0
+                            ? 'Aún no has agregado productos.'
+                            : `${fields.length} producto${fields.length === 1 ? '' : 's'} en la orden.`}
+                        </p>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
 
-              <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Subtotal
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(draftTotals.subtotal)}
-                  </p>
+                  <div className="space-y-5">
+                    {fields.map((field, index) => {
+                      const selectedProductId = watchedItems[index]?.productoId ?? ''
+                      const selectedProduct = options.products.find(
+                        (product) => product.id === selectedProductId,
+                      )
+                      const presentations: PurchasePresentationOption[] =
+                        selectedProduct?.packaging?.presentations ?? []
+                      const defaultPurchasePresentationId =
+                        selectedProduct?.packaging?.purchasePresentationId ?? null
+                      const chosenPresentationId =
+                        createLineaPresentacionId[index] ??
+                        defaultPurchasePresentationId ??
+                        presentations.find((p) => p.allowsPurchase)?.id ??
+                        presentations[0]?.id ??
+                        null
+                      const chosenPresentation =
+                        chosenPresentationId
+                          ? presentations.find((p) => p.id === chosenPresentationId) ?? null
+                          : null
+                      const unitLabel = selectedProduct?.unitSymbol ?? 'unidades'
+                      const basePresentationName =
+                        presentations.find((p) => p.isBase)?.name ?? unitLabel
+                      const chain = buildPurchasePresentationChain(
+                        presentations,
+                        chosenPresentationId,
+                      )
+                      const summary = buildPackagingSummary(chain, (id) =>
+                        resolveLabelForPresentationId(presentations, id),
+                      )
+                      const lineQuantity = Number(watchedItems[index]?.cantidad) || 0
+                      const baseFactor =
+                        chosenPresentation?.factorToBase && chosenPresentation.factorToBase > 0
+                          ? chosenPresentation.factorToBase
+                          : summary.baseUnits ?? 1
+                      const baseUnitsTotal = lineQuantity * baseFactor
+
+                      return (
+                        <div key={field.id} className="space-y-4 rounded-2xl border p-5">
+                          <input
+                            type="hidden"
+                            {...form.register(`items.${index}.productoId`)}
+                          />
+                          <FieldError
+                            message={
+                              form.formState.errors.items?.[index]?.productoId?.message
+                            }
+                          />
+
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-1">
+                              <p className="text-base font-semibold leading-tight text-foreground">
+                                {selectedProduct?.name ?? 'Producto'}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                {selectedProduct?.sku ? (
+                                  <span className="font-mono">SKU {selectedProduct.sku}</span>
+                                ) : null}
+                                {selectedProduct?.laboratory ? (
+                                  <span>Laboratorio: {selectedProduct.laboratory}</span>
+                                ) : null}
+                                {selectedProduct?.unitSymbol ? (
+                                  <span>Unidad base: {basePresentationName}</span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => remove(index)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sr-only">Quitar línea</span>
+                            </Button>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-3">
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium">
+                                Presentación de compra
+                              </label>
+                              {presentations.length === 0 ? (
+                                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                                  El producto no tiene empaque configurado.
+                                </div>
+                              ) : (
+                                <Select
+                                  value={chosenPresentationId ?? undefined}
+                                  onValueChange={(value) => {
+                                    setCreateLineaPresentacionId((cur) => ({
+                                      ...cur,
+                                      [index]: value,
+                                    }))
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Selecciona presentación" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {presentations.map((pres) => (
+                                      <SelectItem
+                                        key={pres.id}
+                                        value={pres.id}
+                                        disabled={!pres.allowsPurchase}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium">{pres.name}</span>
+                                          {pres.isBase ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="text-[10px] uppercase tracking-[0.12em]"
+                                            >
+                                              Base
+                                            </Badge>
+                                          ) : null}
+                                          {!pres.allowsPurchase ? (
+                                            <span className="text-[11px] text-muted-foreground">
+                                              (solo inventario)
+                                            </span>
+                                          ) : null}
+                                          {pres.factorToBase && pres.factorToBase > 0 ? (
+                                            <span className="ml-auto text-[11px] text-muted-foreground">
+                                              1 {pres.name} = {pres.factorToBase.toLocaleString('es-PE')} {basePresentationName}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium">Cantidad</label>
+                              <Input
+                                type="number"
+                                min="1"
+                                step="1"
+                                {...form.register(`items.${index}.cantidad`, {
+                                  valueAsNumber: true,
+                                })}
+                              />
+                              <FieldError
+                                message={
+                                  form.formState.errors.items?.[index]?.cantidad?.message
+                                }
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium">Costo unitario</label>
+                              <div className="relative">
+                                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                                  S/
+                                </span>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  className="pl-9"
+                                  {...form.register(`items.${index}.costoUnitario`, {
+                                    valueAsNumber: true,
+                                  })}
+                                />
+                              </div>
+                              <FieldError
+                                message={
+                                  form.formState.errors.items?.[index]?.costoUnitario
+                                    ?.message
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start">
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium">Afectación IGV</label>
+                              <Controller
+                                control={form.control}
+                                name={`items.${index}.porcentajeImpuesto`}
+                                render={({ field }) => (
+                                  <Select
+                                    value={
+                                      field.value === 18
+                                        ? 'GRAVADO_18'
+                                        : field.value === 0
+                                          ? 'EXONERADO'
+                                          : String(field.value)
+                                    }
+                                    onValueChange={(value) => {
+                                      if (value === 'GRAVADO_18') field.onChange(18)
+                                      else if (value === 'EXONERADO') field.onChange(0)
+                                      else {
+                                        const n = Number(value)
+                                        field.onChange(
+                                          Number.isFinite(n) && n >= 0 ? n : 0,
+                                        )
+                                      }
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="GRAVADO_18">Gravado 18%</SelectItem>
+                                      <SelectItem value="EXONERADO">Exonerado / 0%</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              />
+                              <FieldError
+                                message={
+                                  form.formState.errors.items?.[index]?.porcentajeImpuesto
+                                    ?.message
+                                }
+                              />
+                            </div>
+
+                            {chosenPresentation?.name && Number.isFinite(baseFactor) ? (
+                              <div className="space-y-2">
+                                <label className="text-sm font-medium text-transparent select-none">
+                                  Cantidad comprada
+                                </label>
+                                <div className="inline-flex w-full items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/70 px-4 py-2 text-sm text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+                                  <span className="font-semibold">
+                                    {lineQuantity || 0} {chosenPresentation.name}
+                                  </span>
+                                  <span className="font-medium">=</span>
+                                  <span className="font-mono font-bold">
+                                    {baseUnitsTotal.toLocaleString('es-PE')} {basePresentationName} base
+                                  </span>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {summary.hasEnoughData && summary.baseUnits && summary.baseUnits > 1 ? (
+                            <div className="rounded-xl border bg-muted/30 p-4">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground/80">
+                                Conversión de presentación
+                              </p>
+                              <p className="mt-1.5 text-sm font-semibold text-foreground">
+                                {summary.equivalenceText}
+                              </p>
+                              {summary.relationTexts.length > 0 ? (
+                                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                                  {summary.relationTexts.map((txt, i) => (
+                                    <li key={i}>· {txt}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          <div className="grid gap-4 rounded-xl border bg-muted/20 p-4 sm:grid-cols-3">
+                            <div className="space-y-1">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                                Subtotal
+                              </p>
+                              <p className="text-lg font-semibold text-foreground">
+                                {formatCurrency(draftLineTotals[index]?.subtotal ?? 0)}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                                IGV
+                              </p>
+                              <p className="text-lg font-semibold text-foreground">
+                                {formatCurrency(draftLineTotals[index]?.igv ?? 0)}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                                Total de línea
+                              </p>
+                              <p className="text-xl font-bold text-foreground">
+                                {formatCurrency(draftLineTotals[index]?.total ?? 0)}
+                              </p>
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                {(watchedItems[index]?.porcentajeImpuesto ?? 0) > 0
+                                  ? `S/. ${(watchedItems[index]?.costoUnitario ?? 0).toFixed(2)} × ${lineQuantity || 0}`
+                                  : 'Operación exonerada'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+
+                    {fields.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed p-10 text-center">
+                        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted/50">
+                          <Search className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <p className="text-sm font-medium text-foreground">Aún no has agregado productos.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Busca un producto arriba para comenzar la orden de compra.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {fields.length > 0 ? (
+                    <div className="grid gap-4 rounded-2xl border bg-muted/20 p-5 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                          Subtotal
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-foreground">
+                          {formatCurrency(draftTotals.subtotal)}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                          IGV
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-foreground">
+                          {formatCurrency(draftTotals.tax)}
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                          Total general
+                        </p>
+                        <p className="mt-1 text-2xl font-bold text-foreground">
+                          {formatCurrency(draftTotals.total)}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Impuesto
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(draftTotals.tax)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Total
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {formatCurrency(draftTotals.total)}
-                  </p>
-                </div>
-              </div>
-            </div>
               </div>
             </div>
 
@@ -2321,11 +3108,11 @@ export function ComprasPage() {
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">Cerrar recepción por orden</p>
+                <p className="text-base font-semibold text-foreground">Registrar recepción</p>
                 <p className="text-sm text-muted-foreground">
-                  {selectedOrder && selectedOrderReceiptGroup
-                    ? `${selectedOrder.code} · ${selectedOrder.supplierName} · ${selectedOrderReceiptGroup.pendingLines} líneas pendientes`
-                    : 'Completa las líneas pendientes y registra una nueva recepción.'}
+                  {selectedOrder
+                    ? `${selectedOrder.code} · ${selectedOrder.supplierName}${selectedOrderReceiptGroup ? ` · ${selectedOrderReceiptGroup.pendingLines} líneas pendientes` : ''}`
+                    : 'Confirma cantidades recibidas, lotes y vencimientos. El inventario y Kardex se actualizarán al confirmar.'}
                 </p>
               </div>
               <SidePanelClose asChild>
@@ -2338,237 +3125,440 @@ export function ComprasPage() {
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="space-y-6">
-            {selectedOrderReceiptGroup ? (
-              <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-4">
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Líneas pendientes
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedOrderReceiptGroup.pendingLines}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Unidades pendientes
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedOrderReceiptGroup.pendingUnits.toFixed(0)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Unidades disponibles
-                  </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedOrderAvailableUnits.toFixed(0)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                    Estados
-                  </p>
-                  <div className="mt-2 flex flex-col gap-1">
-                    <Badge
-                      variant={
-                        selectedOrder
-                          ? getLogisticsStatusVariant(selectedOrder.logisticsStatus)
-                          : 'outline'
-                      }
-                    >
-                      {selectedOrder ? formatLogisticsStatus(selectedOrder.logisticsStatus) : 'N/A'}
-                    </Badge>
-                    <Badge
-                      variant={
-                        selectedOrder
-                          ? getFinancialStatusVariant(selectedOrder.financialStatus)
-                          : 'outline'
-                      }
-                    >
-                      {selectedOrder ? formatFinancialStatus(selectedOrder.financialStatus) : 'N/A'}
-                    </Badge>
+                <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-4">
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Líneas a recepcionar
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {orderReceiptDrafts.filter((l) => l.include).length} / {orderReceiptDrafts.length}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Unidades pendientes (base)
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-foreground">
+                      {formatQuantity(
+                        orderReceiptDrafts.reduce((sum, l) => sum + (l.include ? l.pendingBaseUnits : 0), 0),
+                        0,
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Unidades a ingresar (base)
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-emerald-700">
+                      {formatQuantity(selectedOrderAvailableUnits, 0)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                      Estados actuales
+                    </p>
+                    <div className="mt-2 flex flex-col gap-1">
+                      <Badge
+                        variant={
+                          selectedOrder
+                            ? getLogisticsStatusVariant(selectedOrder.logisticsStatus)
+                            : 'outline'
+                        }
+                      >
+                        {selectedOrder ? formatLogisticsStatus(selectedOrder.logisticsStatus) : 'N/A'}
+                      </Badge>
+                      <Badge
+                        variant={
+                          selectedOrder
+                            ? getFinancialStatusVariant(selectedOrder.financialStatus)
+                            : 'outline'
+                        }
+                      >
+                        {selectedOrder ? formatFinancialStatus(selectedOrder.financialStatus) : 'N/A'}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
 
-            <div className="space-y-4">
-              {orderReceiptDrafts.map((line) => {
-                const draftAvailableUnits = Math.max(
-                  0,
-                  line.cantidadRecibida - line.stockReservado - line.stockBloqueado,
-                )
+                <div className="space-y-5">
+                  {orderReceiptDrafts.map((line) => {
+                    const totalReceivedPresentation = line.lotes.reduce(
+                      (sum, l) => sum + (Number(l.cantidadRecibida) || 0),
+                      0,
+                    )
+                    const totalReceivedBase =
+                      totalReceivedPresentation * (line.presentationFactor ?? 1)
+                    const totalReservedPresentation = line.lotes.reduce(
+                      (sum, l) => sum + (Number(l.stockReservado) || 0),
+                      0,
+                    )
+                    const totalBlockedPresentation = line.lotes.reduce(
+                      (sum, l) => sum + (Number(l.stockBloqueado) || 0),
+                      0,
+                    )
+                    const lineAvailablePresentation = Math.max(
+                      0,
+                      totalReceivedPresentation - totalReservedPresentation - totalBlockedPresentation,
+                    )
+                    const lineAvailableBase =
+                      lineAvailablePresentation * (line.presentationFactor ?? 1)
+                    const lineTotalCost = line.lotes.reduce(
+                      (sum, l) =>
+                        sum + (Number(l.cantidadRecibida) || 0) * (Number(l.costoUnitarioRecepcion) || 0),
+                      0,
+                    )
 
-                return (
-                  <div key={line.detailId} className="space-y-4 rounded-2xl border p-4">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                      <div>
-                        <p className="font-medium text-foreground">{line.productName}</p>
-                        <p className="text-small text-muted-foreground">
-                          Pendiente: {line.pendingQuantity.toFixed(0)} {line.unitLabel}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={line.include ? 'secondary' : 'outline'}
-                          onClick={() =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              include: !line.include,
-                            })
-                          }
-                        >
-                          {line.include ? 'Incluida' : 'Omitida'}
-                        </Button>
-                      </div>
-                    </div>
+                    return (
+                      <div
+                        key={line.detailId}
+                        className={`space-y-4 rounded-2xl border p-4 transition-opacity ${
+                          line.include ? 'opacity-100' : 'opacity-60'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium text-foreground">{line.productName}</p>
+                              {line.sku ? (
+                                <span className="text-xs text-muted-foreground">
+                                  SKU {line.sku}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-small text-muted-foreground">
+                              Presentación: {line.presentationName} · Factor {line.presentationFactor}
+                              {line.equivalenceText ? (
+                                <>
+                                  {' · '}
+                                  <span className="text-sky-700 font-medium">
+                                    {line.equivalenceText}
+                                  </span>
+                                </>
+                              ) : null}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {line.previouslyReceivedPresentationUnits > 0 ? (
+                              <Badge variant="outline" className="text-xs">
+                                Ya recibido: {formatQuantity(line.previouslyReceivedPresentationUnits, 0)}{' '}
+                                {line.presentationName}
+                              </Badge>
+                            ) : null}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={line.include ? 'secondary' : 'outline'}
+                              onClick={() =>
+                                updateOrderReceiptDraft(line.detailId, {
+                                  include: !line.include,
+                                })
+                              }
+                            >
+                              {line.include ? 'Incluida' : 'Omitida'}
+                            </Button>
+                          </div>
+                        </div>
 
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Lote</label>
-                        <Input
-                          value={line.numeroLote}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              numeroLote: event.target.value,
-                            })
-                          }
-                          disabled={!line.include}
-                        />
-                      </div>
+                        <div className="grid gap-3 rounded-xl border bg-muted/20 p-3 md:grid-cols-3">
+                          <div className="space-y-1">
+                            <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                              Pedido
+                            </p>
+                            <p className="font-semibold text-foreground">
+                              {formatQuantity(line.requestedPresentationQty, 0)}{' '}
+                              {line.presentationName}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              = {formatQuantity(line.requestedBaseUnits, 0)} {line.unitSymbol}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                              Recibido (esta acción)
+                            </p>
+                            <p className={`font-semibold ${
+                              totalReceivedPresentation > line.pendingPresentationUnits
+                                ? 'text-rose-700'
+                                : 'text-emerald-700'
+                            }`}>
+                              {formatQuantity(totalReceivedPresentation, 0)}{' '}
+                              {line.presentationName}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              = {formatQuantity(totalReceivedBase, 0)} {line.unitSymbol}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
+                              Faltante luego de esta recepción
+                            </p>
+                            <p className={`font-semibold ${
+                              line.missingPresentationQty > 0 ? 'text-amber-700' : 'text-emerald-700'
+                            }`}>
+                              {formatQuantity(line.missingPresentationQty, 0)}{' '}
+                              {line.presentationName}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              = {formatQuantity(line.missingBaseUnits, 0)} {line.unitSymbol}
+                            </p>
+                          </div>
+                        </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Cantidad recibida</label>
-                        <Input
-                          type="number"
-                          step="1"
-                          value={line.cantidadRecibida}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              cantidadRecibida: Number(event.target.value),
-                            })
-                          }
-                          disabled={!line.include}
-                        />
-                      </div>
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-foreground">
+                              Lotes recibidos
+                              <span className="ml-2 text-xs text-muted-foreground font-normal">
+                                ({line.lotes.length} {line.lotes.length === 1 ? 'lote' : 'lotes'})
+                              </span>
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!line.include}
+                              onClick={() => addLoteToReceiptDraft(line.detailId)}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Agregar lote
+                            </Button>
+                          </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Fecha fabricación</label>
-                        <Input
-                          type="date"
-                          value={line.fechaFabricacion}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              fechaFabricacion: event.target.value,
-                            })
-                          }
-                          disabled={!line.include}
-                        />
-                      </div>
+                          <div className="space-y-3">
+                            {line.lotes.map((lote, loteIndex) => {
+                              const loteAvailableQty = Math.max(
+                                0,
+                                (Number(lote.cantidadRecibida) || 0) -
+                                  (Number(lote.stockReservado) || 0) -
+                                  (Number(lote.stockBloqueado) || 0),
+                              )
+                              return (
+                                <div
+                                  key={lote.id}
+                                  className="rounded-xl border p-3 space-y-3 bg-white"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                      Lote {loteIndex + 1}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-rose-700"
+                                      disabled={!line.include || line.lotes.length <= 1}
+                                      onClick={() => removeLoteFromReceiptDraft(line.detailId, lote.id)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      <span className="sr-only">Quitar lote</span>
+                                    </Button>
+                                  </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Fecha vencimiento</label>
-                        <Input
-                          type="date"
-                          value={line.fechaVencimiento}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              fechaVencimiento: event.target.value,
-                            })
-                          }
-                          disabled={!line.include}
-                        />
-                      </div>
+                                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                    <div className="space-y-1.5">
+                                      <label className="text-sm font-medium">Número de lote</label>
+                                      <Input
+                                        value={lote.numeroLote}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: { numeroLote: event.target.value },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <label className="text-sm font-medium">
+                                        Cantidad ({line.presentationName})
+                                      </label>
+                                      <Input
+                                        type="number"
+                                        step="1"
+                                        min="0"
+                                        value={lote.cantidadRecibida}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: {
+                                              cantidadRecibida: Number(event.target.value) || 0,
+                                            },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <label className="text-sm font-medium">Fecha fabricación</label>
+                                      <Input
+                                        type="date"
+                                        value={lote.fechaFabricacion}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: { fechaFabricacion: event.target.value },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <label className="text-sm font-medium">Fecha vencimiento</label>
+                                      <Input
+                                        type="date"
+                                        value={lote.fechaVencimiento}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: { fechaVencimiento: event.target.value },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <label className="text-sm font-medium">Reservado</label>
+                                      <Input
+                                        type="number"
+                                        step="1"
+                                        min="0"
+                                        value={lote.stockReservado}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: {
+                                              stockReservado: Number(event.target.value) || 0,
+                                            },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <label className="text-sm font-medium">Bloqueado</label>
+                                      <Input
+                                        type="number"
+                                        step="1"
+                                        min="0"
+                                        value={lote.stockBloqueado}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: {
+                                              stockBloqueado: Number(event.target.value) || 0,
+                                            },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5 md:col-span-2">
+                                      <label className="text-sm font-medium">
+                                        Costo unitario recepción (por {line.presentationName})
+                                      </label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={lote.costoUnitarioRecepcion}
+                                        onChange={(event) =>
+                                          updateOrderReceiptDraft(line.detailId, null, {
+                                            loteId: lote.id,
+                                            lotePatch: {
+                                              costoUnitarioRecepcion: Number(event.target.value) || 0,
+                                            },
+                                          })
+                                        }
+                                        disabled={!line.include}
+                                      />
+                                    </div>
+                                  </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Reservado</label>
-                        <Input
-                          type="number"
-                          step="1"
-                          value={line.stockReservado}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              stockReservado: Number(event.target.value),
-                            })
-                          }
-                          disabled={!line.include}
-                        />
-                      </div>
+                                  <div className="grid gap-3 rounded-lg border bg-muted/20 p-2.5 text-xs md:grid-cols-3">
+                                    <div>
+                                      <span className="text-muted-foreground">Recibido / base:</span>{' '}
+                                      <span className="font-semibold text-foreground">
+                                        {formatQuantity(lote.cantidadRecibida || 0, 0)}{' '}
+                                        {line.presentationName} ={' '}
+                                        {formatQuantity(
+                                          (lote.cantidadRecibida || 0) * (line.presentationFactor ?? 1),
+                                          0,
+                                        )}{' '}
+                                        {line.unitSymbol}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Disponible:</span>{' '}
+                                      <span className="font-semibold text-emerald-700">
+                                        {formatQuantity(loteAvailableQty, 0)} {line.presentationName}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Costo lote:</span>{' '}
+                                      <span className="font-semibold text-foreground">
+                                        {formatCurrency(
+                                          (lote.cantidadRecibida || 0) *
+                                            (lote.costoUnitarioRecepcion || 0),
+                                        )}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Bloqueado</label>
-                        <Input
-                          type="number"
-                          step="1"
-                          value={line.stockBloqueado}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              stockBloqueado: Number(event.target.value),
-                            })
-                          }
-                          disabled={!line.include}
-                        />
-                      </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium">Almacén / ubicación</label>
+                            <Input
+                              value={line.almacen}
+                              onChange={(event) =>
+                                updateOrderReceiptDraft(line.detailId, {
+                                  almacen: event.target.value,
+                                })
+                              }
+                              disabled={!line.include}
+                              placeholder="Ej: Mostrador principal, Depósito A"
+                            />
+                          </div>
+                          <div className="space-y-1.5 rounded-xl border bg-muted/10 p-3">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">Total línea</span>
+                              <span className="font-semibold text-foreground">
+                                {formatCurrency(lineTotalCost)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs mt-1">
+                              <span className="text-muted-foreground">Disponible para venta</span>
+                              <span className="font-semibold text-emerald-700">
+                                {formatQuantity(lineAvailablePresentation, 0)}{' '}
+                                {line.presentationName} ={' '}
+                                {formatQuantity(lineAvailableBase, 0)} {line.unitSymbol}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
 
-                      <div className="space-y-2 xl:col-span-2">
-                        <label className="text-sm font-medium">Almacén / ubicación</label>
-                        <Input
-                          value={line.almacen}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              almacen: event.target.value,
-                            })
-                          }
-                          disabled={!line.include}
-                        />
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium">Observaciones de la línea</label>
+                          <Textarea
+                            value={line.observacionesLinea}
+                            onChange={(event) =>
+                              updateOrderReceiptDraft(line.detailId, {
+                                observacionesLinea: event.target.value,
+                              })
+                            }
+                            className="min-h-16"
+                            disabled={!line.include}
+                            placeholder="Condición de recepción, daños, faltantes declarados por proveedor..."
+                          />
+                        </div>
                       </div>
-
-                      <div className="space-y-2 md:col-span-2 xl:col-span-4">
-                        <label className="text-sm font-medium">Observaciones</label>
-                        <Textarea
-                          value={line.observaciones}
-                          onChange={(event) =>
-                            updateOrderReceiptDraft(line.detailId, {
-                              observaciones: event.target.value,
-                            })
-                          }
-                          className="min-h-20"
-                          disabled={!line.include}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
-                      <div>
-                        <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                          Pendiente
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-foreground">
-                          {line.pendingQuantity.toFixed(0)} {line.unitLabel}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                          Recibido
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-foreground">
-                          {Number(line.cantidadRecibida || 0).toFixed(0)} {line.unitLabel}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                          Disponible
-                        </p>
-                        <p className="mt-2 text-base font-semibold text-foreground">
-                          {draftAvailableUnits.toFixed(0)} {line.unitLabel}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
@@ -2589,17 +3579,21 @@ export function ComprasPage() {
                 <Button
                   type="button"
                   onClick={() => void handleCloseOrderReceipt()}
-                  disabled={isClosingOrderReceipt || orderReceiptDrafts.length === 0}
+                  disabled={
+                    isClosingOrderReceipt ||
+                    orderReceiptDrafts.length === 0 ||
+                    orderReceiptDrafts.every((l) => !l.include)
+                  }
                 >
                   {isClosingOrderReceipt ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Cerrando recepción...
+                      Registrando recepción...
                     </>
                   ) : (
                     <>
                       <PackageCheck className="h-4 w-4" />
-                      Confirmar recepción completa
+                      Confirmar recepción
                     </>
                   )}
                 </Button>
@@ -2781,72 +3775,60 @@ export function ComprasPage() {
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="grid gap-6">
                 <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Forma de pago</label>
-                <Controller
-                  control={paymentForm.control}
-                  name="formaPagoId"
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona forma de pago" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {options.paymentMethods.map((method) => (
-                          <SelectItem key={method.id} value={method.id}>
-                            {method.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={paymentForm.formState.errors.formaPagoId?.message} />
-              </div>
+                  <FormPaymentMethodTwoLevelSelect
+                    control={paymentForm.control}
+                    name="formaPagoId"
+                    methods={options.paymentMethods}
+                    label="Forma de pago"
+                    placeholderCategory="Selecciona una categoría"
+                    placeholderSubmethod="Selecciona el tipo digital"
+                    id="purchases-payment-method"
+                    required
+                  />
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Fecha de pago</label>
-                <Input type="date" {...paymentForm.register('fechaPago')} />
-                <FieldError message={paymentForm.formState.errors.fechaPago?.message} />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Fecha de pago</label>
+                    <Input type="date" {...paymentForm.register('fechaPago')} />
+                    <FieldError message={paymentForm.formState.errors.fechaPago?.message} />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Monto</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  {...paymentForm.register('monto', {
-                    valueAsNumber: true,
-                  })}
-                />
-                <FieldError message={paymentForm.formState.errors.monto?.message} />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Monto</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      {...paymentForm.register('monto', {
+                        valueAsNumber: true,
+                      })}
+                    />
+                    <FieldError message={paymentForm.formState.errors.monto?.message} />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Referencia</label>
-                <Input
-                  {...paymentForm.register('referenciaExterna')}
-                  placeholder={
-                    selectedPaymentMethod?.requiresReference
-                      ? 'Operación, voucher o nro. de transferencia'
-                      : 'Opcional'
-                  }
-                />
-                <FieldError
-                  message={paymentForm.formState.errors.referenciaExterna?.message}
-                />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Referencia</label>
+                    <Input
+                      {...paymentForm.register('referenciaExterna')}
+                      placeholder={
+                        selectedPaymentMethod?.requiresReference
+                          ? 'Operación, voucher o nro. de transferencia'
+                          : 'Opcional'
+                      }
+                    />
+                    <FieldError
+                      message={paymentForm.formState.errors.referenciaExterna?.message}
+                    />
+                  </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Observaciones</label>
-                <Textarea
-                  {...paymentForm.register('observaciones')}
-                  placeholder="Notas del abono, conciliación o compromiso con proveedor"
-                  className="min-h-24"
-                />
-                <FieldError message={paymentForm.formState.errors.observaciones?.message} />
-              </div>
-            </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-sm font-medium">Observaciones</label>
+                    <Textarea
+                      {...paymentForm.register('observaciones')}
+                      placeholder="Notas del abono, conciliación o compromiso con proveedor"
+                      className="min-h-24"
+                    />
+                    <FieldError message={paymentForm.formState.errors.observaciones?.message} />
+                  </div>
+                </div>
 
             <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-3">
               <div>
@@ -3160,7 +4142,8 @@ export function ComprasPage() {
                 selectedSummaryReceiptGroup &&
                 selectedSummaryReceiptGroup.pendingLines > 0 &&
                 selectedSummaryOrder.status !== 'BORRADOR' &&
-                selectedSummaryOrder.status !== 'ANULADA' ? (
+                selectedSummaryOrder.status !== 'ANULADA' &&
+                Number(selectedSummaryOrder.adjustedPendingAmount ?? 0) <= 0 ? (
                   <Button
                     type="button"
                     onClick={() => {
@@ -3168,6 +4151,25 @@ export function ComprasPage() {
                       setSelectedSummaryOrderId(null)
                       openOrderReceiveDialog(selectedSummaryOrder.id)
                     }}
+                    title={
+                      Number(selectedSummaryOrder.adjustedPendingAmount ?? 0) > 0
+                        ? 'Completa el pago de la orden para habilitar la recepción.'
+                        : 'Continuar con el cierre y registro de recepción.'
+                    }
+                  >
+                    <PackageCheck className="h-4 w-4" />
+                    Continuar cierre
+                  </Button>
+                ) :
+                selectedSummaryOrder &&
+                Number(selectedSummaryOrder.adjustedPendingAmount ?? 0) > 0 &&
+                selectedSummaryReceiptGroup &&
+                selectedSummaryReceiptGroup.pendingLines > 0 ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled
+                    title="Completa el pago de la orden para habilitar la recepción."
                   >
                     <PackageCheck className="h-4 w-4" />
                     Continuar cierre
@@ -3279,7 +4281,11 @@ export function ComprasPage() {
                       Saldo disponible
                     </p>
                     <p className="mt-2 text-base font-semibold text-foreground">
-                      {formatCurrency(cashShortage.available)}
+                      {watchedIncomePaymentMethodId && incomeMethodBalance
+                        ? incomeMethodBalance.loading
+                          ? 'Calculando…'
+                          : formatCurrency(incomeMethodBalance.available)
+                        : formatCurrency(cashShortage.available)}
                     </p>
                   </div>
                   <div>
@@ -3302,6 +4308,17 @@ export function ComprasPage() {
               ) : null}
 
               <div className="space-y-4">
+                <FormPaymentMethodTwoLevelSelect
+                  label="Medio de dinero"
+                  name="paymentMethodId"
+                  control={cashIncomeForm.control}
+                  methods={options.paymentMethods}
+                  required
+                  placeholderCategory="Selecciona una categoría"
+                  placeholderSubmethod="Selecciona un submedio"
+                  errors={cashIncomeForm.formState.errors}
+                />
+
                 <div className="space-y-1">
                   <label htmlFor="cash-income-amount" className="text-xs font-medium text-foreground">
                     Monto
@@ -3372,7 +4389,10 @@ export function ComprasPage() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" disabled={isRegisteringCashIncome}>
+                <Button
+                  type="submit"
+                  disabled={isRegisteringCashIncome || !watchedIncomePaymentMethodId}
+                >
                   {isRegisteringCashIncome ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -3442,6 +4462,403 @@ export function ComprasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SidePanel
+        open={Boolean(selectedViewOrderId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedViewOrderId(null)
+          }
+        }}
+      >
+        <SidePanelContent className="p-0 flex flex-col h-full">
+          <style>{`
+            @media print {
+              body > *:not([data-purchase-order-root]) { display: none !important; }
+              [data-order-ui] { display: none !important; }
+              [data-purchase-order-root] {
+                position: absolute !important;
+                inset: 0 !important;
+                overflow: visible !important;
+                background: #fff !important;
+                padding: 0 !important;
+                margin: 0 !important;
+              }
+              [data-purchase-order-root] > div {
+                box-shadow: none !important;
+                border: 0 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                border-radius: 0 !important;
+                max-width: 100% !important;
+              }
+              @page {
+                size: A4 portrait;
+                margin: 12mm 10mm 14mm 10mm;
+                @bottom-right {
+                  content: "Página " counter(page) " de " counter(pages);
+                  font-size: 10px;
+                  color: #64748b;
+                }
+              }
+            }
+          `}</style>
+
+          <div
+            data-order-ui
+            className="flex items-start justify-between gap-3 border-b px-6 py-4 print:hidden"
+            data-order-internal-only
+          >
+            <div className="flex flex-col gap-2 flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] uppercase tracking-widest text-muted-foreground">
+                  Vista interna · Gestión de la orden
+                </p>
+                <SidePanelClose asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelectedViewOrderId(null)}
+                  >
+                    <X className="h-4 w-4 mr-1" /> Cerrar
+                  </Button>
+                </SidePanelClose>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold text-foreground leading-none">
+                  Orden de compra {selectedOrderDetail?.order.code ?? ''}
+                </h2>
+                {selectedOrderDetail?.order.status ? (
+                  <Badge variant="outline" title="Estado de la orden">
+                    Orden · {selectedOrderDetail.order.status}
+                  </Badge>
+                ) : null}
+                {selectedOrderDetail ? (
+                  <Badge
+                    variant={
+                      Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0
+                        ? 'warning'
+                        : 'info'
+                    }
+                    className="font-normal"
+                    title="Estado de recepción"
+                  >
+                    Recepción ·{' '}
+                    {Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0
+                      ? 'PENDIENTE DE PAGO'
+                      : selectedOrderDetail.order.logisticsStatus ?? 'PENDIENTE'}
+                  </Badge>
+                ) : null}
+                {selectedOrderDetail ? (
+                  <Badge variant="default" className="font-normal" title="Estado de pago">
+                    Pago · {selectedOrderDetail.order.financialStatus ?? '-'}
+                  </Badge>
+                ) : null}
+              </div>
+              {selectedOrderDetail?.supplier?.razonSocial ? (
+                <p className="text-sm text-muted-foreground">
+                  Proveedor · <span className="text-foreground font-medium">{selectedOrderDetail.supplier.razonSocial}</span>
+                  {selectedOrderDetail.buyer?.fullName ? (
+                    <> · Responsable · <span className="text-foreground font-medium">{selectedOrderDetail.buyer.fullName}</span></>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div
+            data-order-ui
+            className="border-b px-6 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-muted/20 print:hidden"
+            data-order-internal-only
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              {(() => {
+                if (!selectedOrderDetail) return null
+                const hasAnyReception = selectedOrderDetail.items.some(
+                  (item) => Number(item.receivedBaseUnits) > 0,
+                )
+                const logisticsBlocked =
+                  selectedOrderDetail.order.logisticsStatus === 'RECEPCION_PARCIAL' ||
+                  selectedOrderDetail.order.logisticsStatus === 'RECEPCION_COMPLETA'
+                const orderClosed =
+                  selectedOrderDetail.order.status === 'ANULADA' ||
+                  selectedOrderDetail.order.status === 'RECIBIDA' ||
+                  selectedOrderDetail.order.status === 'PAGADA'
+                const canEdit = !hasAnyReception && !logisticsBlocked && !orderClosed
+                if (!canEdit) return null
+                return (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={isOrderDetailLoading}
+                    onClick={() => void openEditOrder(selectedOrderDetail.order.id)}
+                  >
+                    <Edit3 className="h-4 w-4 mr-1" /> Editar
+                  </Button>
+                )
+              })()}
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                disabled={isOrderDetailLoading || !selectedOrderDetail}
+                onClick={async () => {
+                  if (!selectedOrderDetail) return
+                  try {
+                    await printPurchaseOrderFromElement(
+                      { detail: selectedOrderDetail },
+                      { title: `Orden de compra ${selectedOrderDetail.order.code}` },
+                    )
+                  } catch (nextErr) {
+                    toast.error(getApiErrorMessage(nextErr))
+                  }
+                }}
+              >
+                <Printer className="h-4 w-4 mr-1" /> Imprimir
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isOrderDetailLoading || !selectedOrderDetail}
+                onClick={async () => {
+                  if (!selectedOrderDetail) return
+                  try {
+                    await generatePurchaseOrderPDFBlob(
+                      { detail: selectedOrderDetail },
+                      { filename: `orden-de-compra-${selectedOrderDetail.order.code.toLowerCase()}.pdf` },
+                    )
+                  } catch (nextErr) {
+                    toast.error(getApiErrorMessage(nextErr))
+                  }
+                }}
+              >
+                <FileDown className="h-4 w-4 mr-1" /> Descargar PDF
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isOrderDetailLoading || !selectedOrderDetail}
+                onClick={async () => {
+                  if (!selectedOrderDetail) return
+                  const det = selectedOrderDetail
+                  const orderSummaryForShare = {
+                    code: det.order.code,
+                    supplierName: det.supplier.razonSocial,
+                    fechaEmision: det.fechaEmision,
+                    fechaRecepcionEsperada: det.fechaRecepcionEsperada,
+                    branchName: det.branch.nombre,
+                    items: det.items.map((it) => ({
+                      productName: it.productName,
+                      sku: it.sku,
+                      presentationName: it.presentationName,
+                      presentationQuantity: it.presentationQuantity,
+                      unitCostPresentation: it.unitCostPresentation,
+                      taxRate: it.taxRate,
+                      total: it.total,
+                    })),
+                    subtotalAmount: det.order.subtotalAmount,
+                    taxAmount: det.order.taxAmount,
+                    totalAmount: det.order.totalAmount,
+                    observaciones: det.observaciones,
+                  }
+                  const textSummary = copyPurchaseOrderText(orderSummaryForShare)
+                  toast.loading('Preparando PDF para compartir…', { id: 'share-oc-prep' })
+                  let pdfBlob: Blob | null = null
+                  try {
+                    pdfBlob = await generatePurchaseOrderPDFBlob({ detail: det })
+                  } catch (err) {
+                    console.error('[shareOC] Fallo generando PDF previo:', err)
+                  }
+                  if (pdfBlob) {
+                    toast.success('PDF listo para compartir.', { id: 'share-oc-prep' })
+                  } else {
+                    toast.warning('No se pudo generar el PDF para adjuntar; se mostrarán alternativas.', { id: 'share-oc-prep' })
+                  }
+                  const onDownload = async () => {
+                    return generatePurchaseOrderPDFBlob(
+                      { detail: det },
+                      { filename: `orden-de-compra-${det.order.code.toLowerCase()}.pdf` },
+                    )
+                  }
+                  const onPrint = () => {
+                    void printPurchaseOrderFromElement(
+                      { detail: det },
+                      { title: `Orden de compra ${det.order.code}` },
+                    )
+                  }
+                  await sharePurchaseOrder({
+                    orderCode: det.order.code,
+                    supplierName: det.supplier.razonSocial,
+                    pdfBlob,
+                    textSummary,
+                    onDownload,
+                    onPrint,
+                  })
+                }}
+              >
+                <Share2 className="h-4 w-4 mr-1" /> Compartir
+              </Button>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={
+                  !selectedOrderDetail ||
+                  selectedOrderDetail.order.logisticsStatus === 'RECEPCION_COMPLETA' ||
+                  Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0 ||
+                  !selectedOrderDetail.items.some(
+                    (item) => item.baseQuantity - item.receivedBaseUnits > 0,
+                  )
+                }
+                onClick={() => {
+                  if (!selectedOrderDetail) return
+                  if (Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0) {
+                    toast.warning(
+                      'Completa el pago de la orden para habilitar la recepción.',
+                    )
+                    return
+                  }
+                  const hasPending = selectedOrderDetail.items.some(
+                    (item) => item.baseQuantity - item.receivedBaseUnits > 0,
+                  )
+                  if (!hasPending) {
+                    toast.info('Esta orden ya fue recibida completamente.')
+                    return
+                  }
+                  if (selectedOrderDetail.order.logisticsStatus === 'RECEPCION_COMPLETA') {
+                    toast.info('Esta orden ya está marcada como recibida.')
+                    return
+                  }
+                  openOrderReceiveDialog(selectedOrderDetail.order.id)
+                }}
+                title={
+                  Number(selectedOrderDetail?.order.adjustedPendingAmount ?? 0) > 0
+                    ? 'Completa el pago de la orden para habilitar la recepción.'
+                    : selectedOrderDetail?.order.logisticsStatus === 'RECEPCION_COMPLETA'
+                      ? 'La orden ya está completamente recibida.'
+                      : 'Registrar cantidades, lotes y vencimientos recibidos del proveedor.'
+                }
+              >
+                <PackageOpen className="h-4 w-4 mr-1" />
+                Registrar recepción
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                disabled={
+                  !selectedOrderDetail ||
+                  Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) <= 0
+                }
+                onClick={() => {
+                  if (selectedOrderDetail) openPaymentDialog(selectedOrderDetail.order)
+                }}
+                title={
+                  Number(selectedOrderDetail?.order.adjustedPendingAmount ?? 0) <= 0
+                    ? 'La orden ya se encuentra pagada completamente.'
+                    : 'Registrar pago a proveedor (parcial o total).'
+                }
+              >
+                <Wallet className="h-4 w-4 mr-1" />
+                Registrar pago
+              </Button>
+            </div>
+          </div>
+
+          <div
+            data-purchase-order-root
+            className="flex-1 overflow-auto bg-muted/30 px-4 sm:px-6 py-5"
+          >
+            {isOrderDetailLoading ? (
+              <div className="h-full min-h-[520px] grid place-items-center">
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Cargando orden de compra…</p>
+                </div>
+              </div>
+            ) : !selectedOrderDetail ? (
+              <div className="h-full min-h-[520px] grid place-items-center">
+                <p className="text-sm text-muted-foreground">No hay una orden cargada.</p>
+              </div>
+            ) : (
+              <div className="mx-auto max-w-[860px] flex flex-col gap-4 print:hidden mb-3">
+                <div
+                  data-order-ui
+                  data-order-internal-only
+                  className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm"
+                >
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Sucursal</p>
+                    <p className="text-foreground font-medium leading-tight">{selectedOrderDetail.branch.nombre}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Fecha de emisión</p>
+                    <p className="text-foreground font-medium leading-tight">{selectedOrderDetail.fechaEmision ?? '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Recepción esperada</p>
+                    <p className="text-foreground font-medium leading-tight">{selectedOrderDetail.fechaRecepcionEsperada ?? '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Líneas</p>
+                    <p className="text-foreground font-medium leading-tight">{selectedOrderDetail.items.length} productos</p>
+                  </div>
+                </div>
+
+                <div
+                  data-order-ui
+                  data-order-internal-only
+                  className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 grid grid-cols-1 sm:grid-cols-3 gap-5 text-sm"
+                >
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Total documento</p>
+                    <p className="text-foreground font-semibold text-2xl leading-none">
+                      {formatCurrency(selectedOrderDetail.order.totalAmount)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Pagado</p>
+                    <p className="text-emerald-700 font-semibold text-2xl leading-none">
+                      {formatCurrency(selectedOrderDetail.order.paidAmount)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {selectedOrderDetail.order.paymentCount ?? 0} pago(s) registrado(s)
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">Saldo pendiente</p>
+                    <p className={`font-semibold text-2xl leading-none ${
+                      (selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0
+                        ? 'text-amber-700'
+                        : 'text-emerald-700'
+                    }`}>
+                      {formatCurrency(selectedOrderDetail.order.adjustedPendingAmount)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0
+                        ? 'Pendiente por cancelar'
+                        : 'Sin saldo pendiente'}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  ref={orderDocumentRef}
+                  className="bg-white border border-slate-200 shadow-sm p-6"
+                >
+                  <PurchaseOrderDocument order={selectedOrderDetail} variant="internal-preview" />
+                </div>
+              </div>
+            )}
+          </div>
+        </SidePanelContent>
+      </SidePanel>
     </div>
   )
 }

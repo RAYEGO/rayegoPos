@@ -1,4 +1,5 @@
 import {
+  AccionAuditoria,
   CodigoFormaPago,
   EstadoCompra,
   EstadoCompraFinanciero,
@@ -17,12 +18,12 @@ import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
-  buildPackagingEdges,
-  resolveBasePresentation,
-  resolveFactorToBase,
-  resolvePresentationEntry,
-  resolvePresentationFactors,
+  buildPackagingSnapshot,
+  convertAmountToBaseUnit,
+  convertQuantityToBaseUnits,
+  resolvePackagingOperationContext,
 } from '../../lib/productPackaging.js'
+import { buildEnsureDefaultPaymentMethodsUpsert, classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
 const purchaseInclude = {
   sucursal: {
@@ -128,12 +129,19 @@ type CreatePurchaseOrderPayload = {
   }>
 }
 
+type UpdatePurchaseOrderPayload = Partial<
+  Omit<CreatePurchaseOrderPayload, 'items'>
+> & {
+  items: CreatePurchaseOrderPayload['items']
+}
+
 type ReceivePurchaseItemPayload = {
   detalleCompraId: string
   numeroLote: string
   fechaFabricacion?: string
   fechaVencimiento: string
   cantidadRecibida: number
+  costoUnitarioRecepcion?: number
   stockReservado?: number
   stockBloqueado?: number
   almacen?: string
@@ -184,6 +192,65 @@ type PurchasePaymentMetrics = {
   }>
 }
 
+type PurchaseDashboardStaticOptions = {
+  branches: Array<{
+    id: string
+    name: string
+  }>
+  suppliers: Array<{
+    id: string
+    name: string
+    documentNumber: string
+  }>
+  paymentMethods: Array<{
+    id: string
+    code: string
+    name: string
+    category: string
+    digitalSubmethod: string | null
+    requiresReference: boolean
+  }>
+  products: Array<{
+    id: string
+    name: string
+    sku: string
+    unitSymbol: string
+    lastPurchaseCost: number
+    packaging: {
+      basePresentationId: string | null
+      purchasePresentationId: string | null
+      presentations: Array<{
+        id: string
+        name: string
+        isBase: boolean
+        allowsPurchase: boolean
+        allowsSale: boolean
+        salePrice: number | null
+        factorToBase: number | null
+      }>
+    } | null
+  }>
+}
+
+const PAYMENT_METHODS_CACHE_TTL_MS = 5 * 60_000
+const PURCHASE_CODE_CACHE_TTL_MS = 60_000
+const PURCHASE_DASHBOARD_OPTIONS_CACHE_TTL_MS = 30_000
+
+let paymentMethodsEnsuredUntil = 0
+let purchaseCodeCache:
+  | {
+      expiresAt: number
+      value: Map<string, string>
+    }
+  | null = null
+const purchaseDashboardOptionsCache = new Map<
+  string,
+  {
+    expiresAt: number
+    value: PurchaseDashboardStaticOptions
+  }
+>()
+
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
   error.statusCode = statusCode
@@ -221,6 +288,13 @@ function extractErrorInfo(err: unknown) {
   }
 }
 
+function isClosedTransactionError(err: unknown) {
+  const message = extractErrorInfo(err).message ?? ''
+  return /Transaction API error|Transaction not found|Transaction already closed|Transaction ID is invalid/i.test(
+    message,
+  )
+}
+
 function reportDebugEvent(event: string, payload: Record<string, unknown>) {
   const debugServerUrl = getDebugServerUrl()
   if (!debugServerUrl) return
@@ -255,7 +329,17 @@ function toOptionalString(value?: string | null) {
 }
 
 function formatDate(value: Date | null | undefined) {
-  return value ? value.toISOString().slice(0, 10) : null
+  if (!value) return null
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value)
+  const y = parts.find((p) => p.type === 'year')?.value ?? '0000'
+  const m = parts.find((p) => p.type === 'month')?.value ?? '00'
+  const d = parts.find((p) => p.type === 'day')?.value ?? '00'
+  return `${y}-${m}-${d}`
 }
 
 function formatDateTime(value: Date | null | undefined) {
@@ -330,6 +414,11 @@ async function getAuthenticatedUserId(request: FastifyRequest) {
 }
 
 async function buildPurchaseCodeMap() {
+  const now = Date.now()
+  if (purchaseCodeCache && purchaseCodeCache.expiresAt > now) {
+    return new Map(purchaseCodeCache.value)
+  }
+
   const orderedPurchases = await prisma.compra.findMany({
     where: {
       deletedAt: null,
@@ -340,9 +429,27 @@ async function buildPurchaseCodeMap() {
     orderBy: [{ fechaEmision: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
   })
 
-  return new Map(
+  const value = new Map(
     orderedPurchases.map((purchase, index) => [purchase.id, buildPurchaseCode(index + 1)]),
   )
+  purchaseCodeCache = {
+    expiresAt: now + PURCHASE_CODE_CACHE_TTL_MS,
+    value,
+  }
+  return new Map(value)
+}
+
+function invalidatePurchaseCodeCache() {
+  purchaseCodeCache = null
+}
+
+function invalidatePurchaseDashboardOptionsCache(companyId?: string) {
+  if (companyId) {
+    purchaseDashboardOptionsCache.delete(companyId)
+    return
+  }
+
+  purchaseDashboardOptionsCache.clear()
 }
 
 async function buildPurchaseReturnMetrics(
@@ -533,78 +640,197 @@ async function ensureDefaultPaymentMethods(
   db: Prisma.TransactionClient | typeof prisma,
   userId?: string,
 ) {
-  const defaults = [
-    {
-      codigo: CodigoFormaPago.EFECTIVO,
-      nombre: 'Efectivo',
-      requiereReferencia: false,
-      permiteVuelto: true,
-      orden: 1,
-    },
-    {
-      codigo: CodigoFormaPago.TARJETA,
-      nombre: 'Tarjeta',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 2,
-    },
-    {
-      codigo: CodigoFormaPago.YAPE,
-      nombre: 'Yape',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 3,
-    },
-    {
-      codigo: CodigoFormaPago.PLIN,
-      nombre: 'Plin',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 4,
-    },
-    {
-      codigo: CodigoFormaPago.TRANSFERENCIA,
-      nombre: 'Transferencia bancaria',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 5,
-    },
-    {
-      codigo: CodigoFormaPago.OTRO,
-      nombre: 'Otro',
-      requiereReferencia: false,
-      permiteVuelto: false,
-      orden: 6,
-    },
-  ] as const
+  if (paymentMethodsEnsuredUntil > Date.now()) {
+    return
+  }
+
+  const upserts = buildEnsureDefaultPaymentMethodsUpsert(userId)
 
   await Promise.all(
-    defaults.map((method) =>
+    upserts.map((upsert) =>
       db.formaPago.upsert({
-        where: {
-          codigo: method.codigo,
-        },
-        update: {
-          nombre: method.nombre,
-          requiereReferencia: method.requiereReferencia,
-          permiteVuelto: method.permiteVuelto,
-          orden: method.orden,
-          activo: true,
-          updatedById: userId,
-        },
-        create: {
-          codigo: method.codigo,
-          nombre: method.nombre,
-          requiereReferencia: method.requiereReferencia,
-          permiteVuelto: method.permiteVuelto,
-          orden: method.orden,
-          activo: true,
-          createdById: userId,
-          updatedById: userId,
-        },
+        where: upsert.where,
+        update: upsert.update,
+        create: upsert.create,
       }),
     ),
   )
+
+  paymentMethodsEnsuredUntil = Date.now() + PAYMENT_METHODS_CACHE_TTL_MS
+}
+
+async function getPurchaseDashboardStaticOptions(
+  companyId: string,
+): Promise<PurchaseDashboardStaticOptions> {
+  const cached = purchaseDashboardOptionsCache.get(companyId)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
+
+  await ensureDefaultPaymentMethods(prisma)
+
+  const [branches, suppliers, paymentMethods, products] = await Promise.all([
+    prisma.sucursal.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+      orderBy: {
+        nombre: 'asc',
+      },
+      select: {
+        id: true,
+        nombre: true,
+      },
+    }),
+    prisma.proveedor.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+      orderBy: {
+        razonSocial: 'asc',
+      },
+      select: {
+        id: true,
+        razonSocial: true,
+        numeroDocumento: true,
+        contactoTelefono: true,
+      },
+    }),
+    prisma.formaPago.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+      },
+      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        requiereReferencia: true,
+      },
+    }),
+    prisma.producto.findMany({
+      where: {
+        deletedAt: null,
+        estado: 'ACTIVO',
+        empresaId: companyId,
+      },
+      orderBy: {
+        nombre: 'asc',
+      },
+      select: {
+        id: true,
+        nombre: true,
+        sku: true,
+        compraPresentacionId: true,
+        presentacionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            esBase: true,
+            permiteCompra: true,
+            permiteVenta: true,
+            precioVenta: true,
+            presentacion: {
+              select: {
+                id: true,
+                nombre: true,
+              },
+            },
+          },
+        },
+        conversionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            desdePresentacionId: true,
+            haciaPresentacionId: true,
+            cantidad: true,
+          },
+        },
+        unidadMedida: {
+          select: {
+            simbolo: true,
+          },
+        },
+        detalleCompras: {
+          where: {
+            deletedAt: null,
+            compra: {
+              deletedAt: null,
+            },
+          },
+          orderBy: [{ createdAt: 'desc' }],
+          take: 1,
+          select: {
+            costoUnitario: true,
+            factorPresentacion: true,
+            factorEmpaque: true,
+          },
+        },
+      },
+    }),
+  ])
+
+  const value: PurchaseDashboardStaticOptions = {
+    branches: branches.map((branch) => ({
+      id: branch.id,
+      name: branch.nombre,
+    })),
+    suppliers: suppliers.map((supplier) => ({
+      id: supplier.id,
+      name: supplier.razonSocial,
+      documentNumber: supplier.numeroDocumento,
+    })),
+    paymentMethods: paymentMethods.map((method) => {
+      const classification = classifyPaymentMethod(method.codigo)
+      return {
+        id: method.id,
+        code: method.codigo,
+        name: method.nombre,
+        category: classification.category,
+        digitalSubmethod: classification.digitalSubmethod,
+        requiresReference: method.requiereReferencia,
+      }
+    }),
+    products: products.map((product) => ({
+      packaging: buildPackagingSnapshot({
+        presentations: product.presentacionesEmpaque ?? [],
+        conversions: product.conversionesEmpaque ?? [],
+        purchasePresentationId: product.compraPresentacionId,
+      }),
+      id: product.id,
+      name: product.nombre,
+      sku: product.sku,
+      unitSymbol: product.unidadMedida.simbolo,
+      lastPurchaseCost: (() => {
+        const latestPurchaseDetail = product.detalleCompras[0]
+        if (!latestPurchaseDetail) {
+          return 0
+        }
+
+        const factor =
+          latestPurchaseDetail.factorPresentacion ??
+          latestPurchaseDetail.factorEmpaque ??
+          1
+
+        return Number(
+          (
+            decimalToNumber(latestPurchaseDetail.costoUnitario) * Math.max(1, factor)
+          ).toFixed(6),
+        )
+      })(),
+    })),
+  }
+
+  purchaseDashboardOptionsCache.set(companyId, {
+    expiresAt: Date.now() + PURCHASE_DASHBOARD_OPTIONS_CACHE_TTL_MS,
+    value,
+  })
+
+  return value
 }
 
 async function ensureMovementReason(
@@ -641,6 +867,65 @@ async function ensureMovementReason(
       activo: true,
       createdById: userId,
       updatedById: userId,
+    },
+  })
+}
+
+async function createCashMovementExpense(
+  tx: Prisma.TransactionClient,
+  payload: {
+    openingId: string
+    paymentMethodId: string
+    amount: number
+    paymentId: string
+    supplierName: string
+    paymentMethodName: string
+    userId: string
+  },
+) {
+  return tx.movimientoCaja.create({
+    data: {
+      aperturaCajaId: payload.openingId,
+      formaPagoId: payload.paymentMethodId,
+      tipo: TipoMovimientoCaja.EGRESO,
+      operacion: OperacionCaja.EGRESO,
+      monto: toDecimal(payload.amount, 2),
+      referencia: toOptionalString(payload.paymentId),
+      observaciones: toOptionalString(
+        `Pago a proveedor · ${payload.supplierName} · ${payload.paymentMethodName}`,
+      ),
+      createdById: payload.userId,
+      updatedById: payload.userId,
+    },
+  })
+}
+
+async function createPurchasePaymentAuditEntry(
+  tx: Prisma.TransactionClient,
+  payload: {
+    userId: string
+    paymentId: string
+    purchaseId: string
+    amount: number
+    outstandingAmount: number
+    request: FastifyRequest
+  },
+) {
+  await tx.auditoria.create({
+    data: {
+      usuarioId: payload.userId,
+      tabla: 'compra_pagos',
+      registroId: payload.paymentId,
+      accion: AccionAuditoria.INSERT,
+      valorNuevo: {
+        compraId: payload.purchaseId,
+        monto: payload.amount,
+        saldoPendiente: payload.outstandingAmount,
+      } as Prisma.InputJsonValue,
+      direccionIp: payload.request.ip,
+      userAgent: payload.request.headers['user-agent'],
+      createdById: payload.userId,
+      updatedById: payload.userId,
     },
   })
 }
@@ -846,7 +1131,7 @@ export async function getPurchaseDashboard(
 ) {
   const search = filters.search?.trim().toLowerCase()
   const { branchId, companyId } = await getAuthContext(request)
-  await ensureDefaultPaymentMethods(prisma)
+  const staticOptions = await getPurchaseDashboardStaticOptions(companyId)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -861,87 +1146,12 @@ export async function getPurchaseDashboard(
     ...(filters.supplierId ? { proveedorId: filters.supplierId } : {}),
   }
 
-  const [codeMap, purchases, branches, suppliers, products] = await Promise.all([
+  const [codeMap, purchases] = await Promise.all([
     buildPurchaseCodeMap(),
     prisma.compra.findMany({
       where: purchaseWhere,
       include: purchaseInclude,
       orderBy: [{ createdAt: 'desc' }],
-    }),
-    prisma.sucursal.findMany({
-      where: {
-        deletedAt: null,
-        activo: true,
-        empresaId: companyId,
-      },
-      orderBy: {
-        nombre: 'asc',
-      },
-      select: {
-        id: true,
-        nombre: true,
-      },
-    }),
-    prisma.proveedor.findMany({
-      where: {
-        deletedAt: null,
-        activo: true,
-        empresaId: companyId,
-      },
-      orderBy: {
-        razonSocial: 'asc',
-      },
-      select: {
-        id: true,
-        razonSocial: true,
-        numeroDocumento: true,
-        contactoTelefono: true,
-      },
-    }),
-    prisma.producto.findMany({
-      where: {
-        deletedAt: null,
-        estado: 'ACTIVO',
-        empresaId: companyId,
-      },
-      orderBy: {
-        nombre: 'asc',
-      },
-      select: {
-        id: true,
-        nombre: true,
-        sku: true,
-        compraPresentacionId: true,
-        costoReferencia: true,
-        presentacionesEmpaque: {
-          where: { deletedAt: null },
-          select: {
-            esBase: true,
-            permiteCompra: true,
-            permiteVenta: true,
-            precioVenta: true,
-            presentacion: {
-              select: {
-                id: true,
-                nombre: true,
-              },
-            },
-          },
-        },
-        conversionesEmpaque: {
-          where: { deletedAt: null },
-          select: {
-            desdePresentacionId: true,
-            haciaPresentacionId: true,
-            cantidad: true,
-          },
-        },
-        unidadMedida: {
-          select: {
-            simbolo: true,
-          },
-        },
-      },
     }),
   ])
 
@@ -1001,7 +1211,7 @@ export async function getPurchaseDashboard(
     order.logisticsStatus === EstadoCompraLogistico.RECEPCION_COMPLETA &&
     order.financialStatus === EstadoCompraFinanciero.PAGADA
 
-  const supplierSummary = suppliers
+  const supplierSummary = staticOptions.suppliers
     .map((supplier) => {
       const supplierPurchases = filteredOrders.filter((order) => order.supplierId === supplier.id)
       const supplierSource = purchases.filter((purchase) => purchase.proveedorId === supplier.id)
@@ -1037,9 +1247,9 @@ export async function getPurchaseDashboard(
 
       return {
         supplierId: supplier.id,
-        supplierName: supplier.razonSocial,
-        documentNumber: supplier.numeroDocumento,
-        contactPhone: supplier.contactoTelefono,
+        supplierName: supplier.name,
+        documentNumber: supplier.documentNumber,
+        contactPhone: null,
         activeOrders,
         avgLeadTimeDays:
           leadTimeValues.length > 0
@@ -1108,70 +1318,7 @@ export async function getPurchaseDashboard(
     receipts: filteredReceipts,
     payments: filteredPayments,
     supplierSummary,
-    options: {
-      branches: branches.map((branch) => ({
-        id: branch.id,
-        name: branch.nombre,
-      })),
-      suppliers: suppliers.map((supplier) => ({
-        id: supplier.id,
-        name: supplier.razonSocial,
-        documentNumber: supplier.numeroDocumento,
-      })),
-      paymentMethods: await prisma.formaPago.findMany({
-        where: {
-          deletedAt: null,
-          activo: true,
-        },
-        orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
-        select: {
-          id: true,
-          codigo: true,
-          nombre: true,
-          requiereReferencia: true,
-        },
-      }).then((methods) =>
-        methods.map((method) => ({
-          id: method.id,
-          code: method.codigo,
-          name: method.nombre,
-          requiresReference: method.requiereReferencia,
-        })),
-      ),
-      products: products.map((product) => ({
-        packaging: (() => {
-          const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
-          const basePresentationId = basePresentation?.presentacion.id ?? null
-          if (!basePresentationId) return null
-
-          const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
-          const factors = resolvePresentationFactors({
-            basePresentationId,
-            presentationIds: (product.presentacionesEmpaque ?? []).map((entry) => entry.presentacion.id),
-            edges,
-          })
-
-          return {
-            basePresentationId,
-            purchasePresentationId: product.compraPresentacionId ?? basePresentationId,
-            presentations: (product.presentacionesEmpaque ?? []).map((entry) => ({
-              id: entry.presentacion.id,
-              name: entry.presentacion.nombre,
-              isBase: entry.esBase,
-              allowsPurchase: entry.permiteCompra,
-              allowsSale: entry.permiteVenta,
-              salePrice: entry.precioVenta ? decimalToNumber(entry.precioVenta) : null,
-              factorToBase: factors.get(entry.presentacion.id) ?? null,
-            })),
-          }
-        })(),
-        id: product.id,
-        name: product.nombre,
-        sku: product.sku,
-        unitSymbol: product.unidadMedida.simbolo,
-        referenceCost: decimalToNumber(product.costoReferencia),
-      })),
-    },
+    options: staticOptions,
   }
 }
 
@@ -1220,197 +1367,188 @@ export async function createPurchaseOrder(
     throw createHttpError(400, 'No repitas el mismo producto dentro de la misma orden.')
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const [branch, supplier, responsibleUser, products] = await Promise.all([
-      tx.sucursal.findFirst({
-        where: {
-          id: targetBranchId,
-          deletedAt: null,
-          activo: true,
-          empresaId: companyId,
+  const [branch, supplier, responsibleUser, products] = await Promise.all([
+    prisma.sucursal.findFirst({
+      where: {
+        id: targetBranchId,
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+    }),
+    prisma.proveedor.findFirst({
+      where: {
+        id: payload.proveedorId,
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+    }),
+    prisma.usuario.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+    }),
+    prisma.producto.findMany({
+      where: {
+        id: {
+          in: payload.items.map((item) => item.productoId),
         },
-      }),
-      tx.proveedor.findFirst({
-        where: {
-          id: payload.proveedorId,
-          deletedAt: null,
-          activo: true,
-          empresaId: companyId,
-        },
-      }),
-      tx.usuario.findFirst({
-        where: {
-          id: userId,
-          deletedAt: null,
-          activo: true,
-          empresaId: companyId,
-        },
-      }),
-      tx.producto.findMany({
-        where: {
-          id: {
-            in: payload.items.map((item) => item.productoId),
-          },
-          deletedAt: null,
-          estado: 'ACTIVO',
-          empresaId: companyId,
-        },
-        select: {
-          id: true,
-          nombre: true,
-          sku: true,
-          compraPresentacionId: true,
-          presentacionesEmpaque: {
-            where: { deletedAt: null },
-            select: {
-              esBase: true,
-              permiteCompra: true,
-              permiteVenta: true,
-              precioVenta: true,
-              presentacion: {
-                select: {
-                  id: true,
-                  nombre: true,
-                },
+        deletedAt: null,
+        estado: 'ACTIVO',
+        empresaId: companyId,
+      },
+      select: {
+        id: true,
+        nombre: true,
+        sku: true,
+        compraPresentacionId: true,
+        presentacionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            esBase: true,
+            permiteCompra: true,
+            permiteVenta: true,
+            precioVenta: true,
+            presentacion: {
+              select: {
+                id: true,
+                nombre: true,
               },
             },
           },
-          conversionesEmpaque: {
-            where: { deletedAt: null },
-            select: {
-              desdePresentacionId: true,
-              haciaPresentacionId: true,
-              cantidad: true,
-            },
-          },
-          unidadMedida: {
-            select: {
-              simbolo: true,
-            },
+        },
+        conversionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            desdePresentacionId: true,
+            haciaPresentacionId: true,
+            cantidad: true,
           },
         },
-      }),
-    ])
+        unidadMedida: {
+          select: {
+            simbolo: true,
+          },
+        },
+      },
+    }),
+  ])
 
-    if (!branch) {
-      throw createHttpError(404, 'La sucursal seleccionada no está disponible.')
+  if (!branch) {
+    throw createHttpError(404, 'La sucursal seleccionada no está disponible.')
+  }
+
+  if (!supplier) {
+    throw createHttpError(404, 'El proveedor seleccionado no está disponible.')
+  }
+
+  if (!responsibleUser) {
+    throw createHttpError(404, 'El usuario responsable no está disponible.')
+  }
+
+  if (products.length !== payload.items.length) {
+    throw createHttpError(
+      404,
+      'Uno o más productos seleccionados ya no están disponibles.',
+    )
+  }
+
+  const productMap = new Map(products.map((product) => [product.id, product]))
+
+  const lineItems = payload.items.map((item) => {
+    const requestedQuantity = Number(item.cantidad)
+    const requestedUnitCost = Number(item.costoUnitario)
+    const taxRate = Number(item.porcentajeImpuesto ?? 0)
+    const product = productMap.get(item.productoId)!
+
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
+      throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
     }
 
-    if (!supplier) {
-      throw createHttpError(404, 'El proveedor seleccionado no está disponible.')
+    if (!Number.isInteger(requestedQuantity)) {
+      throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
     }
 
-    if (!responsibleUser) {
-      throw createHttpError(404, 'El usuario responsable no está disponible.')
-    }
-
-    if (products.length !== payload.items.length) {
+    if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
       throw createHttpError(
-        404,
-        'Uno o más productos seleccionados ya no están disponibles.',
+        400,
+        'El costo unitario de cada línea debe ser mayor o igual a 0.',
       )
     }
 
-    const productMap = new Map(products.map((product) => [product.id, product]))
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+      throw createHttpError(
+        400,
+        'El porcentaje de impuesto debe estar entre 0 y 100.',
+      )
+    }
 
-    const lineItems = payload.items.map((item) => {
-      const requestedQuantity = Number(item.cantidad)
-      const requestedUnitCost = Number(item.costoUnitario)
-      const taxRate = Number(item.porcentajeImpuesto ?? 18)
-      const product = productMap.get(item.productoId)!
+    const purchasePresentationId =
+      product.compraPresentacionId ??
+      product.presentacionesEmpaque.find((entry) => entry.esBase)?.presentacion.id ??
+      ''
 
-      if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
-        throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
-      }
-
-      if (!Number.isInteger(requestedQuantity)) {
-        throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
-      }
-
-      if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
-        throw createHttpError(
-          400,
-          'El costo unitario de cada línea debe ser mayor o igual a 0.',
-        )
-      }
-
-      if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
-        throw createHttpError(
-          400,
-          'El porcentaje de impuesto debe estar entre 0 y 100.',
-        )
-      }
-
-      const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
-      if (!basePresentation) {
-        throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
-      }
-
-      const purchasePresentationId = product.compraPresentacionId ?? basePresentation.presentacion.id
-
-      const resolvedPresentation = resolvePresentationEntry({
-        operation: 'PURCHASE',
-        presentationId: purchasePresentationId,
-        presentations: product.presentacionesEmpaque ?? [],
-      })
-
-      if (!resolvedPresentation.ok) {
-        throw createHttpError(400, resolvedPresentation.error)
-      }
-
-      const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
-      const factor = resolveFactorToBase({
-        presentationId: purchasePresentationId,
-        basePresentationId: basePresentation.presentacion.id,
-        edges,
-      })
-
-      if (!factor) {
-        throw createHttpError(
-          400,
-          'No fue posible resolver la conversión hacia la presentación base del producto.',
-        )
-      }
-
-      const quantity = requestedQuantity * factor
-      const unitCost = requestedUnitCost / factor
-
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
-      }
-
-      if (!Number.isFinite(unitCost) || unitCost < 0) {
-        throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
-      }
-
-      const baseAmount = quantity * unitCost
-      const taxAmount = baseAmount * (taxRate / 100)
-      const totalAmount = baseAmount + taxAmount
-
-      return {
-        productoId: item.productoId,
-        cantidad: quantity,
-        costoUnitario: unitCost,
-        requestedUnitCost,
-        porcentajeImpuesto: taxRate,
-        subtotal: baseAmount,
-        impuestoTotal: taxAmount,
-        total: totalAmount,
-        product,
-        presentation: {
-          id: purchasePresentationId,
-          name: resolvedPresentation.entry.presentacion.nombre,
-          quantity: requestedQuantity,
-          factor,
-        },
-      }
+    const packagingContext = resolvePackagingOperationContext({
+      operation: 'PURCHASE',
+      presentationId: purchasePresentationId,
+      presentations: product.presentacionesEmpaque ?? [],
+      conversions: product.conversionesEmpaque ?? [],
     })
 
-    const subtotal = lineItems.reduce((sum, item) => sum + item.subtotal, 0)
-    const impuestoTotal = lineItems.reduce((sum, item) => sum + item.impuestoTotal, 0)
-    const total = lineItems.reduce((sum, item) => sum + item.total, 0)
+    if (!packagingContext.ok) {
+      throw createHttpError(400, packagingContext.error)
+    }
 
-    const purchase = await tx.compra.create({
+    const quantity = convertQuantityToBaseUnits({
+      quantity: requestedQuantity,
+      factorToBase: packagingContext.factorToBase,
+    })
+    const unitCost = convertAmountToBaseUnit({
+      amount: requestedUnitCost,
+      factorToBase: packagingContext.factorToBase,
+    })
+
+    if (quantity === null) {
+      throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+    }
+
+    if (unitCost === null) {
+      throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
+    }
+
+    const baseAmount = quantity * unitCost
+    const taxAmount = baseAmount * (taxRate / 100)
+    const totalAmount = baseAmount + taxAmount
+
+    return {
+      productoId: item.productoId,
+      cantidad: quantity,
+      costoUnitario: unitCost,
+      requestedUnitCost,
+      porcentajeImpuesto: taxRate,
+      subtotal: baseAmount,
+      impuestoTotal: taxAmount,
+      total: totalAmount,
+      product,
+      presentation: {
+        id: purchasePresentationId,
+        name: packagingContext.selectedPresentation.presentacion.nombre,
+        quantity: requestedQuantity,
+        factor: packagingContext.factorToBase,
+      },
+    }
+  })
+
+  const subtotal = lineItems.reduce((sum, item) => sum + item.subtotal, 0)
+  const impuestoTotal = lineItems.reduce((sum, item) => sum + item.impuestoTotal, 0)
+  const total = lineItems.reduce((sum, item) => sum + item.total, 0)
+
+  const createdPurchase = await prisma.$transaction(async (tx) =>
+    tx.compra.create({
       data: {
         sucursalId: targetBranchId,
         proveedorId: payload.proveedorId,
@@ -1453,59 +1591,523 @@ export async function createPurchaseOrder(
           })),
         },
       },
-      include: purchaseInclude,
+      select: {
+        id: true,
+        estado: true,
+        fechaEmision: true,
+        fechaRecepcion: true,
+      },
+    })
+  )
+
+  invalidatePurchaseCodeCache()
+  const purchaseCodeMap = await buildPurchaseCodeMap()
+  const purchaseCode =
+    purchaseCodeMap.get(createdPurchase.id) ??
+    `CMP-${createdPurchase.id.slice(0, 6).toUpperCase()}`
+
+  invalidatePurchaseDashboardOptionsCache(companyId)
+
+  return {
+    item: {
+      id: createdPurchase.id,
+      code: purchaseCode,
+      supplierName: supplier.razonSocial,
+      branchName: branch.nombre,
+      buyerName: formatFullName(responsibleUser),
+      createdAt: formatDate(createdPurchase.fechaEmision),
+      expectedAt: formatDate(createdPurchase.fechaRecepcion),
+      itemCount: lineItems.length,
+      totalAmount: Number(total.toFixed(2)),
+      status: createdPurchase.estado,
+    },
+    details: lineItems.map((item) => ({
+      productId: item.productoId,
+      productName: item.product.nombre,
+      sku: item.product.sku,
+      unitSymbol: item.presentation.name ?? item.product.unidadMedida.simbolo,
+      quantity: item.presentation.quantity ?? item.cantidad,
+      unitCost:
+        item.presentation.quantity === null || item.presentation.quantity === undefined
+          ? item.costoUnitario
+          : item.requestedUnitCost,
+      taxRate: item.porcentajeImpuesto,
+      total: Number(item.total.toFixed(2)),
+    })),
+  }
+}
+
+export async function updatePurchaseOrder(
+  orderId: string,
+  payload: UpdatePurchaseOrderPayload,
+  request: FastifyRequest,
+) {
+  const { userId, branchId, companyId } = await getAuthContext(request)
+
+  if (!payload.items.length) {
+    throw createHttpError(400, 'La orden debe tener al menos un producto.')
+  }
+
+  const duplicatedProducts = payload.items.reduce((duplicates, item) => {
+    duplicates.set(item.productoId, (duplicates.get(item.productoId) ?? 0) + 1)
+    return duplicates
+  }, new Map<string, number>())
+
+  if ([...duplicatedProducts.values()].some((count) => count > 1)) {
+    throw createHttpError(400, 'No repitas el mismo producto dentro de la misma orden.')
+  }
+
+  const currentOrder = await prisma.compra.findFirst({
+    where: {
+      id: orderId,
+      deletedAt: null,
+    },
+    include: {
+      sucursal: { select: { id: true, nombre: true, empresaId: true } },
+      proveedor: { select: { id: true, razonSocial: true, numeroDocumento: true } },
+      usuarioResponsable: { select: { id: true, nombres: true, apellidos: true } },
+      detalles: {
+        where: { deletedAt: null },
+        include: {
+          producto: { select: { id: true, nombre: true, sku: true } },
+          presentacion: { select: { id: true, nombre: true } },
+        },
+      },
+      recepciones: { where: { deletedAt: null }, select: { id: true } },
+      pagos: { where: { deletedAt: null }, select: { id: true, monto: true } },
+    },
+  })
+
+  if (!currentOrder) {
+    throw createHttpError(404, 'La orden de compra no está disponible.')
+  }
+
+  if (currentOrder.sucursal?.empresaId !== companyId) {
+    throw createHttpError(404, 'La orden de compra no está disponible.')
+  }
+
+  if (currentOrder.sucursalId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para modificar compras de otra sucursal.')
+  }
+
+  if (currentOrder.estado === EstadoCompra.ANULADA) {
+    throw createHttpError(400, 'La orden se encuentra anulada y no puede modificarse.')
+  }
+
+  if (currentOrder.estado === EstadoCompra.PAGADA) {
+    throw createHttpError(400, 'La orden ya fue cerrada y no puede modificarse.')
+  }
+
+  if (currentOrder.recepciones.length > 0) {
+    throw createHttpError(
+      400,
+      'Esta orden ya tiene una recepción registrada y no puede modificarse.',
+    )
+  }
+
+  const emissionDate = payload.fechaEmision
+    ? new Date(`${payload.fechaEmision}T00:00:00`)
+    : currentOrder.fechaEmision
+  const expectedReceptionDate = payload.fechaRecepcion
+    ? new Date(`${payload.fechaRecepcion}T00:00:00`)
+    : currentOrder.fechaRecepcion ?? null
+
+  if (Number.isNaN(emissionDate.getTime())) {
+    throw createHttpError(400, 'La fecha de emisión no es válida.')
+  }
+
+  if (expectedReceptionDate && Number.isNaN(expectedReceptionDate.getTime())) {
+    throw createHttpError(400, 'La fecha esperada de recepción no es válida.')
+  }
+
+  if (expectedReceptionDate && expectedReceptionDate < emissionDate) {
+    throw createHttpError(
+      400,
+      'La fecha esperada de recepción no puede ser anterior a la emisión.',
+    )
+  }
+
+  const targetSupplierId = payload.proveedorId ?? currentOrder.proveedorId
+
+  const [supplier, responsibleUser, products] = await Promise.all([
+    prisma.proveedor.findFirst({
+      where: {
+        id: targetSupplierId,
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+    }),
+    prisma.usuario.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+    }),
+    prisma.producto.findMany({
+      where: {
+        id: {
+          in: payload.items.map((item) => item.productoId),
+        },
+        deletedAt: null,
+        estado: 'ACTIVO',
+        empresaId: companyId,
+      },
+      select: {
+        id: true,
+        nombre: true,
+        sku: true,
+        compraPresentacionId: true,
+        presentacionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            esBase: true,
+            permiteCompra: true,
+            permiteVenta: true,
+            precioVenta: true,
+            presentacion: {
+              select: {
+                id: true,
+                nombre: true,
+              },
+            },
+          },
+        },
+        conversionesEmpaque: {
+          where: { deletedAt: null },
+          select: {
+            desdePresentacionId: true,
+            haciaPresentacionId: true,
+            cantidad: true,
+          },
+        },
+        unidadMedida: {
+          select: {
+            simbolo: true,
+          },
+        },
+      },
+    }),
+  ])
+
+  if (!supplier) {
+    throw createHttpError(404, 'El proveedor seleccionado no está disponible.')
+  }
+
+  if (!responsibleUser) {
+    throw createHttpError(404, 'El usuario responsable no está disponible.')
+  }
+
+  if (products.length !== payload.items.length) {
+    throw createHttpError(
+      404,
+      'Uno o más productos seleccionados ya no están disponibles.',
+    )
+  }
+
+  const productMap = new Map(products.map((product) => [product.id, product]))
+
+  const lineItems = payload.items.map((item) => {
+    const requestedQuantity = Number(item.cantidad)
+    const requestedUnitCost = Number(item.costoUnitario)
+    const taxRate = Number(item.porcentajeImpuesto ?? 0)
+    const product = productMap.get(item.productoId)!
+
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
+      throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
+    }
+
+    if (!Number.isInteger(requestedQuantity)) {
+      throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
+    }
+
+    if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
+      throw createHttpError(
+        400,
+        'El costo unitario de cada línea debe ser mayor o igual a 0.',
+      )
+    }
+
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+      throw createHttpError(
+        400,
+        'El porcentaje de impuesto debe estar entre 0 y 100.',
+      )
+    }
+
+    const purchasePresentationId =
+      product.compraPresentacionId ??
+      product.presentacionesEmpaque.find((entry) => entry.esBase)?.presentacion.id ??
+      ''
+
+    const packagingContext = resolvePackagingOperationContext({
+      operation: 'PURCHASE',
+      presentationId: purchasePresentationId,
+      presentations: product.presentacionesEmpaque ?? [],
+      conversions: product.conversionesEmpaque ?? [],
     })
 
-    const purchaseSequence = await tx.compra.count({
-      where: {
-        deletedAt: null,
-      },
+    if (!packagingContext.ok) {
+      throw createHttpError(400, packagingContext.error)
+    }
+
+    const quantity = convertQuantityToBaseUnits({
+      quantity: requestedQuantity,
+      factorToBase: packagingContext.factorToBase,
     })
-    const mappedOrder = mapPurchaseOrder(
-      purchase,
-      new Map([[purchase.id, buildPurchaseCode(purchaseSequence)]]),
-      {
-        orderReturnedAmountMap: new Map(),
-        detailReturnedUnitsMap: new Map(),
-        detailReturnedAmountMap: new Map(),
-      },
-      {
-        orderPaidAmountMap: new Map(),
-        orderPaymentCountMap: new Map(),
-        payments: [],
-      },
-    )
+    const unitCost = convertAmountToBaseUnit({
+      amount: requestedUnitCost,
+      factorToBase: packagingContext.factorToBase,
+    })
+
+    if (quantity === null) {
+      throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+    }
+
+    if (unitCost === null) {
+      throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
+    }
+
+    const baseAmount = quantity * unitCost
+    const taxAmount = baseAmount * (taxRate / 100)
+    const totalAmount = baseAmount + taxAmount
 
     return {
-      item: {
-        id: mappedOrder.id,
-        code: mappedOrder.code,
-        supplierName: mappedOrder.supplierName,
-        branchName: mappedOrder.branchName,
-        buyerName: mappedOrder.buyerName,
-        createdAt: mappedOrder.createdAt,
-        expectedAt: mappedOrder.expectedAt,
-        itemCount: mappedOrder.itemCount,
-        totalAmount: mappedOrder.totalAmount,
-        status: mappedOrder.status,
+      productoId: item.productoId,
+      cantidad: quantity,
+      costoUnitario: unitCost,
+      requestedUnitCost,
+      porcentajeImpuesto: taxRate,
+      subtotal: baseAmount,
+      impuestoTotal: taxAmount,
+      total: totalAmount,
+      product,
+      presentation: {
+        id: purchasePresentationId,
+        name: packagingContext.selectedPresentation.presentacion.nombre,
+        quantity: requestedQuantity,
+        factor: packagingContext.factorToBase,
       },
-      details: lineItems.map((item) => ({
-        productId: item.productoId,
-        productName: item.product.nombre,
-        sku: item.product.sku,
-        unitSymbol: item.presentation.name ?? item.product.unidadMedida.simbolo,
-        quantity: item.presentation.quantity ?? item.cantidad,
-        unitCost:
-          item.presentation.quantity === null || item.presentation.quantity === undefined
-            ? item.costoUnitario
-            : item.requestedUnitCost,
-        taxRate: item.porcentajeImpuesto,
-        total: Number(item.total.toFixed(2)),
-      })),
     }
   })
 
-  return result
+  const subtotal = lineItems.reduce((sum, item) => sum + item.subtotal, 0)
+  const impuestoTotal = lineItems.reduce((sum, item) => sum + item.impuestoTotal, 0)
+  const total = lineItems.reduce((sum, item) => sum + item.total, 0)
+
+  const paidAmount = currentOrder.pagos.reduce(
+    (sum, payment) => sum + Number(payment.monto),
+    0,
+  )
+
+  if (total < paidAmount) {
+    throw createHttpError(
+      400,
+      'El nuevo total no puede ser menor al monto ya pagado.',
+    )
+  }
+
+  const saldoPendiente = total - paidAmount
+  const nextEstado = payload.estado ?? currentOrder.estado
+  const nextFinanciero =
+    saldoPendiente <= 0.005
+      ? EstadoCompraFinanciero.PAGADA
+      : paidAmount > 0.005
+        ? EstadoCompraFinanciero.PAGO_PARCIAL
+        : EstadoCompraFinanciero.SIN_PAGAR
+
+  const nextLogistico =
+    currentOrder.estadoLogistico === EstadoCompraLogistico.CANCELADA
+      ? EstadoCompraLogistico.CANCELADA
+      : currentOrder.estadoLogistico === EstadoCompraLogistico.RECEPCION_COMPLETA
+        ? EstadoCompraLogistico.RECEPCION_COMPLETA
+        : EstadoCompraLogistico.REGISTRADA
+
+  const previousSnapshot = {
+    proveedorId: currentOrder.proveedorId,
+    fechaEmision: currentOrder.fechaEmision.toISOString().slice(0, 10),
+    fechaRecepcion: currentOrder.fechaRecepcion
+      ? currentOrder.fechaRecepcion.toISOString().slice(0, 10)
+      : null,
+    estado: currentOrder.estado,
+    observaciones: currentOrder.observaciones ?? null,
+    subtotal: Number(currentOrder.subtotal),
+    impuestoTotal: Number(currentOrder.impuestoTotal),
+    total: Number(currentOrder.total),
+    saldoPendiente: Number(currentOrder.saldoPendiente),
+    items: currentOrder.detalles.map((det) => ({
+      productoId: det.productoId,
+      productName: det.producto?.nombre ?? null,
+      cantidad: det.cantidad,
+      cantidadPresentacion: det.cantidadPresentacion ?? null,
+      presentacionId: det.presentacionId,
+      presentationName: det.presentacion?.nombre ?? null,
+      costoUnitario: Number(det.costoUnitario),
+      porcentajeImpuesto: Number(det.porcentajeImpuesto ?? 0),
+      subtotal: Number(det.subtotal),
+      impuestoTotal: Number(det.impuestoTotal),
+      total: Number(det.total),
+    })),
+  }
+
+  const updatedPurchase = await prisma.$transaction(async (tx) => {
+    await tx.detalleCompra.updateMany({
+      where: { compraId: currentOrder.id, deletedAt: null },
+      data: { deletedAt: new Date(), updatedById: userId },
+    })
+
+    return tx.compra.update({
+      where: { id: currentOrder.id },
+      data: {
+        proveedorId: targetSupplierId,
+        fechaEmision: emissionDate,
+        fechaRecepcion: expectedReceptionDate ?? undefined,
+        tipoComprobante: payload.tipoComprobante ?? currentOrder.tipoComprobante ?? undefined,
+        serieComprobante:
+          toOptionalString(payload.serieComprobante) ?? currentOrder.serieComprobante ?? undefined,
+        numeroComprobante:
+          toOptionalString(payload.numeroComprobante) ??
+          currentOrder.numeroComprobante ??
+          undefined,
+        estado: nextEstado,
+        estadoLogistico: nextLogistico,
+        estadoFinanciero: nextFinanciero,
+        subtotal: toDecimal(subtotal, 2),
+        descuentoTotal: toDecimal(0, 2),
+        impuestoTotal: toDecimal(impuestoTotal, 2),
+        total: toDecimal(total, 2),
+        saldoPendiente: toDecimal(saldoPendiente, 2),
+        observaciones:
+          toOptionalString(payload.observaciones) ?? currentOrder.observaciones ?? undefined,
+        updatedById: userId,
+        detalles: {
+          create: lineItems.map((item) => ({
+            productoId: item.productoId,
+            cantidad: item.cantidad,
+            presentacionId: item.presentation.id,
+            cantidadPresentacion:
+              item.presentation.quantity === null || item.presentation.quantity === undefined
+                ? undefined
+                : Math.trunc(item.presentation.quantity),
+            factorPresentacion: Math.trunc(item.presentation.factor),
+            costoUnitario: toDecimal(item.costoUnitario, 6),
+            descuentoTotal: toDecimal(0, 2),
+            porcentajeImpuesto: toDecimal(item.porcentajeImpuesto, 4),
+            impuestoTotal: toDecimal(item.impuestoTotal, 2),
+            subtotal: toDecimal(item.subtotal, 2),
+            total: toDecimal(item.total, 2),
+            createdById: userId,
+            updatedById: userId,
+          })),
+        },
+      },
+      select: {
+        id: true,
+        estado: true,
+        fechaEmision: true,
+        fechaRecepcion: true,
+      },
+    })
+  })
+
+  await prisma.$transaction(async (tx) => {
+    const clientIp =
+      typeof request === 'object' &&
+      request !== null &&
+      'ip' in request &&
+      typeof (request as { ip?: unknown }).ip === 'string'
+        ? (request as { ip: string }).ip
+        : null
+    const userAgent =
+      typeof request === 'object' &&
+      request !== null &&
+      'headers' in request &&
+      typeof (request as { headers?: unknown }).headers === 'object' &&
+      (request as { headers: Record<string, unknown> }).headers !== null &&
+      'user-agent' in (request as { headers: Record<string, unknown> }).headers &&
+      typeof (request as { headers: Record<string, unknown> }).headers['user-agent'] === 'string'
+        ? (request as { headers: Record<string, string> }).headers['user-agent']
+        : null
+
+    await tx.auditoria.create({
+      data: {
+        usuarioId: userId,
+        tabla: 'compra',
+        registroId: updatedPurchase.id,
+        accion: AccionAuditoria.UPDATE,
+        fechaEvento: new Date(),
+        valorAnterior: previousSnapshot as unknown as Prisma.InputJsonValue,
+        valorNuevo: {
+          proveedorId: targetSupplierId,
+          fechaEmision: emissionDate.toISOString().slice(0, 10),
+          fechaRecepcion: expectedReceptionDate
+            ? expectedReceptionDate.toISOString().slice(0, 10)
+            : null,
+          estado: nextEstado,
+          observaciones: payload.observaciones ?? null,
+          subtotal: Number(subtotal.toFixed(2)),
+          impuestoTotal: Number(impuestoTotal.toFixed(2)),
+          total: Number(total.toFixed(2)),
+          saldoPendiente: Number(saldoPendiente.toFixed(2)),
+          items: lineItems.map((item) => ({
+            productoId: item.productoId,
+            productName: item.product.nombre,
+            cantidad: item.cantidad,
+            cantidadPresentacion: item.presentation.quantity,
+            presentacionId: item.presentation.id,
+            presentationName: item.presentation.name,
+            costoUnitario: item.requestedUnitCost,
+            porcentajeImpuesto: item.porcentajeImpuesto,
+            subtotal: Number(item.subtotal.toFixed(2)),
+            impuestoTotal: Number(item.impuestoTotal.toFixed(2)),
+            total: Number(item.total.toFixed(2)),
+          })),
+        } as unknown as Prisma.InputJsonValue,
+        direccionIp: clientIp,
+        userAgent,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+  })
+
+  invalidatePurchaseCodeCache()
+  const purchaseCodeMap = await buildPurchaseCodeMap()
+  const purchaseCode =
+    purchaseCodeMap.get(updatedPurchase.id) ??
+    `CMP-${updatedPurchase.id.slice(0, 6).toUpperCase()}`
+
+  invalidatePurchaseDashboardOptionsCache(companyId)
+
+  return {
+    item: {
+      id: updatedPurchase.id,
+      code: purchaseCode,
+      supplierName: supplier.razonSocial,
+      branchName: currentOrder.sucursal?.nombre ?? '',
+      buyerName: formatFullName(responsibleUser),
+      createdAt: formatDate(updatedPurchase.fechaEmision),
+      expectedAt: formatDate(updatedPurchase.fechaRecepcion),
+      itemCount: lineItems.length,
+      totalAmount: Number(total.toFixed(2)),
+      status: updatedPurchase.estado,
+    },
+    details: lineItems.map((item) => ({
+      productId: item.productoId,
+      productName: item.product.nombre,
+      sku: item.product.sku,
+      unitSymbol: item.presentation.name ?? item.product.unidadMedida.simbolo,
+      quantity: item.presentation.quantity ?? item.cantidad,
+      unitCost:
+        item.presentation.quantity === null || item.presentation.quantity === undefined
+          ? item.costoUnitario
+          : item.requestedUnitCost,
+      taxRate: item.porcentajeImpuesto,
+      total: Number(item.total.toFixed(2)),
+    })),
+  }
 }
 
 export async function registerPurchasePayment(
@@ -1568,6 +2170,12 @@ export async function registerPurchasePayment(
     throw createHttpError(400, 'La fecha del pago no es válida.')
   }
 
+  try {
+    await ensureDefaultPaymentMethods(prisma, userId)
+  } catch (err) {
+    rethrowStepError('ensureDefaultPaymentMethods', err)
+  }
+
   const pendingOpening = await prisma.aperturaCaja.findFirst({
     where: {
       deletedAt: null,
@@ -1612,6 +2220,197 @@ export async function registerPurchasePayment(
     }
   }
 
+  const [purchase, paymentMethod, opening] = await Promise.all([
+    prisma.compra.findFirst({
+      where: {
+        id: payload.compraId,
+        deletedAt: null,
+      },
+      include: {
+        proveedor: {
+          select: {
+            razonSocial: true,
+          },
+        },
+      },
+    }),
+    prisma.formaPago.findFirst({
+      where: {
+        id: payload.formaPagoId,
+        deletedAt: null,
+        activo: true,
+      },
+    }),
+    prisma.aperturaCaja.findFirst({
+      where: {
+        deletedAt: null,
+        estado: EstadoAperturaCaja.ABIERTA,
+        usuarioId: userId,
+        caja: {
+          deletedAt: null,
+          sucursalId: branchId,
+        },
+      },
+      select: {
+        id: true,
+        montoAperturaEfectivo: true,
+      },
+    }),
+  ])
+
+  reportDebugEvent('purchase.payment.loaded', {
+    purchaseId: payload.compraId,
+    purchaseFound: Boolean(purchase),
+    purchaseStatus: purchase?.estado ?? null,
+    purchaseBranchId: purchase?.sucursalId ?? null,
+    paymentMethodFound: Boolean(paymentMethod),
+    paymentMethodId: paymentMethod?.id ?? null,
+    paymentMethodCode: paymentMethod?.codigo ?? null,
+    openingFound: Boolean(opening),
+    openingId: opening?.id ?? null,
+  })
+
+  if (!purchase) {
+    throw createHttpError(404, 'La compra seleccionada no está disponible.')
+  }
+
+  if (purchase.sucursalId !== branchId) {
+    throw createHttpError(403, 'No tienes permisos para registrar pagos en compras de otra sucursal.')
+  }
+
+  if (
+    purchase.estado === EstadoCompra.BORRADOR ||
+    purchase.estado === EstadoCompra.ANULADA
+  ) {
+    throw createHttpError(
+      400,
+      'Solo puedes registrar pagos en compras activas o ya recibidas.',
+    )
+  }
+
+  if (!paymentMethod) {
+    throw createHttpError(404, 'La forma de pago seleccionada no está disponible.')
+  }
+
+  if (paymentMethod.requiereReferencia && !toOptionalString(payload.referenciaExterna)) {
+    throw createHttpError(
+      400,
+      'La forma de pago seleccionada requiere una referencia externa.',
+    )
+  }
+
+  const isCashPayment = paymentMethod.codigo === CodigoFormaPago.EFECTIVO
+
+  let effectiveOpening = opening
+  if (isCashPayment && !effectiveOpening) {
+    throw createHttpError(
+      409,
+      [
+        'No existe una caja activa para registrar este pago en efectivo.',
+        'Abra la Caja de la sesión y luego intente nuevamente.',
+      ].join('\n\n'),
+    )
+  }
+  if (!isCashPayment && !effectiveOpening) {
+    effectiveOpening =
+      (await prisma.aperturaCaja.findFirst({
+        where: {
+          sucursalId: branchId,
+          deletedAt: null,
+          estado: EstadoAperturaCaja.ABIERTA,
+          cierrePendiente: false,
+        },
+        orderBy: { fechaApertura: 'desc' },
+      })) ?? null
+  }
+
+  if (!effectiveOpening) {
+    throw createHttpError(
+      409,
+      [
+        'No existe una caja abierta para registrar este pago.',
+        'Abra la Caja de la sesión y luego intente nuevamente.',
+      ].join('\n\n'),
+    )
+  }
+
+  reportDebugEvent('purchase.payment.opening', {
+    purchaseId: purchase.id,
+    openingId: effectiveOpening.id,
+    openingCashAmount: decimalToNumber(effectiveOpening.montoAperturaEfectivo),
+    isCashPayment,
+    paymentMethodCode: paymentMethod.codigo,
+  })
+
+  const cashScopeOr = [{ formaPagoId: null }, { formaPago: { codigo: CodigoFormaPago.EFECTIVO } }]
+  const movementCashScope = isCashPayment ? { OR: cashScopeOr } : { formaPagoId: paymentMethod.id }
+
+  const [incomeAggregate, expenseAggregate] = await Promise.all([
+    prisma.movimientoCaja.aggregate({
+      where: {
+        deletedAt: null,
+        aperturaCajaId: effectiveOpening.id,
+        ...movementCashScope,
+        tipo: {
+          notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+        },
+        operacion: OperacionCaja.INGRESO,
+      },
+      _sum: {
+        monto: true,
+      },
+    }),
+    prisma.movimientoCaja.aggregate({
+      where: {
+        deletedAt: null,
+        aperturaCajaId: effectiveOpening.id,
+        ...movementCashScope,
+        tipo: {
+          notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
+        },
+        operacion: OperacionCaja.EGRESO,
+      },
+      _sum: {
+        monto: true,
+      },
+    }),
+  ])
+
+  const availableCash = Number(
+    (
+      (isCashPayment ? decimalToNumber(effectiveOpening.montoAperturaEfectivo) : 0) +
+      decimalToNumber(incomeAggregate._sum?.monto) -
+      decimalToNumber(expenseAggregate._sum?.monto)
+    ).toFixed(2),
+  )
+  const outstandingAmount = decimalToNumber(purchase.saldoPendiente)
+
+  reportDebugEvent('purchase.payment.balances', {
+    purchaseId: purchase.id,
+    isCashPayment,
+    availableCash,
+    outstandingAmount,
+    amount,
+  })
+
+  if (amount - outstandingAmount > 0.0001) {
+    throw createHttpError(400, 'El pago supera el saldo pendiente de la compra.')
+  }
+
+  if (isCashPayment && availableCash + 0.0001 < amount) {
+    const missingCash = Number(Math.max(0, amount - availableCash).toFixed(2))
+    throw createHttpError(
+      409,
+      [
+        'La caja activa no cuenta con saldo suficiente para registrar este pago en efectivo.',
+        `Saldo disponible en efectivo: S/${availableCash.toFixed(2)}`,
+        `Monto requerido: S/${amount.toFixed(2)}`,
+        `Faltante: S/${missingCash.toFixed(2)}`,
+        'Registra un ingreso en efectivo y luego completa el pago al proveedor.',
+      ].join('\n\n'),
+    )
+  }
+
   let result: {
     id: string
     purchaseId: string
@@ -1626,336 +2425,130 @@ export async function registerPurchasePayment(
     outstandingAmount: number
   }
   try {
-    result = await prisma.$transaction(async (tx) => {
-      try {
-        await ensureDefaultPaymentMethods(tx, userId)
-      } catch (err) {
-        rethrowStepError('ensureDefaultPaymentMethods', err)
-      }
+    result = await prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "public"."compras" WHERE id = ${purchase.id}::uuid FOR UPDATE`,
+        ).catch((err) => rethrowStepError('lockPurchase', err))
 
-      const [purchase, paymentMethod] = await Promise.all([
-        tx.compra
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${effectiveOpening.id}::uuid FOR UPDATE`,
+        ).catch((err) => rethrowStepError('lockCashOpening', err))
+
+        const currentPurchase = await tx.compra
           .findFirst({
             where: {
-              id: payload.compraId,
+              id: purchase.id,
               deletedAt: null,
             },
-            include: {
-              proveedor: {
-                select: {
-                  razonSocial: true,
-                },
-              },
+            select: {
+              id: true,
+              saldoPendiente: true,
             },
           })
-          .catch((err) => rethrowStepError('loadPurchase', err)),
-        tx.formaPago
-          .findFirst({
-            where: {
-              id: payload.formaPagoId,
-              deletedAt: null,
-              activo: true,
-            },
-          })
-          .catch((err) => rethrowStepError('loadPaymentMethod', err)),
-      ])
+          .catch((err) => rethrowStepError('reloadPurchaseForPayment', err))
 
-      // #region debug-point purchase-payment-advance-500.register-payment.loaded
-      reportDebugEvent('purchase.payment.loaded', {
-        purchaseId: payload.compraId,
-        purchaseFound: Boolean(purchase),
-        purchaseStatus: purchase?.estado ?? null,
-        purchaseBranchId: purchase?.sucursalId ?? null,
-        paymentMethodFound: Boolean(paymentMethod),
-        paymentMethodId: paymentMethod?.id ?? null,
-        paymentMethodCode: paymentMethod?.codigo ?? null,
-      })
-      // #endregion debug-point purchase-payment-advance-500.register-payment.loaded
+        if (!currentPurchase) {
+          throw createHttpError(404, 'La compra seleccionada ya no está disponible.')
+        }
 
-    if (!purchase) {
-      throw createHttpError(404, 'La compra seleccionada no está disponible.')
-    }
+        const currentOutstandingAmount = decimalToNumber(currentPurchase.saldoPendiente)
 
-    if (purchase.sucursalId !== branchId) {
-      throw createHttpError(403, 'No tienes permisos para registrar pagos en compras de otra sucursal.')
-    }
+        if (amount - currentOutstandingAmount > 0.0001) {
+          throw createHttpError(
+            409,
+            'El saldo pendiente de la compra cambió antes de registrar el pago. Recarga la compra e intenta nuevamente.',
+          )
+        }
 
-    if (
-      purchase.estado === EstadoCompra.BORRADOR ||
-      purchase.estado === EstadoCompra.ANULADA
-    ) {
-      throw createHttpError(
-        400,
-        'Solo puedes registrar pagos en compras activas o ya recibidas.',
-      )
-    }
-
-    if (!paymentMethod) {
-      throw createHttpError(404, 'La forma de pago seleccionada no está disponible.')
-    }
-
-    if (paymentMethod.requiereReferencia && !toOptionalString(payload.referenciaExterna)) {
-      throw createHttpError(
-        400,
-        'La forma de pago seleccionada requiere una referencia externa.',
-      )
-    }
-
-    const opening = await tx.aperturaCaja
-      .findFirst({
-        where: {
-          deletedAt: null,
-          estado: EstadoAperturaCaja.ABIERTA,
-          usuarioId: userId,
-          caja: {
-            deletedAt: null,
-            sucursalId: branchId,
-          },
-        },
-        select: {
-          id: true,
-          montoAperturaEfectivo: true,
-        },
-      })
-      .catch((err) => rethrowStepError('loadCashOpening', err))
-
-    if (!opening) {
-      throw createHttpError(
-        409,
-        [
-          'No existe una caja activa para registrar este pago.',
-          'Abra la Caja de la sesión y luego intente nuevamente.',
-        ].join('\n\n'),
-      )
-    }
-
-    // #region debug-point purchase-payment-advance-500.register-payment.opening
-    reportDebugEvent('purchase.payment.opening', {
-      purchaseId: purchase.id,
-      openingId: opening.id,
-      openingCashAmount: decimalToNumber(opening.montoAperturaEfectivo),
-    })
-    // #endregion debug-point purchase-payment-advance-500.register-payment.opening
-
-    try {
-      await tx.$queryRaw(
-        Prisma.sql`SELECT id FROM "public"."apertura_caja" WHERE id = ${opening.id}::uuid FOR UPDATE`,
-      )
-    } catch (err) {
-      rethrowStepError('lockCashOpening', err)
-    }
-
-    const isCashPayment = paymentMethod.codigo === CodigoFormaPago.EFECTIVO
-    const cashScopeOr = [{ formaPagoId: null }, { formaPago: { codigo: CodigoFormaPago.EFECTIVO } }]
-    const movementCashScope = isCashPayment ? { OR: cashScopeOr } : { formaPagoId: paymentMethod.id }
-
-    const [incomeAggregate, expenseAggregate] = await Promise.all([
-      tx.movimientoCaja
-        .aggregate({
-          where: {
-            deletedAt: null,
-            aperturaCajaId: opening.id,
-            ...movementCashScope,
-            tipo: {
-              notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
-            },
-            operacion: OperacionCaja.INGRESO,
-          },
-          _sum: {
-            monto: true,
-          },
-        })
-        .catch((err) => rethrowStepError('aggregateCashIncomes', err)),
-      tx.movimientoCaja
-        .aggregate({
-          where: {
-            deletedAt: null,
-            aperturaCajaId: opening.id,
-            ...movementCashScope,
-            tipo: {
-              notIn: [TipoMovimientoCaja.APERTURA, TipoMovimientoCaja.CIERRE],
-            },
-            operacion: OperacionCaja.EGRESO,
-          },
-          _sum: {
-            monto: true,
-          },
-        })
-        .catch((err) => rethrowStepError('aggregateCashExpenses', err)),
-    ])
-
-    const availableCash = Number(
-      (
-        (isCashPayment ? decimalToNumber(opening.montoAperturaEfectivo) : 0) +
-        decimalToNumber(incomeAggregate._sum?.monto) -
-        decimalToNumber(expenseAggregate._sum?.monto)
-      ).toFixed(2),
-    )
-
-    const [paidAggregate, returnMovements] = await Promise.all([
-      tx.compraPago
-        .aggregate({
-          where: {
+        const payment = await tx.compraPago
+          .create({
+          data: {
             compraId: purchase.id,
-            deletedAt: null,
-          },
-          _sum: {
-            monto: true,
-          },
-        })
-        .catch((err) => rethrowStepError('aggregatePurchasePayments', err)),
-      tx.movimientoInventario
-        .findMany({
-          where: {
-            deletedAt: null,
-            origen: OrigenMovimientoInventario.DEVOLUCION_COMPRA,
-            detalleCompra: {
-              compraId: purchase.id,
-            },
-          },
-          select: {
-            cantidad: true,
-            costoUnitario: true,
+            formaPagoId: paymentMethod.id,
+            monto: toDecimal(amount, 2),
+            fechaPago: paymentDate,
+            referenciaExterna: toOptionalString(payload.referenciaExterna),
+            observaciones: toOptionalString(payload.observaciones),
+            createdById: userId,
+            updatedById: userId,
           },
         })
-        .catch((err) => rethrowStepError('loadPurchaseReturns', err)),
-    ])
+          .catch((err) => rethrowStepError('createPurchasePayment', err))
 
-    const totalAmount = decimalToNumber(purchase.total)
-    const returnedAmount = Number(
-      returnMovements
-        .reduce(
-          (sum, movement) =>
-            sum +
-            Math.abs(decimalToNumber(movement.cantidad)) *
-              decimalToNumber(movement.costoUnitario),
-          0,
+        const nextOutstandingAmount = Number(
+          Math.max(0, currentOutstandingAmount - amount).toFixed(2),
         )
-        .toFixed(2),
+        const nextFinancialStatus =
+          nextOutstandingAmount <= 0
+            ? EstadoCompraFinanciero.PAGADA
+            : EstadoCompraFinanciero.PAGO_PARCIAL
+
+        await tx.compra
+          .update({
+          where: {
+            id: purchase.id,
+          },
+          data: {
+            saldoPendiente: toDecimal(nextOutstandingAmount, 2),
+            estadoFinanciero: nextFinancialStatus,
+            updatedById: userId,
+          },
+        })
+          .catch((err) => rethrowStepError('updatePurchaseFinancialState', err))
+
+        const cashMovement = await createCashMovementExpense(tx, {
+          openingId: effectiveOpening.id,
+          paymentMethodId: paymentMethod.id,
+          amount,
+          paymentId: payment.id,
+          supplierName: purchase.proveedor.razonSocial,
+          paymentMethodName: paymentMethod.nombre,
+          userId,
+        }).catch((err) => rethrowStepError('createCashMovementExpense', err))
+
+        await tx.egreso
+          .create({
+          data: {
+            movimientoCajaId: cashMovement.id,
+            concepto: 'Pago a proveedor',
+            referencia: toOptionalString(payment.id),
+            observaciones: toOptionalString(payload.observaciones),
+            createdById: userId,
+            updatedById: userId,
+          },
+        })
+          .catch((err) => rethrowStepError('createCashExpenseRecord', err))
+
+        await createPurchasePaymentAuditEntry(tx, {
+          userId,
+          paymentId: payment.id,
+          purchaseId: purchase.id,
+          amount,
+          outstandingAmount: nextOutstandingAmount,
+          request,
+        }).catch((err) => rethrowStepError('createPurchasePaymentAudit', err))
+
+        return {
+          id: payment.id,
+          purchaseId: purchase.id,
+          supplierName: purchase.proveedor.razonSocial,
+          formPaymentId: paymentMethod.id,
+          formPaymentCode: paymentMethod.codigo,
+          formPaymentName: paymentMethod.nombre,
+          amount,
+          paidAt: formatDateTime(payment.fechaPago),
+          reference: payment.referenciaExterna,
+          observations: payment.observaciones,
+          outstandingAmount: nextOutstandingAmount,
+        }
+      },
+      {
+        maxWait: 15_000,
+        timeout: 45_000,
+        isolationLevel: 'Serializable',
+      },
     )
-    const paidAmount = decimalToNumber(paidAggregate._sum.monto)
-    const outstandingAmount = calculatePurchaseOutstandingAmount({
-      totalAmount,
-      returnedAmount,
-      paidAmount,
-    })
-
-    // #region debug-point purchase-payment-advance-500.register-payment.balances
-    reportDebugEvent('purchase.payment.balances', {
-      purchaseId: purchase.id,
-      isCashPayment,
-      availableCash,
-      totalAmount,
-      returnedAmount,
-      paidAmount,
-      outstandingAmount,
-      amount,
-    })
-    // #endregion debug-point purchase-payment-advance-500.register-payment.balances
-
-    if (amount - outstandingAmount > 0.0001) {
-      throw createHttpError(
-        400,
-        'El pago supera el saldo pendiente de la compra después de devoluciones.',
-      )
-    }
-
-    if (availableCash + 0.0001 < amount) {
-      const missingCash = Number(Math.max(0, amount - availableCash).toFixed(2))
-      throw createHttpError(
-        409,
-        [
-          'La caja activa no cuenta con saldo suficiente para registrar este pago.',
-          `Saldo disponible: S/${availableCash.toFixed(2)}`,
-          `Monto requerido: S/${amount.toFixed(2)}`,
-          `Faltante: S/${missingCash.toFixed(2)}`,
-          'Registra un ingreso de caja y luego completa el pago al proveedor.',
-        ].join('\n\n'),
-      )
-    }
-
-    const payment = await tx.compraPago
-      .create({
-        data: {
-          compraId: purchase.id,
-          formaPagoId: paymentMethod.id,
-          monto: toDecimal(amount, 2),
-          fechaPago: paymentDate,
-          referenciaExterna: toOptionalString(payload.referenciaExterna),
-          observaciones: toOptionalString(payload.observaciones),
-          createdById: userId,
-          updatedById: userId,
-        },
-      })
-      .catch((err) => rethrowStepError('createPurchasePayment', err))
-
-    const nextOutstandingAmount = Number(Math.max(0, outstandingAmount - amount).toFixed(2))
-    const nextPaidAmount = Number((paidAmount + amount).toFixed(2))
-    const nextFinancialStatus =
-      nextOutstandingAmount <= 0
-        ? EstadoCompraFinanciero.PAGADA
-        : nextPaidAmount > 0
-          ? EstadoCompraFinanciero.PAGO_PARCIAL
-          : EstadoCompraFinanciero.SIN_PAGAR
-
-    await tx.compra
-      .update({
-        where: {
-          id: purchase.id,
-        },
-        data: {
-          saldoPendiente: toDecimal(nextOutstandingAmount, 2),
-          estadoFinanciero: nextFinancialStatus,
-          updatedById: userId,
-        },
-      })
-      .catch((err) => rethrowStepError('updatePurchaseFinancialState', err))
-
-    const cashMovement = await tx.movimientoCaja
-      .create({
-        data: {
-          aperturaCajaId: opening.id,
-          formaPagoId: paymentMethod.id,
-          tipo: TipoMovimientoCaja.EGRESO,
-          operacion: OperacionCaja.EGRESO,
-          monto: toDecimal(amount, 2),
-          referencia: toOptionalString(payment.id),
-          observaciones: toOptionalString(
-            `Pago a proveedor · ${purchase.proveedor.razonSocial} · ${paymentMethod.nombre}`,
-          ),
-          createdById: userId,
-          updatedById: userId,
-        },
-      })
-      .catch((err) => rethrowStepError('createCashMovementExpense', err))
-
-    await tx.egreso
-      .create({
-        data: {
-          movimientoCajaId: cashMovement.id,
-          concepto: 'Pago a proveedor',
-          referencia: toOptionalString(payment.id),
-          observaciones: toOptionalString(payload.observaciones),
-          createdById: userId,
-          updatedById: userId,
-        },
-      })
-      .catch((err) => rethrowStepError('createCashExpenseRecord', err))
-
-      return {
-        id: payment.id,
-        purchaseId: purchase.id,
-        supplierName: purchase.proveedor.razonSocial,
-        formPaymentId: paymentMethod.id,
-        formPaymentCode: paymentMethod.codigo,
-        formPaymentName: paymentMethod.nombre,
-        amount,
-        paidAt: formatDateTime(payment.fechaPago),
-        reference: payment.referenciaExterna,
-        observations: payment.observaciones,
-        outstandingAmount: nextOutstandingAmount,
-      }
-    })
 
     // #region debug-point purchase-payment-advance-500.register-payment.success
     reportDebugEvent('purchase.payment.success', {
@@ -1972,6 +2565,12 @@ export async function registerPurchasePayment(
       error: extractErrorInfo(err),
     })
     // #endregion debug-point purchase-payment-advance-500.register-payment.error
+    if (isClosedTransactionError(err)) {
+      throw createHttpError(
+        500,
+        'No fue posible registrar el pago al proveedor. La operación se canceló antes de completarse y no se guardó ningún cambio. Intenta nuevamente.',
+      )
+    }
     throw err
   }
 
@@ -1988,6 +2587,7 @@ async function receivePurchaseItemInTransaction(
     receivedUnits: number
     reservedUnits: number
     blockedUnits: number
+    costoRecepcion?: number
     almacen?: string
     observaciones?: string
   },
@@ -2010,6 +2610,9 @@ async function receivePurchaseItemInTransaction(
           sucursalId: true,
           proveedorId: true,
           estado: true,
+          estadoFinanciero: true,
+          total: true,
+          saldoPendiente: true,
         },
       },
       producto: {
@@ -2050,6 +2653,14 @@ async function receivePurchaseItemInTransaction(
     throw createHttpError(
       400,
       'Solo puedes recepcionar órdenes registradas o parcialmente recibidas.',
+    )
+  }
+
+  const outstandingAmount = decimalToNumber(detail.compra.saldoPendiente)
+  if (outstandingAmount > 0.0001) {
+    throw createHttpError(
+      400,
+      'No se puede registrar la recepción porque la orden de compra tiene un saldo pendiente de pago.',
     )
   }
 
@@ -2174,7 +2785,7 @@ async function receivePurchaseItemInTransaction(
       numeroLote: prepared.numeroLote.trim().toUpperCase(),
       fechaFabricacion: prepared.manufacturedAt ?? undefined,
       fechaVencimiento: prepared.expiryDate,
-      costoUnitario: detail.costoUnitario,
+      costoUnitario: prepared.costoRecepcion ?? detail.costoUnitario,
       stockInicial: receivedUnits,
       stockDisponible: availableUnits,
       stockReservado: reservedUnits,
@@ -2285,26 +2896,33 @@ export async function receivePurchaseItem(
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      return receivePurchaseItemInTransaction(
-        tx,
-        {
-          detalleCompraId: payload.detalleCompraId,
-          numeroLote: payload.numeroLote,
-          manufacturedAt,
-          expiryDate,
-          receivedUnits: Number(payload.cantidadRecibida),
-          reservedUnits: Number(payload.stockReservado ?? 0),
-          blockedUnits: Number(payload.stockBloqueado ?? 0),
-          almacen: toOptionalString(payload.almacen),
-          observaciones: toOptionalString(payload.observaciones),
-        },
-        {
-          userId,
-          recepcionObservaciones: undefined,
-        },
-      )
-    })
+    const result = await prisma.$transaction(
+      async (tx) => {
+        return receivePurchaseItemInTransaction(
+          tx,
+          {
+            detalleCompraId: payload.detalleCompraId,
+            numeroLote: payload.numeroLote,
+            manufacturedAt,
+            expiryDate,
+            receivedUnits: Number(payload.cantidadRecibida),
+            reservedUnits: Number(payload.stockReservado ?? 0),
+            blockedUnits: Number(payload.stockBloqueado ?? 0),
+            almacen: toOptionalString(payload.almacen),
+            observaciones: toOptionalString(payload.observaciones),
+          },
+          {
+            userId,
+            recepcionObservaciones: undefined,
+          },
+        )
+      },
+      {
+        maxWait: 15_000,
+        timeout: 45_000,
+        isolationLevel: 'Serializable',
+      },
+    )
 
     return { item: result }
   } catch (error) {
@@ -2329,63 +2947,99 @@ export async function createPurchaseReception(
     throw createHttpError(400, 'Agrega al menos una línea para recepcionar.')
   }
 
+  const purchase = await prisma.compra.findFirst({
+    where: {
+      id: payload.compraId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+      saldoPendiente: true,
+      estado: true,
+      estadoFinanciero: true,
+      total: true,
+    },
+  })
+
+  if (!purchase) {
+    throw createHttpError(404, 'La orden de compra no está disponible.')
+  }
+
+  const outstandingAmount = decimalToNumber(purchase.saldoPendiente)
+  if (outstandingAmount > 0.0001) {
+    throw createHttpError(
+      400,
+      'No se puede registrar la recepción porque la orden de compra tiene un saldo pendiente de pago.',
+    )
+  }
+
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      const reception = await createPurchaseReceptionRecord(
-        tx,
-        payload.compraId,
-        userId,
-        payload.observaciones,
-      )
-
-      const receivedItems = []
-      for (const item of payload.items) {
-        const expiryDate = new Date(`${item.fechaVencimiento}T00:00:00`)
-        const manufacturedAt = item.fechaFabricacion
-          ? new Date(`${item.fechaFabricacion}T00:00:00`)
-          : null
-
-        if (Number.isNaN(expiryDate.getTime())) {
-          throw createHttpError(400, 'La fecha de vencimiento no es válida.')
-        }
-
-        if (manufacturedAt && Number.isNaN(manufacturedAt.getTime())) {
-          throw createHttpError(400, 'La fecha de fabricación no es válida.')
-        }
-
-        if (manufacturedAt && manufacturedAt > expiryDate) {
-          throw createHttpError(400, 'La fecha de fabricación no puede ser posterior al vencimiento.')
-        }
-
-        const entry = await receivePurchaseItemInTransaction(
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const reception = await createPurchaseReceptionRecord(
           tx,
-          {
-            detalleCompraId: item.detalleCompraId,
-            numeroLote: item.numeroLote,
-            manufacturedAt,
-            expiryDate,
-            receivedUnits: Number(item.cantidadRecibida),
-            reservedUnits: Number(item.stockReservado ?? 0),
-            blockedUnits: Number(item.stockBloqueado ?? 0),
-            almacen: toOptionalString(item.almacen),
-            observaciones: toOptionalString(item.observaciones),
-          },
-          {
-            userId,
-            compraIdConstraint: payload.compraId,
-            compraRecepcionId: reception.id,
-          },
+          payload.compraId,
+          userId,
+          payload.observaciones,
         )
 
-        receivedItems.push(entry)
-      }
+        const receivedItems = []
+        for (const item of payload.items) {
+          const expiryDate = new Date(`${item.fechaVencimiento}T00:00:00`)
+          const manufacturedAt = item.fechaFabricacion
+            ? new Date(`${item.fechaFabricacion}T00:00:00`)
+            : null
 
-      return {
-        purchaseId: payload.compraId,
-        receptionId: reception.id,
-        receivedCount: receivedItems.length,
-      }
-    })
+          if (Number.isNaN(expiryDate.getTime())) {
+            throw createHttpError(400, 'La fecha de vencimiento no es válida.')
+          }
+
+          if (manufacturedAt && Number.isNaN(manufacturedAt.getTime())) {
+            throw createHttpError(400, 'La fecha de fabricación no es válida.')
+          }
+
+          if (manufacturedAt && manufacturedAt > expiryDate) {
+            throw createHttpError(400, 'La fecha de fabricación no puede ser posterior al vencimiento.')
+          }
+
+          const entry = await receivePurchaseItemInTransaction(
+            tx,
+            {
+              detalleCompraId: item.detalleCompraId,
+              numeroLote: item.numeroLote,
+              manufacturedAt,
+              expiryDate,
+              receivedUnits: Number(item.cantidadRecibida),
+              reservedUnits: Number(item.stockReservado ?? 0),
+              blockedUnits: Number(item.stockBloqueado ?? 0),
+              costoRecepcion: Number.isFinite(Number(item.costoUnitarioRecepcion))
+                ? Number(item.costoUnitarioRecepcion)
+                : undefined,
+              almacen: toOptionalString(item.almacen),
+              observaciones: toOptionalString(item.observaciones),
+            },
+            {
+              userId,
+              compraIdConstraint: payload.compraId,
+              compraRecepcionId: reception.id,
+            },
+          )
+
+          receivedItems.push(entry)
+        }
+
+        return {
+          purchaseId: payload.compraId,
+          receptionId: reception.id,
+          receivedCount: receivedItems.length,
+        }
+      },
+      {
+        maxWait: 15_000,
+        timeout: 45_000,
+        isolationLevel: 'Serializable',
+      },
+    )
 
     return { item: result }
   } catch (error) {
@@ -2615,5 +3269,215 @@ export async function returnPurchaseItem(
 
   return {
     item: result,
+  }
+}
+
+export async function getPurchaseOrderById(orderId: string, request: FastifyRequest) {
+  const { userId, branchId, companyId } = await getAuthContext(request)
+
+  const companyPromise = prisma.empresa.findFirst({
+    where: {
+      id: companyId,
+      deletedAt: null,
+    },
+    select: {
+      razonSocial: true,
+      nombreComercial: true,
+      numeroDocumento: true,
+      direccion: true,
+      logoUrl: true,
+      monedaBase: true,
+      igvPorDefecto: true,
+    },
+  })
+
+  const rawPurchasePromise = prisma.compra.findFirst({
+    where: {
+      id: orderId,
+      deletedAt: null,
+      sucursal: {
+        empresaId: companyId,
+      },
+      OR: [
+        { sucursalId: branchId },
+        {
+          sucursal: {
+            usuariosSucursales: {
+              some: {
+                usuarioId: userId,
+                deletedAt: null,
+              },
+            },
+          },
+        },
+      ],
+    },
+    include: {
+      ...purchaseInclude,
+      detalles: {
+        ...purchaseInclude.detalles,
+        include: {
+          ...purchaseInclude.detalles.include,
+          producto: {
+            select: {
+              id: true,
+              nombre: true,
+              sku: true,
+              compraPresentacionId: true,
+              presentacionesEmpaque: {
+                where: { deletedAt: null },
+                select: {
+                  esBase: true,
+                  permiteCompra: true,
+                  permiteVenta: true,
+                  precioVenta: true,
+                  presentacion: {
+                    select: {
+                      id: true,
+                      nombre: true,
+                    },
+                  },
+                },
+              },
+              conversionesEmpaque: {
+                where: { deletedAt: null },
+                select: {
+                  desdePresentacionId: true,
+                  haciaPresentacionId: true,
+                  cantidad: true,
+                },
+              },
+              unidadMedida: {
+                select: {
+                  simbolo: true,
+                },
+              },
+            },
+          },
+          presentacion: {
+            select: {
+              id: true,
+              nombre: true,
+            },
+          },
+          lotes: {
+            where: { deletedAt: null },
+            select: {
+              id: true,
+              numeroLote: true,
+              stockInicial: true,
+              createdAt: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  const [rawPurchase, company] = await Promise.all([rawPurchasePromise, companyPromise])
+
+  if (!rawPurchase) {
+    throw createHttpError(404, 'La orden de compra no existe o no tienes acceso.')
+  }
+
+  if (!company) {
+    throw createHttpError(404, 'La empresa configurada no está disponible.')
+  }
+
+  const orderIds = [rawPurchase.id]
+  const [codeMap, returnMetrics, paymentMetrics] = await Promise.all([
+    buildPurchaseCodeMap(),
+    buildPurchaseReturnMetrics(orderIds),
+    buildPurchasePaymentMetrics(orderIds),
+  ])
+
+  const order = mapPurchaseOrder(rawPurchase, codeMap, returnMetrics, paymentMetrics)
+
+  const items = rawPurchase.detalles.map((detail) => {
+    const factor = detail.factorPresentacion ?? detail.factorEmpaque ?? 1
+    const presentationQty = detail.cantidadPresentacion ?? detail.cantidadEmpaque ?? null
+    const orderedBaseUnits = decimalToNumber(detail.cantidad)
+    const unitCostBase = decimalToNumber(detail.costoUnitario)
+    const taxRate = Number(detail.porcentajeImpuesto ?? 0)
+    const subtotal = decimalToNumber(detail.subtotal)
+    const taxAmount = decimalToNumber(detail.impuestoTotal)
+    const total = decimalToNumber(detail.total)
+
+    let unitCostPresentation: number
+    if (presentationQty !== null && presentationQty !== undefined && presentationQty > 0) {
+      const fromSubtotal = Number((subtotal / presentationQty).toFixed(6))
+      const fromBase = Number((unitCostBase * factor).toFixed(6))
+      unitCostPresentation =
+        Math.abs(fromSubtotal - fromBase) <= 0.0001 ? fromSubtotal : fromBase
+    } else {
+      unitCostPresentation = unitCostBase
+    }
+
+    const quantityPresentation =
+      presentationQty !== null && presentationQty !== undefined
+        ? Number(presentationQty)
+        : orderedBaseUnits
+
+    const receivedBaseUnits = detail.lotes.reduce(
+      (sum, lot) => sum + decimalToNumber(lot.stockInicial),
+      0,
+    )
+    const packagingSnapshot = buildPackagingSnapshot({
+      presentations: detail.producto.presentacionesEmpaque ?? [],
+      conversions: detail.producto.conversionesEmpaque ?? [],
+    })
+
+    return {
+      detailId: detail.id,
+      productId: detail.productoId,
+      productName: detail.producto.nombre,
+      sku: detail.producto.sku,
+      unitSymbol: detail.producto.unidadMedida?.simbolo ?? 'u',
+      presentationId: detail.presentacionId,
+      presentationName: detail.presentacion?.nombre ?? detail.producto.unidadMedida?.simbolo ?? 'Unidad',
+      presentationFactor: factor,
+      presentationQuantity: quantityPresentation,
+      baseQuantity: orderedBaseUnits,
+      unitCostPresentation,
+      unitCostBase,
+      taxRate,
+      subtotal,
+      taxAmount,
+      total,
+      receivedBaseUnits,
+      receivedPresentationUnits: factor > 1 ? Number((receivedBaseUnits / factor).toFixed(4)) : receivedBaseUnits,
+      packaging: packagingSnapshot,
+    }
+  })
+
+  return {
+    order,
+    items,
+    company: {
+      razonSocial: company.razonSocial,
+      nombreComercial: company.nombreComercial,
+      numeroDocumento: company.numeroDocumento,
+      direccion: company.direccion,
+      logoUrl: company.logoUrl,
+      monedaBase: company.monedaBase,
+      igvPorDefecto: Number(company.igvPorDefecto),
+    },
+    supplier: {
+      id: rawPurchase.proveedor.id,
+      razonSocial: rawPurchase.proveedor.razonSocial,
+      numeroDocumento: rawPurchase.proveedor.numeroDocumento,
+      contactoTelefono: rawPurchase.proveedor.contactoTelefono,
+    },
+    branch: {
+      id: rawPurchase.sucursal.id,
+      nombre: rawPurchase.sucursal.nombre,
+    },
+    buyer: {
+      id: rawPurchase.usuarioResponsable.id,
+      fullName: formatFullName(rawPurchase.usuarioResponsable),
+    },
+    fechaEmision: formatDate(rawPurchase.fechaEmision),
+    fechaRecepcionEsperada: formatDate(rawPurchase.fechaRecepcion),
+    observaciones: rawPurchase.observaciones,
   }
 }

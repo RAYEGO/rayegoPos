@@ -36,6 +36,7 @@ const createCashMovementSchema = z.object({
   openingId: z.string().uuid(),
   type: z.enum(['INGRESO', 'EGRESO']),
   amount: z.number().positive(),
+  paymentMethodId: z.string().uuid().optional(),
   concept: z.string().max(120),
   reference: z.string().max(120).optional(),
   observations: z.string().max(255).optional(),

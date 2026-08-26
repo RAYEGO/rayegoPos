@@ -6,6 +6,7 @@ import type {
   PurchaseLogisticsStatus,
   PurchaseOrderStatus,
   PurchasesDashboardResponse,
+  PurchaseOrderDetail,
   RegisterPurchasePaymentPayload,
   ReturnPurchaseItemPayload,
   ReceivePurchaseItemPayload,
@@ -61,11 +62,28 @@ export const purchasesService = {
     )
   },
 
+  getOrderById(accessToken: string, orderId: string) {
+    return apiRequest<PurchaseOrderDetail>(`/api/purchases/orders/${orderId}`, {
+      accessToken,
+    })
+  },
+
   createOrder(accessToken: string, payload: CreatePurchaseOrderPayload) {
     return apiRequest<{ item: PurchasesDashboardResponse['orders'][number] }>(
       '/api/purchases/orders',
       {
         method: 'POST',
+        accessToken,
+        body: payload,
+      },
+    )
+  },
+
+  updateOrder(accessToken: string, orderId: string, payload: Partial<CreatePurchaseOrderPayload> & { items: CreatePurchaseOrderPayload['items'] }) {
+    return apiRequest<{ item: PurchasesDashboardResponse['orders'][number] }>(
+      `/api/purchases/orders/${orderId}`,
+      {
+        method: 'PUT',
         accessToken,
         body: payload,
       },

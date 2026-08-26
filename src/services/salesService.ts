@@ -7,6 +7,8 @@ type SalesDashboardFilters = {
   commercialTypeId?: string
   activePrincipleId?: string
   medicationTypeId?: string
+  categoryId?: string
+  availability?: 'TODOS' | 'CON_STOCK' | 'SIN_STOCK'
 }
 
 function buildQuery(filters: SalesDashboardFilters) {
@@ -28,6 +30,14 @@ function buildQuery(filters: SalesDashboardFilters) {
 
   if (filters.activePrincipleId) {
     searchParams.set('activePrincipleId', filters.activePrincipleId)
+  }
+
+  if (filters.categoryId) {
+    searchParams.set('categoryId', filters.categoryId)
+  }
+
+  if (filters.availability) {
+    searchParams.set('availability', filters.availability)
   }
 
   const query = searchParams.toString()

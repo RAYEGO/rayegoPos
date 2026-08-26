@@ -3,7 +3,10 @@ import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import {
+  analyzePackagingStructure,
   buildPackagingEdges,
+  buildPackagingSummaries,
+  decomposeStockInBaseUnits,
   resolveBasePresentation,
   resolvePresentationFactors,
 } from '../../lib/productPackaging.js'
@@ -12,7 +15,7 @@ import {
   IMPLEMENTATION_MESSAGES,
 } from '../../shared/implementation/messages.js'
 
-const productInclude = {
+const productIncludeBase = {
   categoria: {
     select: {
       id: true,
@@ -105,6 +108,10 @@ const productInclude = {
       stockReservado: true,
     },
   },
+} satisfies Prisma.ProductoInclude
+
+const productInclude = {
+  ...productIncludeBase,
   _count: {
     select: {
       detalleCompras: {
@@ -126,9 +133,22 @@ const productInclude = {
   },
 } satisfies Prisma.ProductoInclude
 
+type ProductListWithRelations = Prisma.ProductoGetPayload<{
+  include: typeof productIncludeBase
+}>
+
 type ProductWithRelations = Prisma.ProductoGetPayload<{
   include: typeof productInclude
 }>
+
+function resolveProductActivePrincipleIds(payload: CreateProductPayload) {
+  const ordered = [
+    payload.principioActivoId,
+    ...(payload.principioActivoIds ?? []),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+
+  return [...new Set(ordered)]
+}
 
 type ListProductsFilters = {
   search?: string
@@ -143,17 +163,71 @@ type ListProductsFilters = {
   sortDir?: 'asc' | 'desc'
 }
 
+type ProductCatalogCacheEntry = {
+  expiresAt: number
+  value: {
+    items: ReturnType<typeof mapProduct>[]
+    summary: {
+      total: number
+      activeCatalog: number
+      lowStockCount: number
+      withPrescription: number
+      lotEnabled: number
+    }
+    pagination: {
+      page: number
+      pageSize: number
+      totalItems: number
+      totalPages: number
+    }
+    sort: {
+      by: 'name' | 'stockUnits' | 'createdAt'
+      dir: 'asc' | 'desc'
+    }
+  }
+}
+
+const PRODUCT_CATALOG_CACHE_TTL_MS = 20_000
+const productCatalogCache = new Map<string, ProductCatalogCacheEntry>()
+
+function buildProductCatalogCacheKey(args: {
+  companyId: string
+  branchId: string
+  filters: ListProductsFilters
+}) {
+  return JSON.stringify({
+    companyId: args.companyId,
+    branchId: args.branchId,
+    filters: args.filters,
+  })
+}
+
+function invalidateProductCatalogCache(companyId?: string) {
+  if (!companyId) {
+    productCatalogCache.clear()
+    return
+  }
+
+  for (const key of productCatalogCache.keys()) {
+    if (key.includes(`"companyId":"${companyId}"`)) {
+      productCatalogCache.delete(key)
+    }
+  }
+}
+
 type CreateProductPayload = {
   categoriaId: string
   tipoComercialId: string
   principioActivoId: string
+  principioActivoIds?: string[]
   laboratorioId?: string
   presentacionId?: string
   unidadMedidaId: string
-  compraPresentacionId: string
-  basePresentacionId: string
-  presentacionesEmpaque: PackagingPresentationInput[]
+  compraPresentacionId?: string
+  basePresentacionId?: string
+  presentacionesEmpaque?: PackagingPresentationInput[]
   conversionesEmpaque?: PackagingConversionInput[]
+  cadenaEmpaque?: PackagingChainStepInput[]
   sku: string
   codigoBarras?: string
   nombre: string
@@ -162,9 +236,18 @@ type CreateProductPayload = {
   registroSanitario?: string
   requiereReceta: boolean
   esControlado: boolean
-  costoReferencia: number
+  costoReferencia?: number
   observaciones?: string
 }
+
+type PackagingConfigPayload = Pick<
+  CreateProductPayload,
+  | 'compraPresentacionId'
+  | 'basePresentacionId'
+  | 'presentacionesEmpaque'
+  | 'conversionesEmpaque'
+  | 'cadenaEmpaque'
+>
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -189,7 +272,16 @@ type PackagingConversionInput = {
   cantidad: number
 }
 
+type PackagingChainStepInput = {
+  presentacionId: string
+  permiteCompra: boolean
+  permiteVenta: boolean
+  precioVenta?: number
+  cantidad?: number
+}
+
 type NormalizedPackagingConfig = {
+  purchasePresentationId: string
   basePresentacionId: string
   presentaciones: Array<{
     presentacionId: string
@@ -203,18 +295,67 @@ type NormalizedPackagingConfig = {
     haciaPresentacionId: string
     cantidad: number
   }>
+  resumenes: Array<{
+    presentationId: string
+    presentationName: string
+    factorToBase: number
+    expression: string
+  }>
+}
+
+function normalizePackagingConfigPayload(payload: PackagingConfigPayload) {
+  const chain = payload.cadenaEmpaque ?? null
+
+  if (chain && chain.length > 0) {
+    const purchasePresentationId =
+      chain.find((entry) => entry.permiteCompra)?.presentacionId?.trim() ?? ''
+    const basePresentacionId = chain.at(-1)?.presentacionId?.trim() ?? ''
+
+    return {
+      purchasePresentationId,
+      basePresentacionId,
+      presentacionesEmpaque: chain.map((entry) => ({
+        presentacionId: entry.presentacionId,
+        permiteCompra: entry.permiteCompra,
+        permiteVenta: entry.permiteVenta,
+        precioVenta: entry.permiteVenta ? entry.precioVenta : undefined,
+      })),
+      conversionesEmpaque: chain.flatMap((entry, index) => {
+        const next = chain[index + 1]
+        if (!next) {
+          return []
+        }
+
+        return [
+          {
+            desdePresentacionId: entry.presentacionId,
+            haciaPresentacionId: next.presentacionId,
+            cantidad: entry.cantidad ?? Number.NaN,
+          },
+        ]
+      }),
+    }
+  }
+
+  return {
+    purchasePresentationId: payload.compraPresentacionId?.trim() ?? '',
+    basePresentacionId: payload.basePresentacionId?.trim() ?? '',
+    presentacionesEmpaque: payload.presentacionesEmpaque ?? null,
+    conversionesEmpaque: payload.conversionesEmpaque ?? null,
+  }
 }
 
 async function buildPackagingConfig(
   tx: Prisma.TransactionClient,
-  payload: CreateProductPayload,
+  payload: PackagingConfigPayload,
   params: { companyId: string },
 ): Promise<NormalizedPackagingConfig> {
   const { companyId } = params
-  const purchasePresentationId = payload.compraPresentacionId.trim()
-  const basePresentacionId = payload.basePresentacionId.trim()
-  const presentacionesEmpaque = payload.presentacionesEmpaque ?? null
-  const conversionesEmpaque = payload.conversionesEmpaque ?? null
+  const normalizedPayload = normalizePackagingConfigPayload(payload)
+  const purchasePresentationId = normalizedPayload.purchasePresentationId
+  const basePresentacionId = normalizedPayload.basePresentacionId
+  const presentacionesEmpaque = normalizedPayload.presentacionesEmpaque
+  const conversionesEmpaque = normalizedPayload.conversionesEmpaque
 
   if (
     purchasePresentationId &&
@@ -231,6 +372,7 @@ async function buildPackagingConfig(
       },
       select: {
         id: true,
+        nombre: true,
       },
     })
 
@@ -263,10 +405,6 @@ async function buildPackagingConfig(
             'Cada presentación habilitada para venta debe tener un precio válido.',
           )
         }
-      } else {
-        if (salePrice !== null && (!Number.isFinite(salePrice) || salePrice < 0)) {
-          throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_PRICE)
-        }
       }
 
       return {
@@ -274,9 +412,19 @@ async function buildPackagingConfig(
         esBase: entry.presentacionId === basePresentacionId,
         permiteCompra: Boolean(entry.permiteCompra),
         permiteVenta: Boolean(entry.permiteVenta),
-        precioVenta: salePrice === null ? null : new Prisma.Decimal(salePrice.toFixed(2)),
+        precioVenta:
+          !entry.permiteVenta || salePrice === null
+            ? null
+            : new Prisma.Decimal(salePrice.toFixed(2)),
       }
     })
+
+    if (!normalizedPresentations.some((entry) => entry.permiteCompra)) {
+      throw createHttpError(
+        400,
+        'El producto debe tener al menos una presentación habilitada para compra.',
+      )
+    }
 
     if (!normalizedPresentations.some((entry) => entry.permiteVenta)) {
       throw createHttpError(
@@ -325,7 +473,22 @@ async function buildPackagingConfig(
       conversionKey.add(key)
     }
 
+    const presentationDefinitions = presentations.map((entry) => ({
+      id: entry.id,
+      name: entry.nombre,
+    }))
+
     const edges = buildPackagingEdges(conversionList)
+    const analysis = analyzePackagingStructure({
+      basePresentationId: basePresentacionId,
+      edges,
+      presentations: presentationDefinitions,
+    })
+
+    if (!analysis.ok) {
+      throw createHttpError(400, analysis.issues[0]?.message ?? 'La configuración de empaque no es válida.')
+    }
+
     const factors = resolvePresentationFactors({
       basePresentationId: basePresentacionId,
       presentationIds: ids,
@@ -339,13 +502,82 @@ async function buildPackagingConfig(
       )
     }
 
+    const summaries = buildPackagingSummaries({
+      basePresentationId: basePresentacionId,
+      presentations: presentationDefinitions,
+      edges,
+    })
+
     return {
+      purchasePresentationId,
       basePresentacionId,
       presentaciones: normalizedPresentations,
       conversiones: conversionList,
+      resumenes: summaries.map((entry) => ({
+        presentationId: entry.presentationId,
+        presentationName: entry.presentationName,
+        factorToBase: entry.factorToBase,
+        expression: entry.expression,
+      })),
     }
   }
   throw createHttpError(400, 'La configuración de empaque del producto es obligatoria.')
+}
+
+export async function previewProductPackaging(
+  payload: PackagingConfigPayload,
+  request: FastifyRequest,
+) {
+  const { companyId } = await getAuthContext(request)
+
+  return prisma.$transaction(async (tx) => {
+    const packagingConfig = await buildPackagingConfig(tx, payload, { companyId })
+    const presentationIds = packagingConfig.presentaciones.map((entry) => entry.presentacionId)
+
+    const presentations = await tx.presentacion.findMany({
+      where: {
+        id: { in: presentationIds },
+        empresaId: companyId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        nombre: true,
+      },
+    })
+
+    const presentationNameById = new Map(
+      presentations.map((entry) => [entry.id, entry.nombre]),
+    )
+
+    return {
+      preview: {
+        purchasePresentationId: packagingConfig.purchasePresentationId,
+        purchasePresentationName:
+          presentationNameById.get(packagingConfig.purchasePresentationId) ?? 'Presentacion de compra',
+        basePresentationId: packagingConfig.basePresentacionId,
+        basePresentationName:
+          presentationNameById.get(packagingConfig.basePresentacionId) ?? 'Unidad base',
+        presentations: packagingConfig.presentaciones.map((entry) => ({
+          presentationId: entry.presentacionId,
+          presentationName:
+            presentationNameById.get(entry.presentacionId) ?? entry.presentacionId,
+          isBase: entry.esBase,
+          allowsPurchase: entry.permiteCompra,
+          allowsSale: entry.permiteVenta,
+          salePrice:
+            entry.precioVenta === null ? null : decimalToNumber(entry.precioVenta),
+        })),
+        summaries: packagingConfig.resumenes,
+        totalEquivalence:
+          packagingConfig.resumenes.find(
+            (entry) => entry.presentationId === packagingConfig.purchasePresentationId,
+          ) ??
+          packagingConfig.resumenes[0] ??
+          null,
+      },
+    }
+  })
 }
 
 function toOptionalString(value?: string | null) {
@@ -369,7 +601,10 @@ function formatDate(value: Date | null | undefined) {
   return value.toISOString().slice(0, 10)
 }
 
-function mapProduct(product: ProductWithRelations) {
+function mapProduct(
+  product: ProductWithRelations | ProductListWithRelations,
+  options?: { canDelete?: boolean },
+) {
   const stockUnits = product.lotes.reduce(
     (total, lote) => total + decimalToNumber(lote.stockDisponible),
     0,
@@ -395,20 +630,72 @@ function mapProduct(product: ProductWithRelations) {
           presentationIds: product.presentacionesEmpaque.map((entry) => entry.presentacion.id),
           edges: packagingEdges,
         })
+  const packagingSummaries =
+    basePresentationId === null
+      ? []
+      : buildPackagingSummaries({
+          basePresentationId,
+          presentations: product.presentacionesEmpaque.map((entry) => ({
+            id: entry.presentacion.id,
+            name: entry.presentacion.nombre,
+          })),
+          edges: packagingEdges,
+        })
+  const availableStockBreakdown =
+    basePresentationId === null
+      ? []
+      : decomposeStockInBaseUnits({
+          stockInBaseUnits: stockUnits,
+          basePresentationId,
+          presentations: product.presentacionesEmpaque.map((entry) => ({
+            id: entry.presentacion.id,
+            name: entry.presentacion.nombre,
+          })),
+          edges: packagingEdges,
+        })
+  const reservedStockBreakdown =
+    basePresentationId === null
+      ? []
+      : decomposeStockInBaseUnits({
+          stockInBaseUnits: reservedUnits,
+          basePresentationId,
+          presentations: product.presentacionesEmpaque.map((entry) => ({
+            id: entry.presentacion.id,
+            name: entry.presentacion.nombre,
+          })),
+          edges: packagingEdges,
+        })
 
+  const activePrinciplesMap = new Map<
+    string,
+    {
+      id: string
+      name: string
+      concentration: string | null
+    }
+  >()
+
+  if (product.principioActivo) {
+    activePrinciplesMap.set(product.principioActivo.id, {
+      id: product.principioActivo.id,
+      name: product.principioActivo.nombre,
+      concentration: product.concentracion,
+    })
+  }
+
+  for (const relation of product.principiosActivos) {
+    activePrinciplesMap.set(relation.principioActivo.id, {
+      id: relation.principioActivo.id,
+      name: relation.principioActivo.nombre,
+      concentration: relation.concentracion ?? product.concentracion,
+    })
+  }
+
+  const activePrinciples = Array.from(activePrinciplesMap.values())
   const resolvedActivePrinciple =
-    product.principioActivo ??
-    product.principiosActivos[0]?.principioActivo ??
-    null
-  const activePrinciples = resolvedActivePrinciple
-    ? [
-        {
-          id: resolvedActivePrinciple.id,
-          name: resolvedActivePrinciple.nombre,
-          concentration: product.concentracion,
-        },
-      ]
-    : []
+    (product.principioActivo
+      ? activePrinciplesMap.get(product.principioActivo.id)
+      : null) ?? activePrinciples[0] ?? null
 
   return {
     id: product.id,
@@ -464,8 +751,18 @@ function mapProduct(product: ProductWithRelations) {
         toPresentationId: entry.haciaPresentacionId,
         quantity: entry.cantidad,
       })),
+      summaries: packagingSummaries.map((entry) => ({
+        presentationId: entry.presentationId,
+        presentationName: entry.presentationName,
+        factorToBase: entry.factorToBase,
+        expression: entry.expression,
+      })),
+      stockBreakdown: {
+        available: availableStockBreakdown,
+        reserved: reservedStockBreakdown,
+      },
     },
-    activePrinciple: resolvedActivePrinciple?.nombre ?? null,
+    activePrinciple: resolvedActivePrinciple?.name ?? null,
     activePrincipleId: resolvedActivePrinciple?.id ?? null,
     activePrinciples,
     stockUnits,
@@ -474,10 +771,11 @@ function mapProduct(product: ProductWithRelations) {
     branchCoverage: new Set(product.lotes.map((lote) => lote.sucursalId)).size,
     nextExpiry: formatDate(nextExpiry),
     canDelete:
-      product.lotes.length === 0 &&
-      (product._count?.MovimientoInventario ?? 0) === 0 &&
-      (product._count?.detalleCompras ?? 0) === 0 &&
-      (product._count?.detalleVentas ?? 0) === 0,
+      options?.canDelete ??
+      (product.lotes.length === 0 &&
+        (product as ProductWithRelations)._count?.MovimientoInventario === 0 &&
+        (product as ProductWithRelations)._count?.detalleCompras === 0 &&
+        (product as ProductWithRelations)._count?.detalleVentas === 0),
   }
 }
 
@@ -486,6 +784,12 @@ export async function listProductCatalog(
   request: FastifyRequest,
 ) {
   const { branchId, companyId } = await getAuthContext(request)
+  const cacheKey = buildProductCatalogCacheKey({ companyId, branchId, filters })
+  const cached = productCatalogCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
+
   const search = filters.search?.trim()
   const page = Math.max(1, filters.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 20))
@@ -499,58 +803,89 @@ export async function listProductCatalog(
     ...(filters.status ? { estado: filters.status as never } : {}),
     ...(filters.categoryId ? { categoriaId: filters.categoryId } : {}),
     ...(filters.commercialTypeId ? { tipoComercialId: filters.commercialTypeId } : {}),
-    ...(filters.activePrincipleId ? { principioActivoId: filters.activePrincipleId } : {}),
+    ...(filters.activePrincipleId
+      ? {
+          OR: [
+            { principioActivoId: filters.activePrincipleId },
+            {
+              principiosActivos: {
+                some: {
+                  principioActivoId: filters.activePrincipleId,
+                  deletedAt: null,
+                },
+              },
+            },
+          ],
+        }
+      : {}),
     ...(filters.laboratoryId ? { laboratorioId: filters.laboratoryId } : {}),
     ...(search
       ? {
-          OR: [
+          AND: [
             {
-              nombre: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              sku: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              codigoInterno: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              codigoBarras: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              laboratorio: {
-                nombre: {
-                  contains: search,
-                  mode: 'insensitive',
+              OR: [
+                {
+                  nombre: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
                 },
-              },
-            },
-            {
-              principioActivo: {
-                nombre: {
-                  contains: search,
-                  mode: 'insensitive',
+                {
+                  sku: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
                 },
-              },
-            },
-            {
-              tipoComercial: {
-                nombre: {
-                  contains: search,
-                  mode: 'insensitive',
+                {
+                  codigoInterno: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
                 },
-              },
+                {
+                  codigoBarras: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
+                },
+                {
+                  laboratorio: {
+                    nombre: {
+                      contains: search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+                {
+                  principioActivo: {
+                    nombre: {
+                      contains: search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+                {
+                  principiosActivos: {
+                    some: {
+                      deletedAt: null,
+                      principioActivo: {
+                        nombre: {
+                          contains: search,
+                          mode: 'insensitive',
+                        },
+                      },
+                    },
+                  },
+                },
+                {
+                  tipoComercial: {
+                    nombre: {
+                      contains: search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+              ],
             },
           ],
         }
@@ -558,11 +893,11 @@ export async function listProductCatalog(
   }
 
   const productIncludeByBranch = {
-    ...productInclude,
+    ...productIncludeBase,
     lotes: {
-      ...productInclude.lotes,
+      ...productIncludeBase.lotes,
       where: {
-        ...(productInclude.lotes.where as Prisma.LoteWhereInput),
+        ...(productIncludeBase.lotes.where as Prisma.LoteWhereInput),
         sucursalId: branchId,
       },
     },
@@ -657,7 +992,7 @@ export async function listProductCatalog(
     WHERE stocks.stock_units <= 20;
   `
 
-  let products: ProductWithRelations[] = []
+  let products: ProductListWithRelations[] = []
 
   if (sortBy === 'stockUnits') {
     const sortRaw = Prisma.raw(sortDir === 'desc' ? 'DESC' : 'ASC')
@@ -721,7 +1056,7 @@ export async function listProductCatalog(
       })
 
       const byId = new Map(entries.map((entry) => [entry.id, entry]))
-      products = idList.map((id) => byId.get(id)).filter(Boolean) as ProductWithRelations[]
+      products = idList.map((id) => byId.get(id)).filter(Boolean) as ProductListWithRelations[]
     } else {
       products = []
     }
@@ -740,10 +1075,84 @@ export async function listProductCatalog(
     })
   }
 
-  const items = products.map(mapProduct)
+  const productIds = products.map((product) => product.id)
+  const [lotCounts, inventoryMovementCounts, purchaseDetailCounts, saleDetailCounts] =
+    productIds.length > 0
+      ? await Promise.all([
+          prisma.lote.groupBy({
+            by: ['productoId'],
+            where: {
+              deletedAt: null,
+              productoId: {
+                in: productIds,
+              },
+            },
+            _count: {
+              _all: true,
+            },
+          }),
+          prisma.movimientoInventario.groupBy({
+            by: ['productoId'],
+            where: {
+              deletedAt: null,
+              productoId: {
+                in: productIds,
+              },
+            },
+            _count: {
+              _all: true,
+            },
+          }),
+          prisma.detalleCompra.groupBy({
+            by: ['productoId'],
+            where: {
+              deletedAt: null,
+              productoId: {
+                in: productIds,
+              },
+            },
+            _count: {
+              _all: true,
+            },
+          }),
+          prisma.detalleVenta.groupBy({
+            by: ['productoId'],
+            where: {
+              deletedAt: null,
+              productoId: {
+                in: productIds,
+              },
+            },
+            _count: {
+              _all: true,
+            },
+          }),
+        ])
+      : [[], [], [], []]
+
+  const lotCountByProductId = new Map(lotCounts.map((entry) => [entry.productoId, entry._count._all]))
+  const inventoryMovementCountByProductId = new Map(
+    inventoryMovementCounts.map((entry) => [entry.productoId, entry._count._all]),
+  )
+  const purchaseDetailCountByProductId = new Map(
+    purchaseDetailCounts.map((entry) => [entry.productoId, entry._count._all]),
+  )
+  const saleDetailCountByProductId = new Map(
+    saleDetailCounts.map((entry) => [entry.productoId, entry._count._all]),
+  )
+
+  const items = products.map((product) =>
+    mapProduct(product, {
+      canDelete:
+        (lotCountByProductId.get(product.id) ?? 0) === 0 &&
+        (inventoryMovementCountByProductId.get(product.id) ?? 0) === 0 &&
+        (purchaseDetailCountByProductId.get(product.id) ?? 0) === 0 &&
+        (saleDetailCountByProductId.get(product.id) ?? 0) === 0,
+    }),
+  )
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
 
-  return {
+  const response = {
     items,
     summary: {
       total: totalItems,
@@ -763,6 +1172,13 @@ export async function listProductCatalog(
       dir: sortDir,
     },
   }
+
+  productCatalogCache.set(cacheKey, {
+    expiresAt: Date.now() + PRODUCT_CATALOG_CACHE_TTL_MS,
+    value: response,
+  })
+
+  return response
 }
 
 export async function getProductOptions(request: FastifyRequest) {
@@ -1690,7 +2106,15 @@ export async function listMasterActivePrinciples(request: FastifyRequest) {
     include: {
       _count: {
         select: {
-          productosPrincipal: true,
+          productos: {
+            where: {
+              deletedAt: null,
+              producto: {
+                deletedAt: null,
+                empresaId: companyId,
+              },
+            },
+          },
         },
       },
     },
@@ -1703,7 +2127,7 @@ export async function listMasterActivePrinciples(request: FastifyRequest) {
       nombre: principle.nombre,
       descripcion: principle.descripcion,
       activo: principle.activo,
-      productCount: principle._count.productosPrincipal,
+      productCount: principle._count.productos,
       createdAt: principle.createdAt.toISOString(),
       updatedAt: principle.updatedAt.toISOString(),
     })),
@@ -2140,7 +2564,9 @@ export async function createProduct(
 ) {
   const { userId, companyId } = await getAuthContext(request)
   const normalizedName = payload.nombre.trim()
-  const costPrice = Number(payload.costoReferencia)
+  const activePrincipleIds = resolveProductActivePrincipleIds(payload)
+  const costPrice =
+    payload.costoReferencia === undefined ? 0 : Number(payload.costoReferencia)
 
   if (!Number.isFinite(costPrice) || costPrice < 0) {
     throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_COST)
@@ -2166,10 +2592,10 @@ export async function createProduct(
             empresaId: companyId,
             categoriaId: payload.categoriaId,
             tipoComercialId: payload.tipoComercialId,
-            principioActivoId: payload.principioActivoId,
+            principioActivoId: activePrincipleIds[0] ?? payload.principioActivoId,
             laboratorioId: toOptionalString(payload.laboratorioId),
             presentacionId: toOptionalString(payload.presentacionId),
-            compraPresentacionId: payload.compraPresentacionId,
+            compraPresentacionId: packagingConfig.purchasePresentationId,
             unidadMedidaId: payload.unidadMedidaId,
             modoEmpaque: ModoEmpaqueProducto.SIMPLE,
             unidadesPorBlister: null,
@@ -2194,12 +2620,12 @@ export async function createProduct(
             createdById: userId,
             updatedById: userId,
             principiosActivos: {
-              create: {
-                principioActivoId: payload.principioActivoId,
+              create: activePrincipleIds.map((principioActivoId) => ({
+                principioActivoId,
                 concentracion: toOptionalString(payload.concentracion),
                 createdById: userId,
                 updatedById: userId,
-              },
+              })),
             },
             presentacionesEmpaque: {
               create: packagingConfig.presentaciones.map((entry) => ({
@@ -2243,6 +2669,8 @@ export async function createProduct(
     }
 
     throw error
+  } finally {
+    invalidateProductCatalogCache(companyId)
   }
 }
 
@@ -2252,6 +2680,7 @@ export async function updateProduct(
   request: FastifyRequest,
 ) {
   const { userId, companyId } = await getAuthContext(request)
+  const activePrincipleIds = resolveProductActivePrincipleIds(payload)
 
   const existing = await prisma.producto.findFirst({
     where: {
@@ -2269,7 +2698,8 @@ export async function updateProduct(
   }
 
   const normalizedName = payload.nombre.trim()
-  const costPrice = Number(payload.costoReferencia)
+  const costPrice =
+    payload.costoReferencia === undefined ? 0 : Number(payload.costoReferencia)
 
   if (!Number.isFinite(costPrice) || costPrice < 0) {
     throw createHttpError(400, IMPLEMENTATION_MESSAGES.INVALID_COST)
@@ -2298,10 +2728,10 @@ export async function updateProduct(
           data: {
             categoriaId: payload.categoriaId,
             tipoComercialId: payload.tipoComercialId,
-            principioActivoId: payload.principioActivoId,
+            principioActivoId: activePrincipleIds[0] ?? payload.principioActivoId,
             laboratorioId: toOptionalString(payload.laboratorioId),
             presentacionId: toOptionalString(payload.presentacionId),
-            compraPresentacionId: payload.compraPresentacionId,
+            compraPresentacionId: packagingConfig.purchasePresentationId,
             unidadMedidaId: payload.unidadMedidaId,
             modoEmpaque: ModoEmpaqueProducto.SIMPLE,
             unidadesPorBlister: null,
@@ -2325,12 +2755,12 @@ export async function updateProduct(
             updatedById: userId,
             principiosActivos: {
               deleteMany: {},
-              create: {
-                principioActivoId: payload.principioActivoId,
+              create: activePrincipleIds.map((principioActivoId) => ({
+                principioActivoId,
                 concentracion: toOptionalString(payload.concentracion),
                 createdById: userId,
                 updatedById: userId,
-              },
+              })),
             },
             presentacionesEmpaque: {
               deleteMany: {},
@@ -2365,6 +2795,7 @@ export async function updateProduct(
       { timeout: 20000 },
     )
 
+    invalidateProductCatalogCache(companyId)
     return { item: mapProduct(updated) }
   } catch (error) {
     if (
@@ -2401,6 +2832,7 @@ export async function updateProductStatus(
     throw createHttpError(404, 'El producto no existe.')
   }
 
+  invalidateProductCatalogCache(companyId)
   return { success: true }
 }
 
@@ -2476,5 +2908,6 @@ export async function deleteProduct(productId: string, request: FastifyRequest) 
     },
   })
 
+  invalidateProductCatalogCache(companyId)
   return { success: true }
 }

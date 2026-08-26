@@ -29,6 +29,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
+  SearchableSelect,
+  type SearchableOption,
+} from '@/components/ui/searchable-select'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -47,6 +51,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { inventoryService } from '@/services/inventoryService'
 import type {
@@ -325,7 +330,7 @@ function FieldError({ message }: { message?: string }) {
 }
 
 export function InventarioPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
   const activeBranchId = session?.user.branchId ?? ''
   const activeBranchName = session?.user.branchName ?? ''
@@ -459,15 +464,21 @@ export function InventarioPage() {
       (a, b) => parseDateValue(b.receivedAt) - parseDateValue(a.receivedAt),
     )
   }, [dashboard.lots])
+  const lotOptions = useMemo<SearchableOption[]>(
+    () =>
+      sortedLots.map((lot) => ({
+        value: lot.id,
+        title: `${lot.productName} · ${lot.lotCode}`,
+        subtitle: `Disponible ${formatQuantity(lot.availableUnits)} · Reservado ${formatQuantity(lot.reservedUnits)} · Bloqueado ${formatQuantity(lot.blockedUnits)}`,
+      })),
+    [sortedLots],
+  )
   const lotsTotalPages = Math.max(1, Math.ceil(sortedLots.length / lotsPageSize))
   const safeLotsPage = Math.min(lotsPage, lotsTotalPages)
   const lotsPageStart = (safeLotsPage - 1) * lotsPageSize
   const visibleLots = sortedLots.slice(lotsPageStart, lotsPageStart + lotsPageSize)
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('InventarioPage')
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -1120,17 +1131,14 @@ export function InventarioPage() {
                 ) : (
                   dashboard.fifoCandidates.map((lot, index) => (
                     <div key={lot.id} className="rounded-2xl border p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-medium text-foreground">
-                            {index + 1}. {lot.productName}
-                          </p>
-                          <p className="mt-1 text-small text-muted-foreground">
-                            {lot.lotCode} · {formatQuantity(lot.availableUnits)} disponibles · vence{' '}
-                            {formatDate(lot.expiryDate)}
-                          </p>
-                        </div>
-                        <Badge variant="info">{lot.branchName}</Badge>
+                      <div>
+                        <p className="font-medium text-foreground">
+                          {index + 1}. {lot.productName}
+                        </p>
+                        <p className="mt-1 text-small text-muted-foreground">
+                          {lot.lotCode} · {formatQuantity(lot.availableUnits)} disponibles · vence{' '}
+                          {formatDate(lot.expiryDate)}
+                        </p>
                       </div>
                     </div>
                   ))
@@ -1391,164 +1399,221 @@ export function InventarioPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="grid gap-6">
-                <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Lote</label>
-                <Controller
-                  control={adjustForm.control}
-                  name="lotId"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value || undefined}
-                      onValueChange={(value) => {
-                        field.onChange(value)
-                        const nextLot = dashboard.lots.find((entry) => entry.id === value) ?? null
-                        const product =
-                          nextLot
-                            ? dashboard.options.products.find(
-                                (entry) => entry.id === nextLot.productId,
-                              ) ?? null
-                            : null
-                        const presentacionId =
-                          product?.packaging?.basePresentationId ??
-                          product?.packaging?.presentations[0]?.id ??
-                          ''
-                        adjustForm.setValue('presentacionId', presentacionId, {
-                          shouldDirty: true,
-                          shouldValidate: true,
-                        })
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona lote" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {dashboard.lots.map((lot) => (
-                          <SelectItem key={lot.id} value={lot.id}>
-                            {lot.productName} · {lot.lotCode}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError message={adjustForm.formState.errors.lotId?.message} />
-              </div>
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Lote</label>
+                  <Controller
+                    control={adjustForm.control}
+                    name="lotId"
+                    render={({ field }) => (
+                      <SearchableSelect
+                        value={field.value || undefined}
+                        onValueChange={(nextValue) => {
+                          field.onChange(nextValue)
+                          const nextLot =
+                            dashboard.lots.find((entry) => entry.id === nextValue) ?? null
+                          const product =
+                            nextLot
+                              ? dashboard.options.products.find(
+                                  (entry) => entry.id === nextLot.productId,
+                                ) ?? null
+                              : null
+                          const presentacionId =
+                            product?.packaging?.basePresentationId ??
+                            product?.packaging?.presentations[0]?.id ??
+                            ''
+                          adjustForm.setValue('presentacionId', presentacionId, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          })
+                        }}
+                        options={lotOptions}
+                        placeholder="Buscar producto, SKU o código de lote..."
+                        searchPlaceholder="Buscar producto, SKU o código de lote..."
+                        emptyMessage="No se encontraron lotes con ese texto."
+                      />
+                    )}
+                  />
+                  <FieldError message={adjustForm.formState.errors.lotId?.message} />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Presentación</label>
-                <Controller
-                  control={adjustForm.control}
-                  name="presentacionId"
-                  render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona presentación" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(selectedAdjustProduct?.packaging?.presentations ?? [])
-                          .filter(
-                            (entry) =>
-                              entry.factorToBase !== null && entry.factorToBase > 0,
-                          )
-                          .map((entry) => (
-                            <SelectItem key={entry.id} value={entry.id}>
-                              {entry.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <FieldError
-                  message={adjustForm.formState.errors.presentacionId?.message}
-                />
-              </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Presentación</label>
+                  <Controller
+                    control={adjustForm.control}
+                    name="presentacionId"
+                    render={({ field }) => (
+                      <Select value={field.value || undefined} onValueChange={field.onChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona presentación" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(selectedAdjustProduct?.packaging?.presentations ?? [])
+                            .filter(
+                              (entry) => entry.factorToBase !== null && entry.factorToBase > 0,
+                            )
+                            .map((entry) => (
+                              <SelectItem key={entry.id} value={entry.id}>
+                                {entry.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  <FieldError message={adjustForm.formState.errors.presentacionId?.message} />
+                </div>
 
-              <div className="rounded-2xl border bg-muted/20 p-4 md:col-span-2">
-                <p className="text-sm font-medium text-foreground">
-                  {selectedAdjustLot
-                    ? `${selectedAdjustLot.productName} · ${selectedAdjustLot.lotCode}`
-                    : 'Selecciona un lote para ver el resumen'}
-                </p>
-                <p className="mt-2 text-small text-muted-foreground">
-                  Disponible {formatQuantity(selectedAdjustLot?.availableUnits ?? 0)} · Reservado{' '}
-                  {formatQuantity(selectedAdjustLot?.reservedUnits ?? 0)} · Bloqueado{' '}
-                  {formatQuantity(selectedAdjustLot?.blockedUnits ?? 0)}
-                </p>
-              </div>
+                <div className="rounded-2xl border bg-muted/25 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Stock actual
+                  </p>
+                  <div className="mt-3 grid grid-cols-3 gap-3">
+                    <div className="space-y-1 rounded-xl bg-card px-3 py-2 text-center shadow-sm ring-1 ring-border/40">
+                      <p className="text-[11px] font-medium text-muted-foreground">Disponible</p>
+                      <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatQuantity(selectedAdjustLot?.availableUnits ?? 0)}
+                      </p>
+                    </div>
+                    <div className="space-y-1 rounded-xl bg-card px-3 py-2 text-center shadow-sm ring-1 ring-border/40">
+                      <p className="text-[11px] font-medium text-muted-foreground">Reservado</p>
+                      <p className="text-lg font-bold text-amber-600 dark:text-amber-400">
+                        {formatQuantity(selectedAdjustLot?.reservedUnits ?? 0)}
+                      </p>
+                    </div>
+                    <div className="space-y-1 rounded-xl bg-card px-3 py-2 text-center shadow-sm ring-1 ring-border/40">
+                      <p className="text-[11px] font-medium text-muted-foreground">Bloqueado</p>
+                      <p className="text-lg font-bold text-rose-600 dark:text-rose-400">
+                        {formatQuantity(selectedAdjustLot?.blockedUnits ?? 0)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Bolsa</label>
-                <Controller
-                  control={adjustForm.control}
-                  name="target"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DISPONIBLE">Disponible</SelectItem>
-                        <SelectItem value="RESERVADO">Reservado</SelectItem>
-                        <SelectItem value="BLOQUEADO">Bloqueado</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Tipo de stock</label>
+                    <Controller
+                      control={adjustForm.control}
+                      name="target"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="DISPONIBLE">Disponible</SelectItem>
+                            <SelectItem value="RESERVADO">Reservado</SelectItem>
+                            <SelectItem value="BLOQUEADO">Bloqueado</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Operación</label>
-                <Controller
-                  control={adjustForm.control}
-                  name="operation"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="SUMAR">Sumar</SelectItem>
-                        <SelectItem value="RESTAR">Restar</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Operación</label>
+                    <Controller
+                      control={adjustForm.control}
+                      name="operation"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="SUMAR">Sumar</SelectItem>
+                            <SelectItem value="RESTAR">Restar</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Cantidad</label>
-                <Input
-                  type="number"
-                  step="1"
-                  {...adjustForm.register('quantity', { valueAsNumber: true })}
-                />
-                <FieldError message={adjustForm.formState.errors.quantity?.message} />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Cantidad</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      step="1"
+                      {...adjustForm.register('quantity', { valueAsNumber: true })}
+                    />
+                    <FieldError message={adjustForm.formState.errors.quantity?.message} />
+                  </div>
+                </div>
 
-              <div className="rounded-2xl border bg-muted/20 p-4">
-                <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
-                  Vista previa
-                </p>
-                <p className="mt-2 text-small text-muted-foreground">
-                  Disponible {formatQuantity(adjustmentPreview.availableUnits)} · Reservado{' '}
-                  {formatQuantity(adjustmentPreview.reservedUnits)} · Bloqueado{' '}
-                  {formatQuantity(adjustmentPreview.blockedUnits)}
-                </p>
-              </div>
+                <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+                    Vista previa
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase text-muted-foreground">
+                        {adjustTarget === 'DISPONIBLE'
+                          ? 'Disponible actual'
+                          : adjustTarget === 'RESERVADO'
+                            ? 'Reservado actual'
+                            : 'Bloqueado actual'}
+                      </p>
+                      <p className="mt-1 text-lg font-bold text-foreground">
+                        {formatQuantity(
+                          adjustTarget === 'DISPONIBLE'
+                            ? selectedAdjustLot?.availableUnits ?? 0
+                            : adjustTarget === 'RESERVADO'
+                              ? selectedAdjustLot?.reservedUnits ?? 0
+                              : selectedAdjustLot?.blockedUnits ?? 0,
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase text-muted-foreground">
+                        {adjustTarget === 'DISPONIBLE'
+                          ? 'Nuevo disponible'
+                          : adjustTarget === 'RESERVADO'
+                            ? 'Nuevo reservado'
+                            : 'Nuevo bloqueado'}
+                      </p>
+                      <p
+                        className={
+                          'mt-1 text-lg font-bold ' +
+                          (adjustTarget === 'DISPONIBLE'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : adjustTarget === 'RESERVADO'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-rose-600 dark:text-rose-400')
+                        }
+                      >
+                        {formatQuantity(
+                          adjustTarget === 'DISPONIBLE'
+                            ? adjustmentPreview.availableUnits
+                            : adjustTarget === 'RESERVADO'
+                              ? adjustmentPreview.reservedUnits
+                              : adjustmentPreview.blockedUnits,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  {selectedAdjustLot &&
+                  Number.isFinite(adjustQuantity) &&
+                  Number(adjustQuantity) > 0 &&
+                  adjustOperation === 'RESTAR' &&
+                  adjustTarget === 'DISPONIBLE' &&
+                  adjustmentPreview.availableUnits < 0 ? (
+                    <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                      No puedes restar una cantidad mayor al stock disponible.
+                    </p>
+                  ) : null}
+                </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">Observaciones</label>
-                <Textarea
-                  {...adjustForm.register('observaciones')}
-                  placeholder="Motivo o contexto del movimiento"
-                  className="min-h-24"
-                />
-                <FieldError message={adjustForm.formState.errors.observaciones?.message} />
-              </div>
-            </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Observaciones</label>
+                  <Textarea
+                    {...adjustForm.register('observaciones')}
+                    placeholder="Motivo del ajuste (ej: diferencia en conteo físico, producto dañado, corrección de inventario)."
+                    className="min-h-24"
+                  />
+                  <FieldError message={adjustForm.formState.errors.observaciones?.message} />
+                </div>
               </div>
             </div>
 
@@ -1625,11 +1690,12 @@ export function InventarioPage() {
                   control={transferForm.control}
                   name="lotId"
                   render={({ field }) => (
-                    <Select
+                    <SearchableSelect
                       value={field.value || undefined}
-                      onValueChange={(value) => {
-                        field.onChange(value)
-                        const nextLot = dashboard.lots.find((entry) => entry.id === value) ?? null
+                      onValueChange={(nextValue) => {
+                        field.onChange(nextValue)
+                        const nextLot =
+                          dashboard.lots.find((entry) => entry.id === nextValue) ?? null
                         const product =
                           nextLot
                             ? dashboard.options.products.find(
@@ -1645,18 +1711,11 @@ export function InventarioPage() {
                           shouldValidate: true,
                         })
                       }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona lote" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {dashboard.lots.map((lot) => (
-                          <SelectItem key={lot.id} value={lot.id}>
-                            {lot.productName} · {lot.lotCode}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={lotOptions}
+                      placeholder="Buscar producto, SKU o código de lote..."
+                      searchPlaceholder="Buscar producto, SKU o código de lote..."
+                      emptyMessage="No se encontraron lotes con ese texto."
+                    />
                   )}
                 />
                 <FieldError message={transferForm.formState.errors.lotId?.message} />

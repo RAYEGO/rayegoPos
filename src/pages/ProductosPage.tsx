@@ -1,9 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Controller, useFieldArray, useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   AlertTriangle,
+  BookOpen,
+  CheckCircle2,
   ChevronDown,
   Edit,
   Eye,
@@ -18,15 +20,14 @@ import {
   Trash2,
   Copy,
   TestTubeDiagonal,
+  Wand2,
   X,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-} from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -74,10 +75,16 @@ import {
 import { ProductMastersCenter } from '@/components/products/masters-center/ProductMastersCenter'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
+import {
+  buildCumulativePackagingLabels as buildPackagingChainPreview,
+  buildPackagingSummary,
+} from '@/utils/packaging'
 import type {
   CreateProductPayload,
+  MasterActivePrincipleRecord,
   MasterCategoryRecord,
   MasterLaboratoryRecord,
   MasterMedicationTypeRecord,
@@ -85,8 +92,11 @@ import type {
   MasterUnitRecord,
   ProductCatalogItem,
   ProductOptionsResponse,
+  ProductPackagingPreviewPayload,
+  ProductPackagingPreviewResponse,
   ProductStatus,
   UpdateProductPayload,
+  UpsertMasterActivePrinciplePayload,
   UpsertMasterCategoryPayload,
   UpsertMasterLaboratoryPayload,
   UpsertMasterMedicationTypePayload,
@@ -95,32 +105,24 @@ import type {
 } from '@/types/products'
 import { toast } from 'sonner'
 
+const packagingRowSchema = z.object({
+  presentacionId: z.string().uuid({ message: 'Selecciona una presentación.' }),
+  permiteCompra: z.boolean(),
+  permiteVenta: z.boolean(),
+  precioVenta: z.number().nonnegative('El precio debe ser mayor o igual a 0.').optional(),
+  cantidadEquivalencia: z
+    .number()
+    .int('La cantidad debe ser un entero.')
+    .positive('La cantidad debe ser un entero mayor a 0.')
+    .optional(),
+})
+
 const createProductSchema = z.object({
   categoriaId: z.string().uuid({ message: 'Selecciona una categoría.' }),
   laboratorioId: z.string().optional(),
   tipoMedicamentoId: z.string().uuid({ message: 'Selecciona un tipo comercial.' }),
   unidadMedidaId: z.string().uuid({ message: 'Selecciona una unidad.' }),
-  compraPresentacionId: z.string().uuid({ message: 'Selecciona una presentación de compra.' }),
-  basePresentacionId: z.string().uuid({ message: 'Selecciona una presentación base.' }),
-  presentacionesEmpaque: z
-    .array(
-      z.object({
-        presentacionId: z.string().uuid({ message: 'Selecciona una presentación.' }),
-        permiteCompra: z.boolean(),
-        permiteVenta: z.boolean(),
-        precioVenta: z.number().nonnegative('El precio debe ser mayor o igual a 0.').optional(),
-      }),
-    )
-    .min(1, 'Agrega al menos una presentación.'),
-  conversionesEmpaque: z
-    .array(
-      z.object({
-        desdePresentacionId: z.string().uuid({ message: 'Selecciona el origen.' }),
-        haciaPresentacionId: z.string().uuid({ message: 'Selecciona el destino.' }),
-        cantidad: z.number().int().positive('La cantidad debe ser un entero mayor a 0.'),
-      }),
-    )
-    .min(0),
+  empaque: z.array(packagingRowSchema).min(1, 'Agrega al menos una presentación.'),
   principioActivoId: z.string().uuid({ message: 'Selecciona un principio activo.' }),
   sku: z.string().min(3, 'Ingresa un SKU válido.').max(50),
   codigoBarras: z.string().max(50).optional(),
@@ -130,87 +132,54 @@ const createProductSchema = z.object({
   registroSanitario: z.string().max(100).optional(),
   requiereReceta: z.boolean(),
   esControlado: z.boolean(),
-  costoReferencia: z.number().nonnegative('El costo debe ser mayor o igual a 0.'),
 }).superRefine((values, ctx) => {
-  const presentationIds = values.presentacionesEmpaque.map((entry) => entry.presentacionId)
-  if (!presentationIds.includes(values.basePresentacionId)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'La presentación base debe estar incluida en las presentaciones configuradas.',
-      path: ['basePresentacionId'],
-    })
-  }
-
-  if (!presentationIds.includes(values.compraPresentacionId)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'La presentación de compra debe estar incluida en las presentaciones configuradas.',
-      path: ['compraPresentacionId'],
-    })
-  } else {
-    const purchaseEntry = values.presentacionesEmpaque.find(
-      (entry) => entry.presentacionId === values.compraPresentacionId,
-    )
-    if (!purchaseEntry?.permiteCompra) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'La presentación principal de compra debe estar habilitada para compra.',
-        path: ['compraPresentacionId'],
-      })
-    }
-  }
+  const presentationIds = values.empaque.map((entry) => entry.presentacionId)
 
   if (new Set(presentationIds).size !== presentationIds.length) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'No se permiten presentaciones duplicadas.',
-      path: ['presentacionesEmpaque'],
+      path: ['empaque'],
     })
   }
 
-  values.presentacionesEmpaque.forEach((entry, index) => {
+  values.empaque.forEach((entry, index) => {
+    const isLastStep = index === values.empaque.length - 1
+
     if (entry.permiteVenta && (entry.precioVenta === undefined || entry.precioVenta === null)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Define un precio para la presentación habilitada para venta.',
-        path: ['presentacionesEmpaque', index, 'precioVenta'],
+        path: ['empaque', index, 'precioVenta'],
+      })
+    }
+
+    const hasQuantity = typeof entry.cantidadEquivalencia === 'number'
+
+    if (!isLastStep && !hasQuantity) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Define cuántas unidades equivalen a la siguiente presentación.',
+        path: ['empaque', index, 'cantidadEquivalencia'],
       })
     }
   })
 
-  if (!values.presentacionesEmpaque.some((entry) => entry.permiteVenta)) {
+  if (!values.empaque.some((entry) => entry.permiteCompra)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'El producto debe tener al menos una presentación habilitada para venta.',
-      path: ['presentacionesEmpaque'],
+      message: 'El producto debe tener al menos una presentación habilitada para compra.',
+      path: ['empaque'],
     })
   }
 
-  values.conversionesEmpaque.forEach((entry, index) => {
-    if (entry.desdePresentacionId === entry.haciaPresentacionId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Origen y destino no pueden ser iguales.',
-        path: ['conversionesEmpaque', index, 'haciaPresentacionId'],
-      })
-    }
-
-    if (!presentationIds.includes(entry.desdePresentacionId)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'El origen debe ser una presentación configurada.',
-        path: ['conversionesEmpaque', index, 'desdePresentacionId'],
-      })
-    }
-
-    if (!presentationIds.includes(entry.haciaPresentacionId)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'El destino debe ser una presentación configurada.',
-        path: ['conversionesEmpaque', index, 'haciaPresentacionId'],
-      })
-    }
-  })
+  if (!values.empaque.some((entry) => entry.permiteVenta)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'El producto debe tener al menos una presentación habilitada para venta.',
+      path: ['empaque'],
+    })
+  }
 })
 
 const masterCategorySchema = z.object({
@@ -234,6 +203,12 @@ const masterMedicationTypeSchema = z.object({
   activo: z.boolean().optional(),
 })
 
+const masterActivePrincipleSchema = z.object({
+  nombre: z.string().min(2, 'El nombre es obligatorio.').max(150),
+  descripcion: z.string().max(255).optional(),
+  activo: z.boolean().optional(),
+})
+
 const masterPresentationSchema = z.object({
   nombre: z.string().min(2, 'El nombre es obligatorio.').max(120),
   descripcion: z.string().max(255).optional(),
@@ -251,18 +226,17 @@ type CreateProductFormValues = z.infer<typeof createProductSchema>
 type MasterCategoryFormValues = z.infer<typeof masterCategorySchema>
 type MasterLaboratoryFormValues = z.infer<typeof masterLaboratorySchema>
 type MasterMedicationTypeFormValues = z.infer<typeof masterMedicationTypeSchema>
+type MasterActivePrincipleFormValues = z.infer<typeof masterActivePrincipleSchema>
 type MasterPresentationFormValues = z.infer<typeof masterPresentationSchema>
 type MasterUnitFormValues = z.infer<typeof masterUnitSchema>
+type PackagingFormRow = CreateProductFormValues['empaque'][number]
 
 const defaultFormValues: CreateProductFormValues = {
   categoriaId: '',
   laboratorioId: '',
   tipoMedicamentoId: '',
   unidadMedidaId: '',
-  compraPresentacionId: '',
-  basePresentacionId: '',
-  presentacionesEmpaque: [],
-  conversionesEmpaque: [],
+  empaque: [],
   principioActivoId: '',
   sku: '',
   codigoBarras: '',
@@ -272,7 +246,99 @@ const defaultFormValues: CreateProductFormValues = {
   registroSanitario: '',
   requiereReceta: false,
   esControlado: false,
-  costoReferencia: 0,
+}
+
+function buildPackagingPayload(values: CreateProductFormValues): ProductPackagingPreviewPayload {
+  return {
+    cadenaEmpaque: values.empaque.map((entry, index) => ({
+      presentacionId: entry.presentacionId,
+      permiteCompra: entry.permiteCompra,
+      permiteVenta: entry.permiteVenta,
+      ...(entry.permiteVenta && typeof entry.precioVenta === 'number'
+        ? { precioVenta: entry.precioVenta }
+        : {}),
+      ...(index < values.empaque.length - 1 && typeof entry.cantidadEquivalencia === 'number'
+        ? { cantidad: entry.cantidadEquivalencia }
+        : {}),
+    })),
+  }
+}
+
+function buildPackagingPreviewPayloadFromRows(rows: PackagingFormRow[]): ProductPackagingPreviewPayload {
+  return {
+    cadenaEmpaque: rows.map((entry, index) => ({
+      presentacionId: entry.presentacionId,
+      permiteCompra: entry.permiteCompra,
+      permiteVenta: entry.permiteVenta,
+      ...(entry.permiteVenta && typeof entry.precioVenta === 'number'
+        ? { precioVenta: entry.precioVenta }
+        : {}),
+      ...(index < rows.length - 1 && typeof entry.cantidadEquivalencia === 'number'
+        ? { cantidad: entry.cantidadEquivalencia }
+        : {}),
+    })),
+  }
+}
+
+function buildPackagingRowsFromProduct(product: ProductCatalogItem) {
+  const conversionByFromPresentationId = new Map(
+    product.packaging.conversions.map((entry) => [entry.fromPresentationId, entry]),
+  )
+  const incomingPresentationIds = new Set(
+    product.packaging.conversions.map((entry) => entry.toPresentationId),
+  )
+
+  const startPresentationId =
+    product.packaging.summaries[0]?.presentationId ??
+    product.packaging.purchasePresentationId ??
+    product.packaging.presentations.find((entry) => !incomingPresentationIds.has(entry.id))?.id ??
+    product.packaging.presentations[0]?.id ??
+    ''
+
+  const orderedPresentationIds: string[] = []
+  const visited = new Set<string>()
+  let currentPresentationId: string | undefined = startPresentationId
+
+  while (currentPresentationId && !visited.has(currentPresentationId)) {
+    visited.add(currentPresentationId)
+    orderedPresentationIds.push(currentPresentationId)
+    currentPresentationId = conversionByFromPresentationId.get(currentPresentationId)?.toPresentationId
+  }
+
+  for (const presentation of product.packaging.presentations) {
+    if (!visited.has(presentation.id)) {
+      orderedPresentationIds.push(presentation.id)
+    }
+  }
+
+  return orderedPresentationIds
+    .map((presentationId) => {
+      const presentation = product.packaging.presentations.find((entry) => entry.id === presentationId)
+      if (!presentation) {
+        return null
+      }
+
+      const conversion = conversionByFromPresentationId.get(presentationId)
+
+      return {
+        presentacionId: presentation.id,
+        permiteCompra: presentation.allowsPurchase,
+        permiteVenta: presentation.allowsSale,
+        precioVenta: presentation.salePrice ?? undefined,
+        cantidadEquivalencia: conversion?.quantity,
+      }
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+}
+
+function createEmptyPackagingRow(presentationId = ''): PackagingFormRow {
+  return {
+    presentacionId: presentationId,
+    permiteCompra: false,
+    permiteVenta: false,
+    precioVenta: undefined,
+    cantidadEquivalencia: undefined,
+  }
 }
 
 function getProductStatusVariant(status: ProductStatus) {
@@ -332,6 +398,27 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-xs text-destructive">{message}</p>
 }
 
+function getFirstFormErrorMessage(value: unknown): string | null {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    if ('message' in value && typeof value.message === 'string' && value.message.trim().length > 0) {
+      return value.message
+    }
+
+    for (const nestedValue of Object.values(value)) {
+      const nestedMessage = getFirstFormErrorMessage(nestedValue)
+      if (nestedMessage) {
+        return nestedMessage
+      }
+    }
+  }
+
+  return null
+}
+
 export function ProductosPage() {
   const { logout, session } = useAuth()
   const authorization = useAuthorization()
@@ -341,6 +428,7 @@ export function ProductosPage() {
   const [categoryFilter, setCategoryFilter] = useState('TODAS')
   const [laboratoryFilter, setLaboratoryFilter] = useState('TODOS')
   const [medicationTypeFilter, setMedicationTypeFilter] = useState('TODOS')
+  const [activePrincipleFilter, setActivePrincipleFilter] = useState('TODOS')
   const [showSummary, setShowSummary] = useState(true)
   const [mainTab, setMainTab] = useState<'catalogo' | 'maestros'>('catalogo')
   const [products, setProducts] = useState<ProductCatalogItem[]>([])
@@ -373,6 +461,22 @@ export function ProductosPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isMasterSubmitting, setIsMasterSubmitting] = useState(false)
   const [isPackagingDialogOpen, setIsPackagingDialogOpen] = useState(false)
+  const [isPackagingGuideOpen, setIsPackagingGuideOpen] = useState(false)
+  const [dontShowPackagingGuide, setDontShowPackagingGuide] = useState<boolean>(() => {
+    try {
+      if (typeof window === 'undefined') return false
+      return window.localStorage.getItem('no_volver_a_mostrar_empaque_guia') === '1'
+    } catch {
+      return false
+    }
+  })
+  const [isPackagingBreakdownOpen, setIsPackagingBreakdownOpen] = useState(false)
+  const packagingInputRefs = useRef<
+    Record<string, { cantidad: HTMLInputElement | null; precio: HTMLInputElement | null }>
+  >({})
+  const packagingInputDefaults = useRef<
+    Record<string, { cantidad: string; precio: string; mountKey: number }>
+  >({})
   const [editingProduct, setEditingProduct] = useState<ProductCatalogItem | null>(null)
   const [selectedProductDetail, setSelectedProductDetail] = useState<ProductCatalogItem | null>(null)
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
@@ -388,15 +492,22 @@ export function ProductosPage() {
 
   const [masterDialogOpen, setMasterDialogOpen] = useState(false)
   const [masterDialogType, setMasterDialogType] = useState<
-    'categoria' | 'laboratorio' | 'tipoMedicamento' | 'presentacion' | 'unidad'
+    'categoria' | 'laboratorio' | 'tipoMedicamento' | 'principioActivo' | 'presentacion' | 'unidad'
   >('categoria')
   const [masterDialogMode, setMasterDialogMode] = useState<'create' | 'edit'>('create')
   const [masterDialogTargetField, setMasterDialogTargetField] = useState<
-    'categoriaId' | 'laboratorioId' | 'tipoMedicamentoId' | 'presentacionId' | 'unidadMedidaId' | null
+    | 'categoriaId'
+    | 'laboratorioId'
+    | 'tipoMedicamentoId'
+    | 'principioActivoId'
+    | 'presentacionId'
+    | 'unidadMedidaId'
+    | null
   >(null)
   const [editingCategory, setEditingCategory] = useState<MasterCategoryRecord | null>(null)
   const [editingLaboratory, setEditingLaboratory] = useState<MasterLaboratoryRecord | null>(null)
   const [editingMedicationType, setEditingMedicationType] = useState<MasterMedicationTypeRecord | null>(null)
+  const [editingActivePrinciple, setEditingActivePrinciple] = useState<MasterActivePrincipleRecord | null>(null)
   const [editingPresentation, setEditingPresentation] = useState<MasterPresentationRecord | null>(null)
   const [editingUnit, setEditingUnit] = useState<MasterUnitRecord | null>(null)
 
@@ -405,18 +516,16 @@ export function ProductosPage() {
     defaultValues: defaultFormValues,
   })
 
-  const packagingPresentations = useFieldArray({
-    control: form.control,
-    name: 'presentacionesEmpaque',
-  })
-
-  const packagingConversions = useFieldArray({
-    control: form.control,
-    name: 'conversionesEmpaque',
-  })
-
-  const watchedBasePresentationId = form.watch('basePresentacionId')
-  const watchedPackagingPresentations = form.watch('presentacionesEmpaque')
+  const watchedPackagingRows = form.watch('empaque')
+  const detectedBasePresentationId = watchedPackagingRows.at(-1)?.presentacionId ?? ''
+  const [packagingDraftRows, setPackagingDraftRows] = useState<PackagingFormRow[]>([])
+  const draftBasePresentationId = packagingDraftRows.at(-1)?.presentacionId ?? ''
+  const draftPurchasePresentationId =
+    packagingDraftRows.find((entry) => entry.permiteCompra)?.presentacionId ?? ''
+  const [isPackagingPreviewLoading, setIsPackagingPreviewLoading] = useState(false)
+  const [packagingPreview, setPackagingPreview] =
+    useState<ProductPackagingPreviewResponse['preview'] | null>(null)
+  const [packagingPreviewError, setPackagingPreviewError] = useState<string | null>(null)
 
   useEffect(() => {
     const wasOpen = previousPackagingOpenRef.current
@@ -472,6 +581,15 @@ export function ProductosPage() {
     },
   })
 
+  const activePrincipleForm = useForm<MasterActivePrincipleFormValues>({
+    resolver: zodResolver(masterActivePrincipleSchema),
+    defaultValues: {
+      nombre: '',
+      descripcion: '',
+      activo: true,
+    },
+  })
+
   const presentationForm = useForm<MasterPresentationFormValues>({
     resolver: zodResolver(masterPresentationSchema),
     defaultValues: {
@@ -494,10 +612,9 @@ export function ProductosPage() {
   const canManageMasters =
     authorization.can('*') || authorization.hasAnyRole(['ADMIN', 'SUPERVISOR'])
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('ProductosPage')
+  const handleUnauthorizedRef = useRef(handleUnauthorized)
+  handleUnauthorizedRef.current = handleUnauthorized
 
   const loadOptions = useCallback(async () => {
     if (!accessToken) {
@@ -511,14 +628,14 @@ export function ProductosPage() {
       setOptions(nextOptions)
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        await handleUnauthorized()
+        await handleUnauthorizedRef.current()
         return
       }
       toast.error(getApiErrorMessage(error))
     } finally {
       setIsOptionsLoading(false)
     }
-  }, [accessToken, handleUnauthorized])
+  }, [accessToken])
 
   const loadProducts = useCallback(async () => {
     if (!accessToken) {
@@ -535,6 +652,7 @@ export function ProductosPage() {
         categoryId: categoryFilter === 'TODAS' ? undefined : categoryFilter,
         laboratoryId: laboratoryFilter === 'TODOS' ? undefined : laboratoryFilter,
         commercialTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
+        activePrincipleId: activePrincipleFilter === 'TODOS' ? undefined : activePrincipleFilter,
         page,
         pageSize,
         sortBy,
@@ -545,15 +663,21 @@ export function ProductosPage() {
       setSummary(response.summary)
       setTotalItems(response.pagination.totalItems)
       setTotalPages(response.pagination.totalPages)
-      setSortBy(response.sort.by)
-      setSortDir(response.sort.dir)
+
+      if (
+        sortBy !== response.sort.by ||
+        sortDir !== response.sort.dir
+      ) {
+        setSortBy(response.sort.by)
+        setSortDir(response.sort.dir)
+      }
 
       if (page > response.pagination.totalPages) {
         setPage(response.pagination.totalPages)
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        await handleUnauthorized()
+        await handleUnauthorizedRef.current()
         return
       }
       setCatalogError(getApiErrorMessage(error))
@@ -563,8 +687,8 @@ export function ProductosPage() {
   }, [
     accessToken,
     categoryFilter,
-    handleUnauthorized,
     laboratoryFilter,
+    activePrincipleFilter,
     medicationTypeFilter,
     page,
     pageSize,
@@ -580,7 +704,7 @@ export function ProductosPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [categoryFilter, laboratoryFilter, medicationTypeFilter, pageSize, search, sortBy, sortDir, statusFilter])
+  }, [activePrincipleFilter, categoryFilter, laboratoryFilter, medicationTypeFilter, pageSize, search, sortBy, sortDir, statusFilter])
 
   useEffect(() => {
     void loadProducts()
@@ -598,6 +722,128 @@ export function ProductosPage() {
 
   const masterDataReady =
     options.categories.length > 0 && options.units.length > 0
+
+  const presentationNameById = useMemo(
+    () => new Map(options.presentations.map((presentation) => [presentation.id, presentation.name])),
+    [options.presentations],
+  )
+
+  const loadPracticalPackagingExample = useCallback(() => {
+    const normalize = (name: string) =>
+      name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim()
+
+    const byNormalized = new Map(options.presentations.map((p) => [normalize(p.name), p]))
+
+    const findPresentation = (patterns: string[]) => {
+      for (const pattern of patterns) {
+        const p = byNormalized.get(pattern)
+        if (p) return p
+      }
+      const needle = patterns[0]
+      return options.presentations.find((p) => normalize(p.name).includes(needle)) ?? null
+    }
+
+    const caja = findPresentation(['caja'])
+    const blister = findPresentation(['blister', 'blister pack', 'blist'])
+    const capsulas = findPresentation(['capsulas', 'capsula', 'capsul'])
+
+    if (!caja || !blister || !capsulas) {
+      return null
+    }
+
+    const rows: PackagingFormRow[] = [
+      {
+        presentacionId: caja.id,
+        permiteCompra: true,
+        permiteVenta: true,
+        precioVenta: 120,
+        cantidadEquivalencia: 10,
+      },
+      {
+        presentacionId: blister.id,
+        permiteCompra: false,
+        permiteVenta: true,
+        precioVenta: 12,
+        cantidadEquivalencia: 12,
+      },
+      {
+        presentacionId: capsulas.id,
+        permiteCompra: false,
+        permiteVenta: true,
+        precioVenta: 1,
+        cantidadEquivalencia: undefined,
+      },
+    ]
+
+    setPackagingDraftRows(rows)
+    return rows
+  }, [options.presentations])
+
+  const syncPackagingInputValues = useCallback(
+    (rows: PackagingFormRow[]) => {
+      const defaults = packagingInputDefaults.current
+      const refs = packagingInputRefs.current
+      const expectedKeys: string[] = []
+      rows.forEach((row, index) => {
+        const key = `${row.presentacionId || 'row'}-${index}`
+        expectedKeys.push(key)
+        const cantidad = typeof row.cantidadEquivalencia === 'number' ? row.cantidadEquivalencia.toString() : ''
+        const precio = typeof row.precioVenta === 'number' ? row.precioVenta.toString() : ''
+        const prev = defaults[key]
+        if (!prev || prev.cantidad !== cantidad || prev.precio !== precio) {
+          defaults[key] = { cantidad, precio, mountKey: (prev?.mountKey ?? 0) + 1 }
+        }
+        if (refs[key]) {
+          if (refs[key]?.cantidad && refs[key]!.cantidad!.value !== cantidad) refs[key]!.cantidad!.value = cantidad
+          if (refs[key]?.precio && refs[key]!.precio!.value !== precio) refs[key]!.precio!.value = precio
+        }
+      })
+      Object.keys(defaults).forEach((key) => {
+        if (!expectedKeys.includes(key)) {
+          delete defaults[key]
+          delete refs[key]
+        }
+      })
+    },
+    [],
+  )
+
+  const flushPackagingInputValues = useCallback(
+    (rows: PackagingFormRow[]): PackagingFormRow[] => {
+      return rows.map((row, index) => {
+        const key = `${row.presentacionId || 'row'}-${index}`
+        const ref = packagingInputRefs.current[key]
+        let cantidadStr =
+          typeof row.cantidadEquivalencia === 'number' ? row.cantidadEquivalencia.toString() : ''
+        let precioStr = typeof row.precioVenta === 'number' ? row.precioVenta.toString() : ''
+        if (ref?.cantidad && document.activeElement !== ref.cantidad) {
+          cantidadStr = ref.cantidad.value
+        } else if (ref?.cantidad) {
+          cantidadStr = ref.cantidad.value
+        }
+        if (ref?.precio && document.activeElement !== ref.precio) {
+          precioStr = ref.precio.value
+        } else if (ref?.precio) {
+          precioStr = ref.precio.value
+        }
+        const cleanCant = cantidadStr.replace(/[^0-9]/g, '')
+        const cantidad = cleanCant === '' ? undefined : Math.trunc(Number(cleanCant))
+        const raw = precioStr.replace(/[^0-9.]/g, '')
+        const parts = raw.split('.')
+        const cleanPrecio = parts[0] + (parts.length > 1 ? '.' + parts.slice(1).join('').slice(0, 2) : '')
+        const precio = cleanPrecio === '' || cleanPrecio === '.' ? undefined : Number(cleanPrecio)
+        if (cantidad === row.cantidadEquivalencia && precio === row.precioVenta) {
+          return row
+        }
+        return { ...row, cantidadEquivalencia: cantidad, precioVenta: precio }
+      })
+    },
+    [],
+  )
 
   const categoryLeafOptions = useMemo(() => {
     const byId = new Map(options.categories.map((category) => [category.id, category]))
@@ -634,6 +880,132 @@ export function ProductosPage() {
       .sort((a, b) => a.label.localeCompare(b.label, 'es'))
   }, [options.categories])
 
+  const getPresentationLabel = useCallback(
+    (presentationId?: string | null) => {
+      if (!presentationId) {
+        return 'Sin definir'
+      }
+
+      return presentationNameById.get(presentationId) ?? presentationId
+    },
+    [presentationNameById],
+  )
+
+  const getNextPackagingPresentationId = useCallback((rows: PackagingFormRow[] = form.getValues('empaque')) => {
+    const usedIds = new Set(
+      rows.map((entry) => entry.presentacionId).filter(Boolean),
+    )
+
+    return (
+      options.presentations.find((presentation) => !usedIds.has(presentation.id))?.id ??
+      options.presentations[0]?.id ??
+      ''
+    )
+  }, [form, options.presentations])
+
+  const canAddNextPackagingStep =
+    packagingDraftRows.length === 0 ||
+    Boolean(packagingDraftRows.at(-1)?.presentacionId)
+
+  const packagingDraftIssues = useMemo(() => {
+    if (packagingDraftRows.length === 0) {
+      return []
+    }
+
+    const issues: string[] = []
+    const selectedPresentationIds = packagingDraftRows
+      .map((entry) => entry.presentacionId)
+      .filter(Boolean)
+
+    if (new Set(selectedPresentationIds).size !== selectedPresentationIds.length) {
+      issues.push('Cada paso debe usar una presentación distinta.')
+    }
+
+    if (!packagingDraftRows[0]?.presentacionId) {
+      issues.push('Empieza seleccionando la presentación más grande o principal en el Paso 1.')
+    }
+
+    const purchaseIndex = packagingDraftRows.findIndex((entry) => entry.permiteCompra)
+    if (purchaseIndex > 0) {
+      issues.push('La presentación de compra debe registrarse al inicio de la cadena.')
+    }
+
+    packagingDraftRows.forEach((row, index) => {
+      const isLastStep = index === packagingDraftRows.length - 1
+
+      if (!row.presentacionId) {
+        issues.push(`Completa la presentación del Paso ${index + 1} antes de continuar.`)
+      }
+
+      if (!isLastStep && typeof row.cantidadEquivalencia !== 'number') {
+        issues.push(
+          `Indica cuántas unidades contiene la presentación del Paso ${index + 1} antes de agregar la siguiente.`,
+        )
+      }
+    })
+
+    return Array.from(new Set(issues))
+  }, [packagingDraftRows])
+
+  const packagingChainPreview = useMemo(
+    () => buildPackagingChainPreview(packagingDraftRows, getPresentationLabel),
+    [getPresentationLabel, packagingDraftRows],
+  )
+
+  const packagingSummary = useMemo(
+    () => buildPackagingSummary(packagingDraftRows, getPresentationLabel),
+    [getPresentationLabel, packagingDraftRows],
+  )
+
+  useEffect(() => {
+    if (!isPackagingDialogOpen) {
+      packagingInputRefs.current = {}
+      packagingInputDefaults.current = {}
+    }
+  }, [isPackagingDialogOpen])
+
+  useEffect(() => {
+    if (!isPackagingDialogOpen || !accessToken) {
+      return
+    }
+
+    const hasRows = packagingDraftRows.length > 0
+    const hasIdentifiers = packagingDraftRows.every((entry) => Boolean(entry.presentacionId))
+
+    if (!hasRows || !hasIdentifiers) {
+      setPackagingPreview(null)
+      setPackagingPreviewError(null)
+      setIsPackagingPreviewLoading(false)
+      return
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setIsPackagingPreviewLoading(true)
+      setPackagingPreviewError(null)
+
+      try {
+        const response = await productsService.previewPackaging(
+          accessToken,
+          buildPackagingPreviewPayloadFromRows(packagingDraftRows),
+        )
+        setPackagingPreview(response.preview)
+      } catch (error) {
+        setPackagingPreview(null)
+        setPackagingPreviewError(getApiErrorMessage(error))
+      } finally {
+        setIsPackagingPreviewLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [
+    accessToken,
+    isPackagingDialogOpen,
+    packagingDraftRows,
+  ])
+
   const resetMasterDialogState = useCallback(() => {
     setMasterDialogOpen(false)
     setMasterDialogTargetField(null)
@@ -641,22 +1013,25 @@ export function ProductosPage() {
     setEditingCategory(null)
     setEditingLaboratory(null)
     setEditingMedicationType(null)
+    setEditingActivePrinciple(null)
     setEditingPresentation(null)
     setEditingUnit(null)
     categoryForm.reset()
     laboratoryForm.reset()
     medicationTypeForm.reset()
+    activePrincipleForm.reset()
     presentationForm.reset()
     unitForm.reset()
-  }, [categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm])
+  }, [activePrincipleForm, categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm])
 
   const openCreateMaster = useCallback(
     (
-      type: 'categoria' | 'laboratorio' | 'tipoMedicamento' | 'presentacion' | 'unidad',
+      type: 'categoria' | 'laboratorio' | 'tipoMedicamento' | 'principioActivo' | 'presentacion' | 'unidad',
       targetField:
         | 'categoriaId'
         | 'laboratorioId'
         | 'tipoMedicamentoId'
+        | 'principioActivoId'
         | 'presentacionId'
         | 'unidadMedidaId'
         | null = null,
@@ -667,6 +1042,7 @@ export function ProductosPage() {
       setEditingCategory(null)
       setEditingLaboratory(null)
       setEditingMedicationType(null)
+      setEditingActivePrinciple(null)
       setEditingPresentation(null)
       setEditingUnit(null)
       categoryForm.reset({
@@ -687,6 +1063,11 @@ export function ProductosPage() {
         descripcion: '',
         activo: true,
       })
+      activePrincipleForm.reset({
+        nombre: '',
+        descripcion: '',
+        activo: true,
+      })
       presentationForm.reset({
         nombre: '',
         descripcion: '',
@@ -700,7 +1081,7 @@ export function ProductosPage() {
       })
       setMasterDialogOpen(true)
     },
-    [categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm],
+    [activePrincipleForm, categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm],
   )
 
   const handleSaveMasterCategory = useCallback(
@@ -907,6 +1288,56 @@ export function ProductosPage() {
     ],
   )
 
+  const handleSaveMasterActivePrinciple = useCallback(
+    async (values: MasterActivePrincipleFormValues) => {
+      if (!accessToken) {
+        toast.error('La sesión no está disponible.')
+        return
+      }
+
+      const payload: UpsertMasterActivePrinciplePayload = {
+        nombre: values.nombre.trim(),
+        descripcion: values.descripcion?.trim() || undefined,
+        activo: values.activo,
+      }
+
+      setIsMasterSubmitting(true)
+      try {
+        if (masterDialogMode === 'edit' && editingActivePrinciple) {
+          await productsService.updateMasterActivePrinciple(accessToken, editingActivePrinciple.id, payload)
+          toast.success('Principio activo actualizado.')
+        } else {
+          const created = await productsService.createMasterActivePrinciple(accessToken, payload)
+          toast.success('Principio activo creado.')
+          if (masterDialogTargetField === 'principioActivoId') {
+            form.setValue('principioActivoId', created.id, { shouldValidate: true })
+          }
+        }
+
+        resetMasterDialogState()
+        await loadOptions()
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        toast.error(getApiErrorMessage(error))
+      } finally {
+        setIsMasterSubmitting(false)
+      }
+    },
+    [
+      accessToken,
+      editingActivePrinciple,
+      form,
+      handleUnauthorized,
+      loadOptions,
+      masterDialogMode,
+      masterDialogTargetField,
+      resetMasterDialogState,
+    ],
+  )
+
   const handleSaveMasterUnit = useCallback(
     async (values: MasterUnitFormValues) => {
       if (!accessToken) {
@@ -964,20 +1395,8 @@ export function ProductosPage() {
       laboratorioId: product.laboratoryId ?? '',
       tipoMedicamentoId: product.commercialTypeId ?? product.medicationTypeId ?? '',
       unidadMedidaId: product.unitId,
-      compraPresentacionId: product.packaging.purchasePresentationId ?? '',
-      basePresentacionId: product.packaging.basePresentationId ?? '',
-      presentacionesEmpaque: product.packaging.presentations.map((entry) => ({
-        presentacionId: entry.id,
-        permiteCompra: entry.allowsPurchase,
-        permiteVenta: entry.allowsSale,
-        precioVenta: entry.salePrice ?? undefined,
-      })),
-      conversionesEmpaque: product.packaging.conversions.map((entry) => ({
-        desdePresentacionId: entry.fromPresentationId,
-        haciaPresentacionId: entry.toPresentationId,
-        cantidad: entry.quantity,
-      })),
-      principioActivoId: product.activePrincipleId ?? '',
+      empaque: buildPackagingRowsFromProduct(product),
+      principioActivoId: product.activePrincipleId ?? product.activePrinciples[0]?.id ?? '',
       sku: product.sku,
       codigoBarras: product.barcode ?? '',
       nombre: product.name,
@@ -986,7 +1405,6 @@ export function ProductosPage() {
       registroSanitario: product.sanitaryRegistration ?? '',
       requiereReceta: product.requiresPrescription,
       esControlado: product.isControlled,
-      costoReferencia: product.costPrice,
     }
   }
 
@@ -1094,16 +1512,24 @@ export function ProductosPage() {
     }
 
     const editingId = editingProduct?.id ?? null
+    const packagingPayload = buildPackagingPayload(values)
 
     const payload: CreateProductPayload | UpdateProductPayload = {
-      ...values,
+      categoriaId: values.categoriaId,
       laboratorioId: values.laboratorioId || undefined,
       tipoComercialId: values.tipoMedicamentoId,
+      unidadMedidaId: values.unidadMedidaId,
+      cadenaEmpaque: packagingPayload.cadenaEmpaque,
       principioActivoId: values.principioActivoId,
+      principioActivoIds: values.principioActivoId ? [values.principioActivoId] : undefined,
+      sku: values.sku.trim(),
       codigoBarras: values.codigoBarras?.trim() || undefined,
+      nombre: values.nombre.trim(),
       descripcion: values.descripcion?.trim() || undefined,
       concentracion: values.concentracion?.trim() || undefined,
       registroSanitario: values.registroSanitario?.trim() || undefined,
+      requiereReceta: values.requiereReceta,
+      esControlado: values.esControlado,
     }
 
     setIsSubmitting(true)
@@ -1131,6 +1557,11 @@ export function ProductosPage() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  function handleCreateProductInvalid(errors: typeof form.formState.errors) {
+    const message = getFirstFormErrorMessage(errors) ?? 'Revisa los campos obligatorios antes de guardar.'
+    toast.error(message)
   }
 
   return (
@@ -1201,14 +1632,14 @@ export function ProductosPage() {
 
         <TabsContent value="catalogo" className="space-y-4 pt-4">
           <Card className="p-4">
-            <div className="grid gap-3 md:grid-cols-4 lg:grid-cols-8">
+            <div className="grid gap-3 md:grid-cols-4 lg:grid-cols-9">
               <div className="md:col-span-2">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Buscar por SKU, nombre, código"
+                    placeholder="Buscar por SKU, nombre, código o principio activo"
                     className="pl-9"
                   />
                 </div>
@@ -1255,6 +1686,19 @@ export function ProductosPage() {
                   {options.commercialTypes.map((type) => (
                     <SelectItem key={type.id} value={type.id}>
                       {type.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={activePrincipleFilter} onValueChange={setActivePrincipleFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Principio activo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos</SelectItem>
+                  {options.activePrinciples.map((principle) => (
+                    <SelectItem key={principle.id} value={principle.id}>
+                      {principle.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1328,6 +1772,7 @@ export function ProductosPage() {
                             {(product.commercialType ?? product.medicationType)
                               ? ` · ${product.commercialType ?? product.medicationType}`
                               : ''}
+                            {product.activePrinciple ? ` · ${product.activePrinciple}` : ''}
                             {product.presentation ? ` · ${product.presentation}` : ''}
                           </p>
                         </div>
@@ -1451,6 +1896,7 @@ export function ProductosPage() {
                                   {(product.commercialType ?? product.medicationType)
                                     ? ` · ${product.commercialType ?? product.medicationType}`
                                     : ''}
+                                  {product.activePrinciple ? ` · ${product.activePrinciple}` : ''}
                                   {product.presentation ? ` · ${product.presentation}` : ''}
                                 </p>
                               </div>
@@ -1575,7 +2021,7 @@ export function ProductosPage() {
         <TabsContent value="maestros" className="space-y-4 pt-4">
           <ProductMastersCenter
             accessToken={accessToken}
-            onCategoriesChanged={loadOptions}
+            onMastersChanged={loadOptions}
             canManageMasters={canManageMasters}
           />
         </TabsContent>
@@ -1592,7 +2038,7 @@ export function ProductosPage() {
         }}
       >
         <SidePanelContent className="p-0">
-          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateProduct)}>
+          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateProduct, handleCreateProductInvalid)}>
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">
@@ -1780,13 +2226,39 @@ export function ProductosPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium">Costo referencial</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  {...form.register('costoReferencia', { valueAsNumber: true })}
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium">Principio activo</label>
+                  {canManageMasters ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openCreateMaster('principioActivo', 'principioActivoId')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
+                <Controller
+                  control={form.control}
+                  name="principioActivoId"
+                  render={({ field }) => (
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona principio activo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {options.activePrinciples.map((activePrinciple) => (
+                          <SelectItem key={activePrinciple.id} value={activePrinciple.id}>
+                            {activePrinciple.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 />
-                <FieldError message={form.formState.errors.costoReferencia?.message} />
+                <FieldError message={form.formState.errors.principioActivoId?.message} />
               </div>
 
               <div className="space-y-1.5 md:col-span-2">
@@ -1797,18 +2269,29 @@ export function ProductosPage() {
                   className="w-full justify-between gap-3"
                   onClick={() => {
                     createDialogScrollTopRef.current = createDialogContentRef.current?.scrollTop ?? 0
-                    if (packagingPresentations.fields.length === 0 && options.presentations.length > 0) {
-                      const firstPresentationId = options.presentations[0].id
-                      packagingPresentations.append({
-                        presentacionId: firstPresentationId,
-                        permiteCompra: true,
-                        permiteVenta: true,
-                        precioVenta: 0,
-                      })
-                      form.setValue('basePresentacionId', firstPresentationId, { shouldValidate: true })
-                      form.setValue('compraPresentacionId', firstPresentationId, { shouldValidate: true })
-                    }
+                    const currentRows = form.getValues('empaque')
+                    const initialRows =
+                      currentRows.length > 0
+                        ? currentRows
+                        : options.presentations.length > 0
+                          ? [
+                              {
+                                ...createEmptyPackagingRow(
+                                  getNextPackagingPresentationId(currentRows),
+                                ),
+                                permiteCompra: true,
+                                permiteVenta: true,
+                              },
+                            ]
+                          : []
+
+                    setPackagingDraftRows(initialRows)
+                    syncPackagingInputValues(initialRows)
+                    setPackagingPreviewError(null)
                     setIsPackagingDialogOpen(true)
+                    if (!dontShowPackagingGuide && currentRows.length === 0) {
+                      setTimeout(() => setIsPackagingGuideOpen(true), 60)
+                    }
                   }}
                 >
                   <span className="flex items-center gap-2">
@@ -1816,10 +2299,9 @@ export function ProductosPage() {
                     Configurar empaque
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {`${watchedPackagingPresentations.length} presentación(es) · base ${
-                      options.presentations.find((item) => item.id === watchedBasePresentationId)?.name ??
-                      'sin definir'
-                    }`}
+                    {`${watchedPackagingRows.length} nivel(es) · base ${getPresentationLabel(
+                      detectedBasePresentationId,
+                    )}`}
                   </span>
                 </Button>
               </div>
@@ -1885,284 +2367,569 @@ export function ProductosPage() {
         </SidePanelContent>
       </SidePanel>
 
-      <Dialog open={isPackagingDialogOpen} onOpenChange={setIsPackagingDialogOpen}>
-        <DialogContent className="bottom-0 left-0 top-auto h-[92vh] w-full max-w-none translate-x-0 translate-y-0 rounded-t-2xl rounded-b-none p-4 overflow-y-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-auto sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6">
-          <DialogHeader>
-            <DialogTitle>Empaque y conversión</DialogTitle>
-            <DialogDescription>
-              Configura cómo se compra y vende este producto sin duplicar stock.
-            </DialogDescription>
+      <Dialog
+        open={isPackagingDialogOpen}
+        onOpenChange={(open) => {
+          setIsPackagingDialogOpen(open)
+          if (!open) {
+            setPackagingPreviewError(null)
+            setPackagingPreview(null)
+            setPackagingDraftRows([])
+            setIsPackagingBreakdownOpen(false)
+          }
+        }}
+      >
+        <DialogContent className="bottom-0 left-0 top-auto flex h-[92vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-4 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[78vh] sm:max-h-[78vh] sm:max-w-4xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-5">
+          <DialogHeader className="shrink-0 space-y-1">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <DialogTitle className="text-[19px] leading-6">Empaque y conversión</DialogTitle>
+                <DialogDescription className="mt-1 text-[13px]">
+                  Agrega las presentaciones de mayor a menor hasta llegar a la unidad base.
+                </DialogDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 gap-1 px-2.5 text-[12px]"
+                onClick={() => setIsPackagingGuideOpen(true)}
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                Guía
+              </Button>
+            </div>
           </DialogHeader>
 
-          <div className="grid gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Presentación principal de compra</label>
-              <Controller
-                control={form.control}
-                name="compraPresentacionId"
-                render={({ field }) => (
-                  <Select value={field.value || undefined} onValueChange={field.onChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona compra" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {watchedPackagingPresentations
-                        .filter((entry) => entry.permiteCompra)
-                        .map((entry) => {
-                        const label =
-                          options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
-                          entry.presentacionId
-                        return (
-                          <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
-                            {label}
-                          </SelectItem>
-                        )
-                      })}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              <FieldError message={form.formState.errors.compraPresentacionId?.message} />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Unidad mínima (base)</label>
-              <Controller
-                control={form.control}
-                name="basePresentacionId"
-                render={({ field }) => (
-                  <Select value={field.value || undefined} onValueChange={field.onChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona base" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {watchedPackagingPresentations.map((entry) => {
-                        const label =
-                          options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
-                          entry.presentacionId
-                        return (
-                          <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
-                            {label}
-                          </SelectItem>
-                        )
-                      })}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              <FieldError message={form.formState.errors.basePresentacionId?.message} />
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium">Presentaciones</p>
+          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,7.3fr)_minmax(0,2.7fr)]">
+            <div className="flex min-h-0 flex-col gap-2.5 overflow-hidden">
+              <div className="shrink-0 flex items-center justify-between gap-2">
+                <p className="text-[14px] font-semibold text-foreground">Cadena de presentaciones</p>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
+                  disabled={!canAddNextPackagingStep}
                   onClick={() =>
-                    packagingPresentations.append({
-                      presentacionId: options.presentations[0]?.id ?? '',
-                      permiteCompra: false,
-                      permiteVenta: false,
-                      precioVenta: undefined,
+                    setPackagingDraftRows((current) => {
+                      const next = [
+                        ...current,
+                        createEmptyPackagingRow(getNextPackagingPresentationId(current)),
+                      ]
+                      syncPackagingInputValues(next)
+                      return next
                     })
                   }
                 >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Agregar
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Agregar presentación
                 </Button>
               </div>
 
-              <div className="grid gap-2">
-                {packagingPresentations.fields.map((field, index) => (
-                  <div key={field.id} className="grid gap-2 rounded-xl border p-3">
-                    <Controller
-                      control={form.control}
-                      name={`presentacionesEmpaque.${index}.presentacionId`}
-                      render={({ field }) => (
-                        <Select value={field.value || undefined} onValueChange={field.onChange}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecciona presentación" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {options.presentations.map((presentation) => (
-                              <SelectItem key={presentation.id} value={presentation.id}>
-                                {presentation.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    />
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <Controller
-                        control={form.control}
-                        name={`presentacionesEmpaque.${index}.permiteCompra`}
-                        render={({ field }) => (
-                          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                            <p className="text-sm font-medium text-foreground">Compra</p>
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
-                          </label>
-                        )}
-                      />
-                      <Controller
-                        control={form.control}
-                        name={`presentacionesEmpaque.${index}.permiteVenta`}
-                        render={({ field }) => (
-                          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                            <p className="text-sm font-medium text-foreground">Venta</p>
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
-                          </label>
-                        )}
-                      />
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium">Precio</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          {...form.register(`presentacionesEmpaque.${index}.precioVenta`, {
-                            valueAsNumber: true,
-                            setValueAs: (value) =>
-                              value === '' || value === null || value === undefined ? undefined : Number(value),
-                          })}
-                        />
-                        <FieldError
-                          message={
-                            form.formState.errors.presentacionesEmpaque?.[index]?.precioVenta?.message
-                          }
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => packagingPresentations.remove(index)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <FieldError message={form.formState.errors.presentacionesEmpaque?.message as string | undefined} />
-            </div>
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-background pr-1">
+                {packagingDraftRows.map((row, index) => {
+                  const isLastStep = index === packagingDraftRows.length - 1
+                  const nextStep = packagingDraftRows[index + 1]
+                  const currentLabel = getPresentationLabel(row.presentacionId)
+                  const nextLabel = getPresentationLabel(nextStep?.presentacionId)
+                  const fieldKey = `${row.presentacionId || 'row'}-${index}`
+                  const defaults = packagingInputDefaults.current[fieldKey] ?? {
+                    cantidad: typeof row.cantidadEquivalencia === 'number' ? row.cantidadEquivalencia.toString() : '',
+                    precio: typeof row.precioVenta === 'number' ? row.precioVenta.toString() : '',
+                    mountKey: 0,
+                  }
+                  const mountKey = defaults.mountKey
 
-            {watchedPackagingPresentations.length <= 1 ? null : (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium">Equivalencias (enteros)</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      packagingConversions.append({
-                        desdePresentacionId: watchedPackagingPresentations[0]?.presentacionId ?? '',
-                        haciaPresentacionId: watchedPackagingPresentations[0]?.presentacionId ?? '',
-                        cantidad: 1,
-                      })
-                    }
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Agregar
-                  </Button>
-                </div>
+                  return (
+                    <div key={`${row.presentacionId || 'row'}-${index}`}>
+                      <div className="space-y-3 p-3.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant={index === 0 ? 'outline' : 'default'} className="text-[11px]">
+                              {index === 0 ? 'Paso 1 · Mayor' : isLastStep ? `Paso ${index + 1} · Base` : `Paso ${index + 1} · Intermedio`}
+                            </Badge>
+                            {row.presentacionId === draftPurchasePresentationId && draftPurchasePresentationId ? (
+                              <Badge variant="info" className="text-[11px]">Compra</Badge>
+                            ) : null}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 shrink-0 gap-1 px-2 text-[12px] text-muted-foreground hover:text-destructive"
+                            onClick={() =>
+                              setPackagingDraftRows((current) => {
+                                const next = current.filter((_, currentIndex) => currentIndex !== index)
+                                syncPackagingInputValues(next)
+                                return next
+                              })
+                            }
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Eliminar
+                          </Button>
+                        </div>
 
-                <div className="grid gap-2">
-                  {packagingConversions.fields.map((field, index) => (
-                    <div key={field.id} className="grid gap-2 rounded-xl border p-3">
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        <Controller
-                          control={form.control}
-                          name={`conversionesEmpaque.${index}.desdePresentacionId`}
-                          render={({ field }) => (
-                            <Select value={field.value || undefined} onValueChange={field.onChange}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Desde" />
+                        <div className="rounded-lg border bg-muted/10 p-3 space-y-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[12px] font-medium text-muted-foreground">
+                              Presentación
+                            </label>
+                            <Select
+                              value={row.presentacionId || undefined}
+                              onValueChange={(value) =>
+                              setPackagingDraftRows((current) => {
+                                const next = current.map((entry, currentIndex) =>
+                                  currentIndex === index ? { ...entry, presentacionId: value } : entry,
+                                )
+                                syncPackagingInputValues(next)
+                                return next
+                              })
+                            }
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Selecciona la presentación" />
                               </SelectTrigger>
                               <SelectContent>
-                                {watchedPackagingPresentations.map((entry) => {
-                                  const label =
-                                    options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
-                                    entry.presentacionId
-                                  return (
-                                    <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
-                                      {label}
-                                    </SelectItem>
+                                {options.presentations
+                                  .filter(
+                                    (presentation) =>
+                                      presentation.id === row.presentacionId ||
+                                      !packagingDraftRows.some(
+                                        (entry, currentIndex) =>
+                                          currentIndex !== index && entry.presentacionId === presentation.id,
+                                      ),
                                   )
-                                })}
+                                  .map((presentation) => (
+                                    <SelectItem key={presentation.id} value={presentation.id}>
+                                      {presentation.name}
+                                    </SelectItem>
+                                  ))}
                               </SelectContent>
                             </Select>
-                          )}
-                        />
-                        <Controller
-                          control={form.control}
-                          name={`conversionesEmpaque.${index}.haciaPresentacionId`}
-                          render={({ field }) => (
-                            <Select value={field.value || undefined} onValueChange={field.onChange}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Hacia" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {watchedPackagingPresentations.map((entry) => {
-                                  const label =
-                                    options.presentations.find((item) => item.id === entry.presentacionId)?.name ??
-                                    entry.presentacionId
-                                  return (
-                                    <SelectItem key={entry.presentacionId} value={entry.presentacionId}>
-                                      {label}
-                                    </SelectItem>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] font-medium text-muted-foreground">Compra</span>
+                              <Switch
+                                checked={row.permiteCompra}
+                                onCheckedChange={(checked) =>
+                                  setPackagingDraftRows((current) =>
+                                    current.map((entry, currentIndex) =>
+                                      currentIndex === index ? { ...entry, permiteCompra: checked } : entry,
+                                    ),
                                   )
-                                })}
-                              </SelectContent>
-                            </Select>
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] font-medium text-muted-foreground">Venta</span>
+                              <Switch
+                                checked={row.permiteVenta}
+                                onCheckedChange={(checked) =>
+                                  setPackagingDraftRows((current) =>
+                                    current.map((entry, currentIndex) =>
+                                      currentIndex === index
+                                        ? {
+                                            ...entry,
+                                            permiteVenta: checked,
+                                            precioVenta: checked ? entry.precioVenta : undefined,
+                                          }
+                                        : entry,
+                                    ),
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          {!isLastStep ? (
+                            <div className="flex flex-wrap items-center gap-2 text-[14px]">
+                              <span className="inline-flex items-center rounded-md border bg-background px-2.5 py-1 font-semibold">
+                                1 {currentLabel || '…'}
+                              </span>
+                              <span className="text-[12px] font-medium text-muted-foreground">contiene</span>
+                              <Input
+                                key={`cant-${fieldKey}-${mountKey}`}
+                                type="text"
+                                inputMode="numeric"
+                                name={`pack_cant_${index}`}
+                                autoComplete="off"
+                                spellCheck={false}
+                                className="h-9 w-28 text-center text-[14px] font-semibold"
+                                placeholder="Ej: 10"
+                                defaultValue={defaults.cantidad}
+                                ref={(el) => {
+                                  const bucket = packagingInputRefs.current[fieldKey] ?? { cantidad: null, precio: null }
+                                  bucket.cantidad = el
+                                  packagingInputRefs.current[fieldKey] = bucket
+                                }}
+                                onBlur={() => {
+                                  const refs = packagingInputRefs.current[fieldKey]
+                                  const value = refs?.cantidad?.value ?? ''
+                                  const clean = value.replace(/[^0-9]/g, '')
+                                  const parsed = clean === '' ? undefined : Math.trunc(Number(clean))
+                                  if (parsed === row.cantidadEquivalencia) return
+                                  setPackagingDraftRows((current) =>
+                                    current.map((entry, currentIndex) =>
+                                      currentIndex === index
+                                        ? { ...entry, cantidadEquivalencia: parsed }
+                                        : entry,
+                                    ),
+                                  )
+                                }}
+                              />
+                              <span className="inline-flex items-center rounded-md border bg-background px-2.5 py-1 font-semibold">
+                                {nextLabel || 'Siguiente presentación'}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="success" className="h-7 gap-1 px-2 text-[12px]">
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Unidad base
+                              </Badge>
+                            </div>
                           )}
-                        />
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium">Cantidad</label>
-                          <Input
-                            type="number"
-                            step="1"
-                            {...form.register(`conversionesEmpaque.${index}.cantidad`, {
-                              valueAsNumber: true,
-                              setValueAs: (value) =>
-                                value === '' || value === null || value === undefined
-                                  ? undefined
-                                  : Number(value),
-                            })}
-                          />
-                          <FieldError
-                            message={form.formState.errors.conversionesEmpaque?.[index]?.cantidad?.message}
-                          />
+
+                          {row.permiteVenta ? (
+                            <div className="space-y-1.5">
+                              <label className="text-[12px] font-medium text-muted-foreground">
+                                Precio de venta por 1 {currentLabel || 'presentación'}
+                              </label>
+                              <div className="flex h-9 items-stretch overflow-hidden rounded-md border">
+                                <span className="flex items-center border-r bg-muted/40 px-3 text-[14px] font-semibold pointer-events-none select-none">
+                                  S/
+                                </span>
+                                <Input
+                                  key={`price-${fieldKey}-${mountKey}`}
+                                  type="text"
+                                  inputMode="decimal"
+                                  name={`pack_price_${index}`}
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                  className="h-full border-0 text-[14px] font-semibold shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                  placeholder="0.00"
+                                  defaultValue={defaults.precio}
+                                  ref={(el) => {
+                                    const bucket = packagingInputRefs.current[fieldKey] ?? { cantidad: null, precio: null }
+                                    bucket.precio = el
+                                    packagingInputRefs.current[fieldKey] = bucket
+                                  }}
+                                  onBlur={() => {
+                                    const refs = packagingInputRefs.current[fieldKey]
+                                    const value = refs?.precio?.value ?? ''
+                                    const raw = value.replace(/[^0-9.]/g, '')
+                                    const parts = raw.split('.')
+                                    const clean = parts[0] + (parts.length > 1 ? '.' + parts.slice(1).join('').slice(0, 2) : '')
+                                    const parsed = clean === '' || clean === '.' ? undefined : Number(clean)
+                                    if (parsed === row.precioVenta) return
+                                    setPackagingDraftRows((current) =>
+                                      current.map((entry, currentIndex) =>
+                                        currentIndex === index
+                                          ? { ...entry, precioVenta: parsed }
+                                          : entry,
+                                      ),
+                                    )
+                                  }}
+                                />
+                              </div>
+                              {row.permiteCompra &&
+                              packagingSummary.hasEnoughData &&
+                              typeof packagingSummary.baseUnits === 'number' &&
+                              typeof row.precioVenta === 'number' ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Equiv. base ({getPresentationLabel(draftBasePresentationId) || 'unidad'}):{' '}
+                                  <span className="font-semibold text-foreground">
+                                    {formatCurrency(row.precioVenta / packagingSummary.baseUnits)}
+                                  </span>
+                                </p>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => packagingConversions.remove(index)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
+
+                      {index < packagingDraftRows.length - 1 ? (
+                        <div className="border-t border-dashed" />
+                      ) : null}
                     </div>
-                  ))}
-                </div>
+                  )
+                })}
+
+                {packagingDraftRows.length === 0 ? (
+                  <div className="p-5 text-center text-[12px] text-muted-foreground">
+                    Agrega la presentación principal para construir la cadena de conversión.
+                  </div>
+                ) : null}
               </div>
-            )}
+
+              <FieldError message={form.formState.errors.empaque?.message as string | undefined} />
+            </div>
+
+            <div className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden">
+              <div className="shrink-0 rounded-lg border p-2.5">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Resumen
+                </p>
+                <p className="mt-1.5 text-[14px] font-semibold leading-snug text-foreground">
+                  {packagingSummary.hasEnoughData
+                    ? packagingSummary.equivalenceText
+                    : packagingDraftRows.length === 0
+                      ? 'Agrega presentaciones.'
+                      : 'Completa para ver equivalencia.'}
+                </p>
+                <div className="mt-2 space-y-0.5 text-[12px] text-muted-foreground">
+                  <p>
+                    Compra principal:{' '}
+                    <span className="font-medium text-foreground">
+                      {draftPurchasePresentationId
+                        ? getPresentationLabel(draftPurchasePresentationId)
+                        : 'Sin definir'}
+                    </span>
+                  </p>
+                  <p>
+                    Unidad base:{' '}
+                    <span className="font-medium text-foreground">
+                      {draftBasePresentationId
+                        ? getPresentationLabel(draftBasePresentationId)
+                        : 'Sin definir'}
+                    </span>
+                  </p>
+                </div>
+
+                {packagingChainPreview.length > 0 ? (
+                  <div className="mt-2 rounded-md border">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left"
+                      onClick={() => setIsPackagingBreakdownOpen((value) => !value)}
+                    >
+                      <span className="text-[12px] font-medium text-foreground">Ver desglose</span>
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+                          isPackagingBreakdownOpen ? '' : '-rotate-90'
+                        }`}
+                      />
+                    </button>
+                    {isPackagingBreakdownOpen ? (
+                      <div className="space-y-1 border-t px-2.5 py-2 text-[12px]">
+                        {packagingChainPreview.map((node) => (
+                          <div
+                            key={node.key}
+                            className="flex items-center gap-2 rounded-sm bg-muted/25 px-2 py-1"
+                          >
+                            <span className="font-semibold text-foreground">
+                              {node.quantityLabel ?? '1'}
+                            </span>
+                            <span className="text-muted-foreground">×</span>
+                            <span className="font-medium text-foreground">{node.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+                {packagingDraftIssues.length > 0 ? (
+                  <div className="rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2 text-[12px] text-warning-foreground leading-relaxed">
+                    <p className="font-semibold text-foreground">Revisa la cadena</p>
+                    <ul className="mt-1 space-y-0.5 text-[12px] text-muted-foreground">
+                      {packagingDraftIssues.map((issue) => (
+                        <li key={issue}>• {issue}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {isPackagingPreviewLoading ? (
+                  <div className="rounded-md border px-2.5 py-2 text-[12px] text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Validando…
+                    </div>
+                  </div>
+                ) : null}
+
+                {packagingPreviewError ? (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive leading-relaxed">
+                    {packagingPreviewError}
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={() => setIsPackagingDialogOpen(false)}>
+          <DialogFooter className="shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPackagingDialogOpen(false)}
+            >
               Cerrar
             </Button>
-            <Button type="button" size="sm" onClick={() => setIsPackagingDialogOpen(false)}>
-              Listo
+            <Button
+              type="button"
+              size="sm"
+              onClick={async () => {
+                const flushedRows = flushPackagingInputValues(packagingDraftRows)
+                setPackagingDraftRows(flushedRows)
+                syncPackagingInputValues(flushedRows)
+
+                if (packagingPreviewError || !packagingPreview) {
+                  setPackagingPreviewError(
+                    packagingPreviewError ?? 'Completa una cadena válida antes de aplicar.',
+                  )
+                  return
+                }
+
+                form.setValue('empaque', flushedRows, {
+                  shouldDirty: true,
+                  shouldTouch: true,
+                  shouldValidate: true,
+                })
+                const isValid = await form.trigger('empaque')
+                if (!isValid) {
+                  return
+                }
+                setIsPackagingDialogOpen(false)
+              }}
+            >
+              Aplicar
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isPackagingGuideOpen}
+        onOpenChange={(open) => {
+          setIsPackagingGuideOpen(open)
+        }}
+      >
+        <DialogContent className="max-h-[86vh] overflow-hidden sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[18px] leading-6">
+              <BookOpen className="h-5 w-5 text-primary" />
+              Guía de empaque y conversión
+            </DialogTitle>
+            <DialogDescription className="text-[13px]">
+              Aprende a configurar presentaciones y equivalencias de un producto en pocos pasos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            <div className="rounded-lg border bg-muted/25 p-3 text-[13px] leading-relaxed">
+              <p>
+                Agrega las presentaciones <strong>desde la más grande hasta la unidad base</strong>.
+                La cantidad indica <strong>cuántas unidades de la siguiente presentación</strong> contiene la presentación actual.
+              </p>
+            </div>
+
+            <div className="rounded-lg border p-3">
+              <p className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Ejemplo visual</p>
+              <div className="mt-2.5 space-y-1.5 text-[13px]">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">📦</span>
+                  <span className="font-semibold">Caja</span>
+                </div>
+                <div className="pl-9 text-[12px] text-muted-foreground">
+                  ↓ contiene <span className="font-semibold text-foreground">10</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">📋</span>
+                  <span className="font-semibold">Blíster</span>
+                </div>
+                <div className="pl-9 text-[12px] text-muted-foreground">
+                  ↓ contiene <span className="font-semibold text-foreground">12</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">💊</span>
+                  <span className="font-semibold">Tabletas</span>
+                </div>
+              </div>
+              <div className="mt-3 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-[13px]">
+                Resultado: <span className="font-semibold">1 Caja = 10 Blíster = 120 Tabletas</span>
+              </div>
+            </div>
+
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              <div className="rounded-lg border p-2.5 text-[12px] leading-relaxed">
+                <p className="font-semibold text-foreground">Medicamento</p>
+                <p className="mt-1 text-muted-foreground">1 Caja → 10 Blíster → 12 Tabletas</p>
+                <p className="mt-1 text-foreground">= 120 Tabletas</p>
+              </div>
+              <div className="rounded-lg border p-2.5 text-[12px] leading-relaxed">
+                <p className="font-semibold text-foreground">Pañales</p>
+                <p className="mt-1 text-muted-foreground">1 Paquete → 20 Packs → 3 Unidades</p>
+                <p className="mt-1 text-foreground">= 60 Unidades</p>
+              </div>
+              <div className="rounded-lg border p-2.5 text-[12px] leading-relaxed">
+                <p className="font-semibold text-foreground">Simple</p>
+                <p className="mt-1 text-muted-foreground">1 Caja → 24 Unidades</p>
+                <p className="mt-1 text-foreground">= 24 Unidades</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border p-3 text-[13px] leading-relaxed">
+              <p className="font-semibold text-foreground">Regla de orden</p>
+              <p className="mt-1 text-muted-foreground">
+                Siempre agrega las presentaciones desde la más grande hasta la más pequeña. La última presentación será automáticamente la unidad base.
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2 text-[12px]">
+                <div className="rounded-md border border-success/30 bg-success/5 px-2.5 py-2">
+                  <span className="font-semibold text-success">✓ Correcto</span>
+                  <p className="mt-0.5">Caja → Blíster → Tableta</p>
+                </div>
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
+                  <span className="font-semibold text-destructive">✗ Incorrecto</span>
+                  <p className="mt-0.5">Tableta → Blíster → Caja</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">
+              <p>
+                Tip: Si tienes dudas, puedes pulsar <span className="font-semibold text-foreground">Guía</span> dentro de cualquier configuración de empaque.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="dont-show-packaging-guide"
+                checked={dontShowPackagingGuide}
+                onCheckedChange={(value) => {
+                  const checked = value === true
+                  setDontShowPackagingGuide(checked)
+                  try {
+                    if (typeof window !== 'undefined') {
+                      window.localStorage.setItem('no_volver_a_mostrar_empaque_guia', checked ? '1' : '0')
+                    }
+                  } catch {
+                    // ignore storage errors
+                  }
+                }}
+              />
+              <label htmlFor="dont-show-packaging-guide" className="text-[12px] text-muted-foreground cursor-pointer">
+                No volver a mostrar automáticamente
+              </label>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPackagingGuideOpen(false)}
+              >
+                Entendido, configurar
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2223,6 +2990,12 @@ export function ProductosPage() {
                   </p>
                 </div>
                 <div className="rounded-xl border p-3">
+                  <p className="text-xs text-muted-foreground">Principio activo</p>
+                  <p className="mt-1 font-medium text-foreground">
+                    {selectedProductDetail.activePrinciple ?? 'Sin principio activo'}
+                  </p>
+                </div>
+                <div className="rounded-xl border p-3">
                   <p className="text-xs text-muted-foreground">Laboratorio</p>
                   <p className="mt-1 font-medium text-foreground">
                     {selectedProductDetail.laboratory ?? 'Sin laboratorio'}
@@ -2232,14 +3005,50 @@ export function ProductosPage() {
 
               <div className="rounded-xl border p-3">
                 <p className="text-xs text-muted-foreground">Empaque</p>
-                <p className="mt-1 font-medium text-foreground">
-                  {selectedProductDetail.packaging.presentations.find((item) => item.isBase)?.name ??
-                    'Sin base definida'}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground">Unidad base</p>
+                    <p className="mt-1 font-medium text-foreground">
+                      {selectedProductDetail.packaging.presentations.find((item) => item.isBase)?.name ??
+                        'Sin base definida'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground">Compra principal</p>
+                    <p className="mt-1 font-medium text-foreground">
+                      {selectedProductDetail.packaging.presentations.find(
+                        (item) => item.id === selectedProductDetail.packaging.purchasePresentationId,
+                      )?.name ?? 'Sin definir'}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
                   {selectedProductDetail.packaging.presentations.length} presentaciones ·{' '}
                   {selectedProductDetail.packaging.conversions.length} equivalencias
                 </p>
+
+                {selectedProductDetail.packaging.summaries.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {selectedProductDetail.packaging.summaries.map((entry) => (
+                      <div key={entry.presentationId} className="rounded-lg border bg-muted/20 p-3">
+                        <p className="text-sm font-medium text-foreground">{entry.presentationName}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{entry.expression}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {selectedProductDetail.packaging.stockBreakdown.available.length > 0 ? (
+                  <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                    <p className="text-xs text-muted-foreground">Stock amigable</p>
+                    <p className="mt-1 text-sm text-foreground">
+                      {selectedProductDetail.packaging.stockBreakdown.available
+                        .filter((entry) => entry.quantity > 0)
+                        .map((entry) => `${entry.quantity} ${entry.presentationName}`)
+                        .join(' · ') || 'Sin stock disponible'}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -2346,6 +3155,8 @@ export function ProductosPage() {
                   ? 'laboratorio'
                   : masterDialogType === 'tipoMedicamento'
                     ? 'tipo comercial'
+                  : masterDialogType === 'principioActivo'
+                    ? 'principio activo'
                   : masterDialogType === 'presentacion'
                     ? 'presentación'
                     : 'unidad'}
@@ -2507,6 +3318,61 @@ export function ProductosPage() {
                     <div>
                       <p className="text-sm font-medium text-foreground">Activo</p>
                       <p className="text-xs text-muted-foreground">Disponible en selects de Producto y filtros de Venta.</p>
+                    </div>
+                    <Switch
+                      checked={field.value ?? true}
+                      onCheckedChange={field.onChange}
+                      disabled={isMasterSubmitting}
+                    />
+                  </label>
+                )}
+              />
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={resetMasterDialogState}
+                  disabled={isMasterSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={!canManageMasters || isMasterSubmitting}>
+                  Guardar
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+
+          {masterDialogType === 'principioActivo' ? (
+            <form className="grid gap-4" onSubmit={activePrincipleForm.handleSubmit(handleSaveMasterActivePrinciple)}>
+              <div className="grid gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Nombre</label>
+                  <Input
+                    {...activePrincipleForm.register('nombre')}
+                    placeholder="Paracetamol"
+                    disabled={isMasterSubmitting}
+                  />
+                  <FieldError message={activePrincipleForm.formState.errors.nombre?.message} />
+                  <p className="text-xs text-muted-foreground">Código generado automáticamente desde el nombre.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea {...activePrincipleForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <FieldError message={activePrincipleForm.formState.errors.descripcion?.message} />
+                </div>
+              </div>
+
+              <Controller
+                control={activePrincipleForm.control}
+                name="activo"
+                render={({ field }) => (
+                  <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Activo</p>
+                      <p className="text-xs text-muted-foreground">Disponible en productos, importación y filtros.</p>
                     </div>
                     <Switch
                       checked={field.value ?? true}

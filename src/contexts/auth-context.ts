@@ -12,11 +12,13 @@ export type AuthContextValue = {
   isAuthenticated: boolean
   isBootstrapping: boolean
   login: (payload: LoginPayload) => Promise<void>
-  logout: () => Promise<void>
+  logout: (reason?: string) => Promise<void>
   requestPasswordReset: (
     payload: ForgotPasswordPayload,
   ) => Promise<ForgotPasswordResult>
   resetPassword: (payload: ResetPasswordPayload) => Promise<void>
+  setSession: (next: AuthSession | null) => void
+  syncSessionFromStorage: () => void
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)

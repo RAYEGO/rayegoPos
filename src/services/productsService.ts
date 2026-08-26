@@ -9,6 +9,8 @@ import type {
   MasterUnitsResponse,
   ProductCatalogResponse,
   ProductOptionsResponse,
+  ProductPackagingPreviewPayload,
+  ProductPackagingPreviewResponse,
   ProductStatus,
   UpdateProductPayload,
   UpsertMasterActivePrinciplePayload,
@@ -95,6 +97,14 @@ export const productsService = {
   getOptions(accessToken: string) {
     return apiRequest<ProductOptionsResponse>('/api/products/options', {
       accessToken,
+    })
+  },
+
+  previewPackaging(accessToken: string, payload: ProductPackagingPreviewPayload) {
+    return apiRequest<ProductPackagingPreviewResponse>('/api/products/packaging/preview', {
+      method: 'POST',
+      accessToken,
+      body: payload,
     })
   },
 

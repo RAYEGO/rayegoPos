@@ -15,12 +15,12 @@ import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
-  buildPackagingEdges,
-  resolveBasePresentation,
-  resolveFactorToBase,
-  resolvePresentationEntry,
-  resolvePresentationFactors,
+  buildPackagingSnapshot,
+  convertAmountToBaseUnit,
+  convertQuantityToBaseUnits,
+  resolvePackagingOperationContext,
 } from '../../lib/productPackaging.js'
+import { buildEnsureDefaultPaymentMethodsUpsert, classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
 const saleInclude = {
   sucursal: {
@@ -112,6 +112,8 @@ type SalesDashboardFilters = {
   branchId?: string
   commercialTypeId?: string
   activePrincipleId?: string
+  categoryId?: string
+  availability?: 'TODOS' | 'CON_STOCK' | 'SIN_STOCK'
 }
 
 type CreateSalePayload = {
@@ -280,75 +282,13 @@ async function ensureDefaultPaymentMethods(
   db: Prisma.TransactionClient | typeof prisma,
   userId?: string,
 ) {
-  const defaults = [
-    {
-      codigo: CodigoFormaPago.EFECTIVO,
-      nombre: 'Efectivo',
-      requiereReferencia: false,
-      permiteVuelto: true,
-      orden: 1,
-    },
-    {
-      codigo: CodigoFormaPago.TARJETA,
-      nombre: 'Tarjeta',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 2,
-    },
-    {
-      codigo: CodigoFormaPago.YAPE,
-      nombre: 'Yape',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 3,
-    },
-    {
-      codigo: CodigoFormaPago.PLIN,
-      nombre: 'Plin',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 4,
-    },
-    {
-      codigo: CodigoFormaPago.TRANSFERENCIA,
-      nombre: 'Transferencia bancaria',
-      requiereReferencia: true,
-      permiteVuelto: false,
-      orden: 5,
-    },
-    {
-      codigo: CodigoFormaPago.OTRO,
-      nombre: 'Otro',
-      requiereReferencia: false,
-      permiteVuelto: false,
-      orden: 6,
-    },
-  ] as const
-
+  const upserts = buildEnsureDefaultPaymentMethodsUpsert(userId)
   await Promise.all(
-    defaults.map((method) =>
+    upserts.map((upsert) =>
       db.formaPago.upsert({
-        where: {
-          codigo: method.codigo,
-        },
-        update: {
-          nombre: method.nombre,
-          requiereReferencia: method.requiereReferencia,
-          permiteVuelto: method.permiteVuelto,
-          orden: method.orden,
-          activo: true,
-          updatedById: userId,
-        },
-        create: {
-          codigo: method.codigo,
-          nombre: method.nombre,
-          requiereReferencia: method.requiereReferencia,
-          permiteVuelto: method.permiteVuelto,
-          orden: method.orden,
-          activo: true,
-          createdById: userId,
-          updatedById: userId,
-        },
+        where: upsert.where,
+        update: upsert.update,
+        create: upsert.create,
       }),
     ),
   )
@@ -455,44 +395,76 @@ export async function getSalesDashboard(
     deletedAt: null,
     empresaId: companyId,
     estado: 'ACTIVO',
+    ...(filters.categoryId ? { categoriaId: filters.categoryId } : {}),
     ...(filters.commercialTypeId ? { tipoComercialId: filters.commercialTypeId } : {}),
-    ...(filters.activePrincipleId ? { principioActivoId: filters.activePrincipleId } : {}),
-    ...(search
+    ...(filters.activePrincipleId
       ? {
           OR: [
+            { principioActivoId: filters.activePrincipleId },
             {
-              nombre: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              sku: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              codigoBarras: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-            {
-              principioActivo: {
-                nombre: {
-                  contains: search,
-                  mode: 'insensitive',
+              principiosActivos: {
+                some: {
+                  principioActivoId: filters.activePrincipleId,
+                  deletedAt: null,
                 },
               },
             },
+          ],
+        }
+      : {}),
+    ...(search
+      ? {
+          AND: [
             {
-              tipoComercial: {
-                nombre: {
-                  contains: search,
-                  mode: 'insensitive',
+              OR: [
+                {
+                  nombre: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
                 },
-              },
+                {
+                  sku: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
+                },
+                {
+                  codigoBarras: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
+                },
+                {
+                  principioActivo: {
+                    nombre: {
+                      contains: search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+                {
+                  principiosActivos: {
+                    some: {
+                      deletedAt: null,
+                      principioActivo: {
+                        nombre: {
+                          contains: search,
+                          mode: 'insensitive',
+                        },
+                      },
+                    },
+                  },
+                },
+                {
+                  tipoComercial: {
+                    nombre: {
+                      contains: search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+              ],
             },
           ],
         }
@@ -544,7 +516,7 @@ export async function getSalesDashboard(
       : {}),
   }
 
-  const [codeMap, branches, customers, paymentMethods, commercialTypes, products, sales] = await Promise.all([
+  const [codeMap, branches, customers, paymentMethods, commercialTypes, categories, products, sales] = await Promise.all([
     buildSaleCodeMap(),
     prisma.sucursal.findMany({
       where: {
@@ -592,6 +564,18 @@ export async function getSalesDashboard(
       },
     }),
     prisma.tipoComercial.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+        empresaId: companyId,
+      },
+      orderBy: [{ nombre: 'asc' }],
+      select: {
+        id: true,
+        nombre: true,
+      },
+    }),
+    prisma.categoria.findMany({
       where: {
         deletedAt: null,
         activo: true,
@@ -691,7 +675,7 @@ export async function getSalesDashboard(
     }),
   ])
 
-  const mappedProducts = products
+  const rawProducts = products
     .map((product) => {
       const sellableLots = product.lotes.filter(
         (lot) =>
@@ -705,32 +689,11 @@ export async function getSalesDashboard(
         0,
       )
 
-      const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
-      const packagingBasePresentationId = basePresentation?.presentacion.id ?? null
-      const packagingEdges = buildPackagingEdges(product.conversionesEmpaque ?? [])
-      const packagingFactors =
-        packagingBasePresentationId === null
-          ? new Map<string, number | null>()
-          : resolvePresentationFactors({
-              basePresentationId: packagingBasePresentationId,
-              presentationIds: (product.presentacionesEmpaque ?? []).map(
-                (entry) => entry.presentacion.id,
-              ),
-              edges: packagingEdges,
-            })
-
-      const packagingPresentations = (product.presentacionesEmpaque ?? []).map((entry) => ({
-        id: entry.presentacion.id,
-        name: entry.presentacion.nombre,
-        isBase: entry.esBase,
-        allowsPurchase: entry.permiteCompra,
-        allowsSale: entry.permiteVenta,
-        salePrice: entry.precioVenta ? decimalToNumber(entry.precioVenta) : null,
-        factorToBase:
-          packagingBasePresentationId === null
-            ? null
-            : (packagingFactors.get(entry.presentacion.id) ?? null),
-      }))
+      const packaging = buildPackagingSnapshot({
+        presentations: product.presentacionesEmpaque ?? [],
+        conversions: product.conversionesEmpaque ?? [],
+        purchasePresentationId: product.compraPresentacionId,
+      })
 
       return {
         id: product.id,
@@ -747,13 +710,7 @@ export async function getSalesDashboard(
         presentationName: product.presentacion?.nombre ?? 'Presentación general',
         unitSymbol: product.unidadMedida.simbolo,
         salePrice: decimalToNumber(product.precioVenta),
-        packaging:
-          packagingPresentations.length > 0
-            ? {
-                basePresentationId: packagingBasePresentationId,
-                presentations: packagingPresentations,
-              }
-            : null,
+        packaging,
         availableUnits: Number(availableUnits.toFixed(2)),
         requiresPrescription: product.requiereReceta,
         isControlled: product.esControlado,
@@ -772,6 +729,14 @@ export async function getSalesDashboard(
       }
     })
     .filter((product) => product.suggestedLot !== null)
+
+  const mappedProducts = rawProducts.filter((product) => {
+    if (!filters.availability) return true
+    if (filters.availability === 'TODOS') return true
+    if (filters.availability === 'CON_STOCK') return product.availableUnits > 0
+    if (filters.availability === 'SIN_STOCK') return product.availableUnits <= 0
+    return true
+  })
 
   const mappedSales = sales.map((sale) => mapRecentSale(sale, codeMap))
   const dispensations = mapDispensations(sales, codeMap).slice(0, 20)
@@ -810,6 +775,10 @@ export async function getSalesDashboard(
         id: commercialType.id,
         name: commercialType.nombre,
       })),
+      categories: categories.map((category) => ({
+        id: category.id,
+        name: category.nombre,
+      })),
       medicationTypes: commercialTypes.map((commercialType) => ({
         id: commercialType.id,
         name: commercialType.nombre,
@@ -822,13 +791,18 @@ export async function getSalesDashboard(
         limiteCredito: decimalToNumber(customer.limiteCredito),
         saldoPendiente: decimalToNumber(customer.saldoPendiente),
       })),
-      paymentMethods: paymentMethods.map((method) => ({
-        id: method.id,
-        code: method.codigo,
-        name: method.nombre,
-        requiresReference: method.requiereReferencia,
-        allowsChange: method.permiteVuelto,
-      })),
+      paymentMethods: paymentMethods.map((method) => {
+        const classification = classifyPaymentMethod(method.codigo)
+        return {
+          id: method.id,
+          code: method.codigo,
+          name: method.nombre,
+          category: classification.category,
+          digitalSubmethod: classification.digitalSubmethod,
+          requiresReference: method.requiereReferencia,
+          allowsChange: method.permiteVuelto,
+        }
+      }),
     },
   }
 }
@@ -1012,12 +986,39 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     }
 
     if (paymentMethods.length !== payload.payments.length) {
-      throw createHttpError(404, 'Una o más formas de pago seleccionadas no están disponibles.')
-    }
+    throw createHttpError(404, 'Una o más formas de pago seleccionadas no están disponibles.')
+  }
 
-    if (!openCashDrawer) {
-      throw createHttpError(400, 'No hay una caja abierta para esta sucursal. Por favor, abre la caja antes de realizar ventas.')
+  const anyPaymentIsCash = payload.payments.some((payment) => {
+    const method = paymentMethods.find((m) => m.id === payment.formaPagoId)
+    return method?.codigo === CodigoFormaPago.EFECTIVO
+  })
+
+  let effectiveOpening = openCashDrawer
+  if (!effectiveOpening) {
+    if (anyPaymentIsCash) {
+      throw createHttpError(400, 'No hay una caja abierta para esta sucursal. Por favor, abre la caja antes de realizar ventas que cobren en efectivo.')
     }
+    effectiveOpening =
+      (await tx.aperturaCaja.findFirst({
+        where: {
+          caja: {
+            sucursalId: targetBranchId,
+          },
+          estado: EstadoAperturaCaja.ABIERTA,
+          deletedAt: null,
+          cierrePendiente: false,
+        },
+        orderBy: { fechaApertura: 'desc' },
+      })) ?? null
+  }
+
+  if (!effectiveOpening && anyPaymentIsCash) {
+    throw createHttpError(400, 'No hay una caja abierta para esta sucursal. Por favor, abre la caja antes de realizar ventas.')
+  }
+  if (!effectiveOpening) {
+    throw createHttpError(400, 'No hay una caja abierta para esta sucursal. Abre una caja antes de registrar ventas.')
+  }
 
     const tipoComprobante = payload.tipoComprobante ?? TipoComprobante.TICKET
 
@@ -1111,50 +1112,42 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
       }
 
-      const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
-      if (!basePresentation) {
-        throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
-      }
-
-      const resolvedPresentation = resolvePresentationEntry({
+      const packagingContext = resolvePackagingOperationContext({
         operation: 'SALE',
         presentationId: item.presentacionId,
         presentations: product.presentacionesEmpaque ?? [],
+        conversions: product.conversionesEmpaque ?? [],
       })
 
-      if (!resolvedPresentation.ok) {
-        throw createHttpError(400, resolvedPresentation.error)
+      if (!packagingContext.ok) {
+        throw createHttpError(400, packagingContext.error)
       }
 
-      const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
-      const factor = resolveFactorToBase({
-        presentationId: item.presentacionId,
-        basePresentationId: basePresentation.presentacion.id,
-        edges,
+      const quantity = convertQuantityToBaseUnits({
+        quantity: requestedQuantity,
+        factorToBase: packagingContext.factorToBase,
       })
-
-      if (!factor) {
-        throw createHttpError(
-          400,
-          'No fue posible resolver la conversión hacia la presentación base del producto.',
-        )
-      }
-
-      const quantity = requestedQuantity * factor
-      if (!Number.isFinite(quantity) || quantity <= 0) {
+      if (quantity === null) {
         throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
       }
 
       const presentationPrice =
-        resolvedPresentation.entry.precioVenta === null || resolvedPresentation.entry.precioVenta === undefined
+        packagingContext.selectedPresentation.precioVenta === null ||
+        packagingContext.selectedPresentation.precioVenta === undefined
           ? null
-          : decimalToNumber(resolvedPresentation.entry.precioVenta)
+          : decimalToNumber(packagingContext.selectedPresentation.precioVenta)
 
       if (presentationPrice === null) {
         throw createHttpError(400, 'La presentación seleccionada no tiene un precio de venta configurado.')
       }
 
-      const unitPrice = presentationPrice / factor
+      const unitPrice = convertAmountToBaseUnit({
+        amount: presentationPrice,
+        factorToBase: packagingContext.factorToBase,
+      })
+      if (unitPrice === null) {
+        throw createHttpError(400, 'No fue posible calcular el precio unitario en base.')
+      }
       const grossAmount = quantity * unitPrice
 
       if (!Number.isFinite(discountTotal) || discountTotal < 0 || discountTotal > grossAmount) {
@@ -1174,9 +1167,9 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         product,
         presentation: {
           id: item.presentacionId,
-          name: resolvedPresentation.entry.presentacion.nombre,
+          name: packagingContext.selectedPresentation.presentacion.nombre,
           quantity: requestedQuantity,
-          factor,
+          factor: packagingContext.factorToBase,
         },
       }
     })
@@ -1195,13 +1188,6 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
       if (!Number.isFinite(amount) || amount <= 0) {
         throw createHttpError(400, 'Cada pago debe tener un monto mayor a 0.')
-      }
-
-      if (paymentMethod.requiereReferencia && !toOptionalString(payment.referenciaExterna)) {
-        throw createHttpError(
-          400,
-          `La forma de pago ${paymentMethod.nombre} requiere una referencia externa.`,
-        )
       }
 
       return {
@@ -1478,7 +1464,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       const ventaPago = sale.pagos[index] // get the created VentaPago
       await tx.movimientoCaja.create({
         data: {
-          aperturaCajaId: openCashDrawer.id,
+          aperturaCajaId: effectiveOpening.id,
           tipo: TipoMovimientoCaja.VENTA,
           operacion: OperacionCaja.INGRESO,
           monto: toDecimal(payment.amount, 2),
@@ -1496,12 +1482,12 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     if (changeAmount > 0) {
       await tx.movimientoCaja.create({
         data: {
-          aperturaCajaId: openCashDrawer.id,
-          tipo: TipoMovimientoCaja.VENTA, // or maybe AJUSTE? But VENTA makes sense
+          aperturaCajaId: effectiveOpening.id,
+          tipo: TipoMovimientoCaja.VENTA,
           operacion: OperacionCaja.EGRESO,
           monto: toDecimal(changeAmount, 2),
           referencia: `Vuelto venta ${sale.id.slice(0, 8).toUpperCase()}`,
-          formaPagoId: payments[0].formaPagoId, // only efectivo allows change
+          formaPagoId: payments[0].formaPagoId,
           observaciones: 'Vuelto a cliente',
           createdById: userId,
           updatedById: userId,

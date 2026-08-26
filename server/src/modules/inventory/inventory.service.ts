@@ -1,4 +1,5 @@
 import {
+  AccionAuditoria,
   EstadoLote,
   OrigenMovimientoInventario,
   Prisma,
@@ -8,11 +9,9 @@ import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import {
-  buildPackagingEdges,
-  resolveBasePresentation,
-  resolveFactorToBase,
-  resolvePresentationEntry,
-  resolvePresentationFactors,
+  buildPackagingSnapshot,
+  convertQuantityToBaseUnits,
+  resolvePackagingOperationContext,
 } from '../../lib/productPackaging.js'
 
 type InventoryDashboardFilters = {
@@ -56,6 +55,7 @@ type TransferInventoryLotPayload = {
 }
 
 type InventoryTransaction = Prisma.TransactionClient
+type PrismaQueryable = typeof prisma | InventoryTransaction
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -278,8 +278,8 @@ async function upsertInventoryWarehouse(
   })
 }
 
-async function buildLotResponse(tx: InventoryTransaction, lotId: string) {
-  const lot = await tx.lote.findFirst({
+async function buildLotResponse(client: PrismaQueryable, lotId: string) {
+  const lot = await client.lote.findFirst({
     where: {
       id: lotId,
       deletedAt: null,
@@ -296,6 +296,7 @@ async function buildLotResponse(tx: InventoryTransaction, lotId: string) {
           id: true,
           nombre: true,
           sku: true,
+          compraPresentacionId: true,
           unidadMedida: {
             select: {
               simbolo: true,
@@ -315,7 +316,7 @@ async function buildLotResponse(tx: InventoryTransaction, lotId: string) {
     throw createHttpError(404, 'No fue posible reconstruir el lote actualizado.')
   }
 
-  const inventory = await tx.inventario.findUnique({
+  const inventory = await client.inventario.findUnique({
     where: {
       sucursalId_productoId: {
         sucursalId: lot.sucursalId,
@@ -465,6 +466,7 @@ export async function getInventoryDashboard(
           id: true,
           nombre: true,
           sku: true,
+          compraPresentacionId: true,
           unidadMedida: {
             select: {
               simbolo: true,
@@ -749,43 +751,17 @@ export async function getInventoryDashboard(
         id: branch.id,
         name: branch.nombre,
       })),
-      products: products.map((product) => {
-        const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
-        const basePresentationId = basePresentation?.presentacion.id ?? null
-        const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
-        const factors =
-          basePresentationId === null
-            ? new Map<string, number | null>()
-            : resolvePresentationFactors({
-                basePresentationId,
-                presentationIds: (product.presentacionesEmpaque ?? []).map(
-                  (entry) => entry.presentacion.id,
-                ),
-                edges,
-              })
-
-        return {
-          id: product.id,
-          name: product.nombre,
-          sku: product.sku,
-          unitSymbol: product.unidadMedida.simbolo,
-          packaging:
-            basePresentationId === null
-              ? null
-              : {
-                  basePresentationId,
-                  presentations: (product.presentacionesEmpaque ?? []).map((entry) => ({
-                    id: entry.presentacion.id,
-                    name: entry.presentacion.nombre,
-                    isBase: entry.esBase,
-                    allowsPurchase: entry.permiteCompra,
-                    allowsSale: entry.permiteVenta,
-                    salePrice: entry.precioVenta ? decimalToNumber(entry.precioVenta) : null,
-                    factorToBase: factors.get(entry.presentacion.id) ?? null,
-                  })),
-                },
-        }
-      }),
+      products: products.map((product) => ({
+        id: product.id,
+        name: product.nombre,
+        sku: product.sku,
+        unitSymbol: product.unidadMedida.simbolo,
+        packaging: buildPackagingSnapshot({
+          presentations: product.presentacionesEmpaque ?? [],
+          conversions: product.conversionesEmpaque ?? [],
+          purchasePresentationId: product.compraPresentacionId,
+        }),
+      })),
       suppliers: suppliers.map((supplier) => ({
         id: supplier.id,
         name: supplier.razonSocial,
@@ -1151,192 +1127,253 @@ export async function adjustInventoryLot(
     throw createHttpError(400, 'La cantidad del ajuste debe ser mayor a 0.')
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const lot = await getLotForOperation(tx, payload.lotId)
-    if (lot.sucursalId !== branchId) {
-      throw createHttpError(
-        403,
-        'No tienes permisos para ajustar lotes de otra sucursal.',
-      )
-    }
+  const auditBefore = {
+    lotId: payload.lotId,
+    target: payload.target,
+    operation: payload.operation,
+    requestedQuantity,
+    snapshot: null as unknown,
+  }
 
-    const basePresentation = resolveBasePresentation(lot.producto.presentacionesEmpaque ?? [])
-    if (!basePresentation) {
-      throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
-    }
-
-    const resolvedPresentation = resolvePresentationEntry({
-      operation: 'INVENTORY',
-      presentationId: payload.presentacionId,
-      presentations: lot.producto.presentacionesEmpaque ?? [],
-    })
-
-    if (!resolvedPresentation.ok) {
-      throw createHttpError(400, resolvedPresentation.error)
-    }
-
-    const edges = buildPackagingEdges(lot.producto.conversionesEmpaque ?? [])
-    const factor = resolveFactorToBase({
-      presentationId: payload.presentacionId,
-      basePresentationId: basePresentation.presentacion.id,
-      edges,
-    })
-
-    if (!factor) {
-      throw createHttpError(
-        400,
-        'No fue posible resolver la conversión hacia la presentación base del producto.',
-      )
-    }
-
-    const quantity = requestedQuantity * factor
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
-    }
-    const currentAvailable = decimalToNumber(lot.stockDisponible)
-    const currentReserved = decimalToNumber(lot.stockReservado)
-    const currentBlocked = decimalToNumber(lot.stockBloqueado)
-    let nextAvailable = currentAvailable
-    let nextReserved = currentReserved
-    let nextBlocked = currentBlocked
-    let movementType: TipoMovimientoInventario = TipoMovimientoInventario.AJUSTE
-    let signedQuantity: number = payload.operation === 'SUMAR' ? quantity : -quantity
-    let reference: string = 'Ajuste manual de inventario'
-
-    if (payload.target === 'DISPONIBLE') {
-      nextAvailable =
-        payload.operation === 'SUMAR'
-          ? currentAvailable + quantity
-          : currentAvailable - quantity
-
-      if (nextAvailable < 0) {
+  const lotId = await prisma.$transaction(
+    async (tx) => {
+      const lot = await getLotForOperation(tx, payload.lotId)
+      if (lot.sucursalId !== branchId) {
         throw createHttpError(
-          400,
-          'El ajuste excede el stock disponible actual del lote.',
+          403,
+          'No tienes permisos para ajustar lotes de otra sucursal.',
         )
       }
 
-      movementType =
-        payload.operation === 'SUMAR'
-          ? TipoMovimientoInventario.ENTRADA
-          : TipoMovimientoInventario.AJUSTE
-      reference =
-        payload.operation === 'SUMAR'
-          ? `Ingreso manual lote ${lot.numeroLote}`
-          : `Salida por ajuste lote ${lot.numeroLote}`
-    }
+      const packagingContext = resolvePackagingOperationContext({
+        operation: 'INVENTORY',
+        presentationId: payload.presentacionId,
+        presentations: lot.producto.presentacionesEmpaque ?? [],
+        conversions: lot.producto.conversionesEmpaque ?? [],
+      })
 
-    if (payload.target === 'RESERVADO') {
-      if (payload.operation === 'SUMAR') {
-        if (currentAvailable < quantity) {
-          throw createHttpError(
-            400,
-            'No hay stock disponible suficiente para reservar esa cantidad.',
-          )
-        }
-
-        nextAvailable = currentAvailable - quantity
-        nextReserved = currentReserved + quantity
-        movementType = TipoMovimientoInventario.RESERVA
-        signedQuantity = -quantity
-        reference = `Reserva operativa lote ${lot.numeroLote}`
-      } else {
-        if (currentReserved < quantity) {
-          throw createHttpError(
-            400,
-            'No hay stock reservado suficiente para liberar esa cantidad.',
-          )
-        }
-
-        nextReserved = currentReserved - quantity
-        nextAvailable = currentAvailable + quantity
-        movementType = TipoMovimientoInventario.LIBERACION
-        signedQuantity = quantity
-        reference = `Liberación de reserva lote ${lot.numeroLote}`
+      if (!packagingContext.ok) {
+        throw createHttpError(400, packagingContext.error)
       }
-    }
 
-    if (payload.target === 'BLOQUEADO') {
-      if (payload.operation === 'SUMAR') {
-        if (currentAvailable < quantity) {
-          throw createHttpError(
-            400,
-            'No hay stock disponible suficiente para bloquear esa cantidad.',
-          )
-        }
-
-        nextAvailable = currentAvailable - quantity
-        nextBlocked = currentBlocked + quantity
-        movementType = TipoMovimientoInventario.AJUSTE
-        signedQuantity = -quantity
-        reference = `Bloqueo operativo lote ${lot.numeroLote}`
-      } else {
-        if (currentBlocked < quantity) {
-          throw createHttpError(
-            400,
-            'No hay stock bloqueado suficiente para liberar esa cantidad.',
-          )
-        }
-
-        nextBlocked = currentBlocked - quantity
-        nextAvailable = currentAvailable + quantity
-        movementType = TipoMovimientoInventario.LIBERACION
-        signedQuantity = quantity
-        reference = `Liberación de bloqueo lote ${lot.numeroLote}`
+      const quantity = convertQuantityToBaseUnits({
+        quantity: requestedQuantity,
+        factorToBase: packagingContext.factorToBase,
+      })
+      if (quantity === null) {
+        throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
       }
-    }
+      const currentAvailable = decimalToNumber(lot.stockDisponible)
+      const currentReserved = decimalToNumber(lot.stockReservado)
+      const currentBlocked = decimalToNumber(lot.stockBloqueado)
 
-    const reason = await ensureMovementReason(tx, userId, {
-      code: `AJUSTE_${payload.target}_${payload.operation}`,
-      name: `Ajuste ${payload.target.toLowerCase()} ${payload.operation.toLowerCase()}`,
-      description: 'Movimiento operativo manual registrado desde el módulo de inventario.',
-      type: movementType,
-    })
+      auditBefore.snapshot = {
+        lotNumber: lot.numeroLote,
+        productId: lot.productoId,
+        productName: lot.producto?.nombre ?? null,
+        sku: lot.producto?.sku ?? null,
+        availableBefore: currentAvailable,
+        reservedBefore: currentReserved,
+        blockedBefore: currentBlocked,
+      }
 
-    const status = resolveLotStatus({
-      expiryDate: lot.fechaVencimiento,
-      availableUnits: nextAvailable,
-      reservedUnits: nextReserved,
-      blockedUnits: nextBlocked,
-    })
+      let nextAvailable = currentAvailable
+      let nextReserved = currentReserved
+      let nextBlocked = currentBlocked
+      let movementType: TipoMovimientoInventario = TipoMovimientoInventario.AJUSTE
+      let signedQuantity: number = payload.operation === 'SUMAR' ? quantity : -quantity
+      let reference: string = 'Ajuste manual de inventario'
+      let auditAction = ''
+      let auditAfterDescription = ''
 
-    await tx.lote.update({
-      where: {
-        id: lot.id,
-      },
-      data: {
-        stockDisponible: nextAvailable,
-        stockReservado: nextReserved,
-        stockBloqueado: nextBlocked,
-        estado: status,
-        observaciones: toOptionalString(payload.observaciones) ?? lot.observaciones ?? undefined,
-        updatedById: userId,
-      },
-    })
+      if (payload.target === 'DISPONIBLE') {
+        nextAvailable =
+          payload.operation === 'SUMAR'
+            ? currentAvailable + quantity
+            : currentAvailable - quantity
 
-    await tx.movimientoInventario.create({
-      data: {
-        sucursalId: lot.sucursalId,
-        productoId: lot.productoId,
-        loteId: lot.id,
-        motivoId: reason.id,
-        tipo: movementType,
-        origen: OrigenMovimientoInventario.AJUSTE,
-        cantidad: signedQuantity,
-        costoUnitario: lot.costoUnitario,
-        stockResultante: nextAvailable,
-        referencia: reference,
-        observaciones: toOptionalString(payload.observaciones),
-        createdById: userId,
-        updatedById: userId,
-      },
-    })
+        if (nextAvailable < 0) {
+          throw createHttpError(
+            400,
+            'No puedes restar una cantidad mayor al stock disponible.',
+          )
+        }
 
-    return buildLotResponse(tx, lot.id)
-  })
+        if (payload.operation === 'SUMAR') {
+          movementType = TipoMovimientoInventario.ENTRADA
+          auditAction = 'Ajuste disponible (sumar)'
+          auditAfterDescription = `Sumaron ${quantity} unidad(es) base a disponible.`
+          reference = `Ingreso manual lote ${lot.numeroLote}`
+        } else {
+          movementType = TipoMovimientoInventario.AJUSTE
+          auditAction = 'Ajuste disponible (restar)'
+          auditAfterDescription = `Restaron ${quantity} unidad(es) base a disponible.`
+          reference = `Salida por ajuste lote ${lot.numeroLote}`
+        }
+      }
+
+      if (payload.target === 'RESERVADO') {
+        if (payload.operation === 'SUMAR') {
+          if (currentAvailable < quantity) {
+            throw createHttpError(
+              400,
+              'No puedes reservar más de lo disponible en stock.',
+            )
+          }
+
+          nextAvailable = currentAvailable - quantity
+          nextReserved = currentReserved + quantity
+          movementType = TipoMovimientoInventario.RESERVA
+          signedQuantity = -quantity
+          auditAction = 'Ajuste reservado (sumar)'
+          auditAfterDescription = `Pasaron ${quantity} unidad(es) base de disponible a reservado.`
+          reference = `Reserva operativa lote ${lot.numeroLote}`
+        } else {
+          if (currentReserved < quantity) {
+            throw createHttpError(
+              400,
+              'No puedes liberar más de lo reservado actualmente.',
+            )
+          }
+
+          nextReserved = currentReserved - quantity
+          nextAvailable = currentAvailable + quantity
+          movementType = TipoMovimientoInventario.LIBERACION
+          signedQuantity = quantity
+          auditAction = 'Ajuste reservado (restar)'
+          auditAfterDescription = `Liberaron ${quantity} unidad(es) base de reservado a disponible.`
+          reference = `Liberación de reserva lote ${lot.numeroLote}`
+        }
+      }
+
+      if (payload.target === 'BLOQUEADO') {
+        if (payload.operation === 'SUMAR') {
+          if (currentAvailable < quantity) {
+            throw createHttpError(
+              400,
+              'No puedes bloquear más de lo disponible en stock.',
+            )
+          }
+
+          nextAvailable = currentAvailable - quantity
+          nextBlocked = currentBlocked + quantity
+          movementType = TipoMovimientoInventario.AJUSTE
+          signedQuantity = -quantity
+          auditAction = 'Ajuste bloqueado (sumar)'
+          auditAfterDescription = `Pasaron ${quantity} unidad(es) base de disponible a bloqueado.`
+          reference = `Bloqueo operativo lote ${lot.numeroLote}`
+        } else {
+          if (currentBlocked < quantity) {
+            throw createHttpError(
+              400,
+              'No puedes liberar más de lo bloqueado actualmente.',
+            )
+          }
+
+          nextBlocked = currentBlocked - quantity
+          nextAvailable = currentAvailable + quantity
+          movementType = TipoMovimientoInventario.LIBERACION
+          signedQuantity = quantity
+          auditAction = 'Ajuste bloqueado (restar)'
+          auditAfterDescription = `Liberaron ${quantity} unidad(es) base de bloqueado a disponible.`
+          reference = `Liberación de bloqueo lote ${lot.numeroLote}`
+        }
+      }
+
+      const reason = await ensureMovementReason(tx, userId, {
+        code: `AJUSTE_${payload.target}_${payload.operation}`,
+        name: `Ajuste ${payload.target.toLowerCase()} ${payload.operation.toLowerCase()}`,
+        description: 'Movimiento operativo manual registrado desde el módulo de inventario.',
+        type: movementType,
+      })
+
+      const status = resolveLotStatus({
+        expiryDate: lot.fechaVencimiento,
+        availableUnits: nextAvailable,
+        reservedUnits: nextReserved,
+        blockedUnits: nextBlocked,
+      })
+
+      await tx.lote.update({
+        where: {
+          id: lot.id,
+        },
+        data: {
+          stockDisponible: nextAvailable,
+          stockReservado: nextReserved,
+          stockBloqueado: nextBlocked,
+          estado: status,
+          observaciones: toOptionalString(payload.observaciones) ?? lot.observaciones ?? undefined,
+          updatedById: userId,
+        },
+      })
+
+      await tx.movimientoInventario.create({
+        data: {
+          sucursalId: lot.sucursalId,
+          productoId: lot.productoId,
+          loteId: lot.id,
+          motivoId: reason.id,
+          tipo: movementType,
+          origen: OrigenMovimientoInventario.AJUSTE,
+          cantidad: signedQuantity,
+          costoUnitario: lot.costoUnitario,
+          stockResultante: nextAvailable,
+          referencia: reference,
+          observaciones: toOptionalString(payload.observaciones),
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+
+      await tx.auditoria.create({
+        data: {
+          usuarioId: userId,
+          tabla: 'lote',
+          registroId: lot.id,
+          accion: AccionAuditoria.UPDATE,
+          fechaEvento: new Date(),
+          valorAnterior: {
+            ...auditBefore,
+            resumen: auditAction || 'Ajuste operativo de lote',
+            detalles: auditAfterDescription || null,
+          } as unknown as Prisma.InputJsonValue,
+          valorNuevo: {
+            lotId: payload.lotId,
+            target: payload.target,
+            operation: payload.operation,
+            requestedQuantity,
+            observaciones: toOptionalString(payload.observaciones) ?? null,
+            resumen: auditAction || 'Ajuste operativo de lote',
+            detalles: auditAfterDescription || null,
+            snapshot: {
+              lotNumber: lot.numeroLote,
+              productId: lot.productoId,
+              productName: lot.producto?.nombre ?? null,
+              sku: lot.producto?.sku ?? null,
+              availableAfter: nextAvailable,
+              reservedAfter: nextReserved,
+              blockedAfter: nextBlocked,
+              newStatus: status,
+            },
+          } as unknown as Prisma.InputJsonValue,
+          createdById: userId,
+          updatedById: userId,
+        },
+      })
+
+      return lot.id
+    },
+    {
+      timeout: 20000,
+      maxWait: 25000,
+    },
+  )
+
+  const item = await buildLotResponse(prisma, lotId)
 
   return {
-    item: result,
+    item,
   }
 }
 
@@ -1355,8 +1392,9 @@ export async function transferInventoryLot(
     throw createHttpError(400, 'La cantidad a transferir debe ser mayor a 0.')
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const sourceLot = await getLotForOperation(tx, payload.lotId)
+  const sourceLotId = await prisma.$transaction(
+    async (tx) => {
+      const sourceLot = await getLotForOperation(tx, payload.lotId)
     if (sourceLot.sucursalId !== branchId) {
       throw createHttpError(
         403,
@@ -1365,37 +1403,22 @@ export async function transferInventoryLot(
     }
     const sourceAvailable = decimalToNumber(sourceLot.stockDisponible)
 
-    const basePresentation = resolveBasePresentation(sourceLot.producto.presentacionesEmpaque ?? [])
-    if (!basePresentation) {
-      throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
-    }
-
-    const resolvedPresentation = resolvePresentationEntry({
+    const packagingContext = resolvePackagingOperationContext({
       operation: 'INVENTORY',
       presentationId: payload.presentacionId,
       presentations: sourceLot.producto.presentacionesEmpaque ?? [],
+      conversions: sourceLot.producto.conversionesEmpaque ?? [],
     })
 
-    if (!resolvedPresentation.ok) {
-      throw createHttpError(400, resolvedPresentation.error)
+    if (!packagingContext.ok) {
+      throw createHttpError(400, packagingContext.error)
     }
 
-    const edges = buildPackagingEdges(sourceLot.producto.conversionesEmpaque ?? [])
-    const factor = resolveFactorToBase({
-      presentationId: payload.presentacionId,
-      basePresentationId: basePresentation.presentacion.id,
-      edges,
+    const quantity = convertQuantityToBaseUnits({
+      quantity: requestedQuantity,
+      factorToBase: packagingContext.factorToBase,
     })
-
-    if (!factor) {
-      throw createHttpError(
-        400,
-        'No fue posible resolver la conversión hacia la presentación base del producto.',
-      )
-    }
-
-    const quantity = requestedQuantity * factor
-    if (!Number.isFinite(quantity) || quantity <= 0) {
+    if (quantity === null) {
       throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
     }
 
@@ -1585,10 +1608,17 @@ export async function transferInventoryLot(
       ],
     })
 
-    return buildLotResponse(tx, sourceLot.id)
-  })
+    return sourceLot.id
+  },
+  {
+    timeout: 20000,
+    maxWait: 25000,
+  },
+)
+
+  const item = await buildLotResponse(prisma, sourceLotId)
 
   return {
-    item: result,
+    item,
   }
 }

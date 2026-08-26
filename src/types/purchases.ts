@@ -1,7 +1,11 @@
+import type { PaymentMethodCode, PaymentCategory, DigitalSubmethod } from './cashier'
+
 export type PurchaseOrderStatus =
   | 'BORRADOR'
   | 'REGISTRADA'
+  | 'ENVIADA'
   | 'PARCIAL'
+  | 'RECIBIDA'
   | 'PAGADA'
   | 'ANULADA'
 
@@ -122,16 +126,21 @@ export type PurchasesDashboardResponse = {
     }>
     paymentMethods: Array<{
       id: string
-      code: string
+      code: PaymentMethodCode
       name: string
+      category: PaymentCategory
+      digitalSubmethod: DigitalSubmethod | null
       requiresReference: boolean
     }>
     products: Array<{
       id: string
       name: string
       sku: string
+      internalCode?: string | null
+      barcode?: string | null
+      laboratory?: string | null
       unitSymbol: string
-      referenceCost: number
+      lastPurchaseCost: number
       packaging: {
         basePresentationId: string | null
         purchasePresentationId: string | null
@@ -170,6 +179,7 @@ export type ReceivePurchaseItemPayload = {
   fechaFabricacion?: string
   fechaVencimiento: string
   cantidadRecibida: number
+  costoUnitarioRecepcion?: number
   stockReservado?: number
   stockBloqueado?: number
   almacen?: string
@@ -196,4 +206,57 @@ export type RegisterPurchasePaymentPayload = {
   fechaPago?: string
   referenciaExterna?: string
   observaciones?: string
+}
+
+export type PurchaseOrderDetailItem = {
+  detailId: string
+  productId: string
+  productName: string
+  sku: string
+  unitSymbol: string
+  presentationId: string
+  presentationName: string
+  presentationFactor: number
+  presentationQuantity: number
+  baseQuantity: number
+  unitCostPresentation: number
+  unitCostBase: number
+  taxRate: number
+  subtotal: number
+  taxAmount: number
+  total: number
+  receivedBaseUnits: number
+  receivedPresentationUnits: number
+  packaging: PurchasesDashboardResponse['options']['products'][number]['packaging']
+}
+
+export type PurchaseOrderDetail = {
+  order: PurchasesDashboardResponse['orders'][number]
+  items: PurchaseOrderDetailItem[]
+  company: {
+    razonSocial: string
+    nombreComercial: string | null
+    numeroDocumento: string
+    direccion: string | null
+    logoUrl: string | null
+    monedaBase: string
+    igvPorDefecto: number
+  }
+  supplier: {
+    id: string
+    razonSocial: string
+    numeroDocumento: string
+    contactoTelefono: string | null
+  }
+  branch: {
+    id: string
+    nombre: string
+  }
+  buyer: {
+    id: string
+    fullName: string
+  }
+  fechaEmision: string | null
+  fechaRecepcionEsperada: string | null
+  observaciones: string | null
 }

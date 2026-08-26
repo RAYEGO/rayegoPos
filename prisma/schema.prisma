@@ -1576,7 +1576,9 @@ enum EstadoLote {
 enum EstadoCompra {
   BORRADOR
   REGISTRADA
+  ENVIADA
   PARCIAL
+  RECIBIDA
   PAGADA
   ANULADA
 }

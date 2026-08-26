@@ -42,8 +42,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
+import { getMethodVariant } from '@/lib/payment-methods'
 import { ReceiptDialog } from '@/components/sales/ReceiptDialog'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { salesService } from '@/services/salesService'
 import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } from '@/types/sales'
@@ -171,10 +174,7 @@ function getSaleStatusVariant(status: SalesDashboardResponse['recentSales'][numb
 function getPaymentVariant(
   method: SalesDashboardResponse['recentSales'][number]['paymentMethods'][number],
 ) {
-  if (method === 'EFECTIVO') return 'success'
-  if (method === 'TARJETA') return 'info'
-  if (method === 'YAPE' || method === 'PLIN') return 'warning'
-  return 'outline'
+  return getMethodVariant(method)
 }
 
 function clampQuantity(value: number, max: number) {
@@ -220,7 +220,8 @@ export function VentasPage() {
 
   const [dashboard, setDashboard] = useState<SalesDashboardResponse | null>(null)
   const [search, setSearch] = useState('')
-  const [branchFilter, setBranchFilter] = useState<string>('TODAS')
+  const [categoryFilter, setCategoryFilter] = useState<string>('TODAS')
+  const [availabilityFilter, setAvailabilityFilter] = useState<'TODOS' | 'CON_STOCK' | 'SIN_STOCK'>('TODOS')
   const [medicationTypeFilter, setMedicationTypeFilter] = useState<string>('TODOS')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -231,9 +232,7 @@ export function VentasPage() {
   const [receiptPayload, setReceiptPayload] = useState<SaleReceiptResponse | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleUnauthorized = useCallback(async () => {
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('VentasPage')
 
   const checkoutForm = useForm<SaleCheckoutFormValues>({
     resolver: zodResolver(saleCheckoutSchema),
@@ -272,7 +271,8 @@ export function VentasPage() {
     try {
       const response = await salesService.getDashboard(accessToken, {
         search,
-        branchId: branchFilter === 'TODAS' ? undefined : branchFilter,
+        categoryId: categoryFilter === 'TODAS' ? undefined : categoryFilter,
+        availability: availabilityFilter,
         commercialTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
       })
 
@@ -282,7 +282,7 @@ export function VentasPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, branchFilter, medicationTypeFilter, search])
+  }, [accessToken, categoryFilter, availabilityFilter, medicationTypeFilter, search])
 
   useEffect(() => {
     void loadDashboard()
@@ -660,12 +660,15 @@ export function VentasPage() {
         cantidad: item.quantity,
         presentacionId: item.presentationId ?? '',
       })),
-      payments: values.payments.map((payment) => ({
-        formaPagoId: payment.formaPagoId,
-        monto: payment.monto,
-        referenciaExterna: payment.referenciaExterna,
-        observaciones: payment.observaciones,
-      })),
+      payments: values.payments.map((payment) => {
+        const reference = payment.referenciaExterna?.trim()
+        return {
+          formaPagoId: payment.formaPagoId,
+          monto: payment.monto,
+          referenciaExterna: reference ? reference : undefined,
+          observaciones: payment.observaciones,
+        }
+      }),
     }
 
     setIsSubmitting(true)
@@ -737,30 +740,27 @@ export function VentasPage() {
                   className="pl-9"
                 />
               </div>
-              <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Sucursal" />
+                  <SelectValue placeholder="Categoría" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="TODAS">Todas</SelectItem>
-                  {options.branches.map((branch) => (
-                    <SelectItem key={branch.id} value={branch.id}>
-                      {branch.name}
+                  <SelectItem value="TODAS">Todas las categorías</SelectItem>
+                  {(options?.categories ?? []).map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={medicationTypeFilter} onValueChange={setMedicationTypeFilter}>
+              <Select value={availabilityFilter} onValueChange={(value) => setAvailabilityFilter(value as any)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Tipo comercial" />
+                  <SelectValue placeholder="Disponibilidad" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="TODOS">Todos</SelectItem>
-                  {options.commercialTypes.map((type) => (
-                    <SelectItem key={type.id} value={type.id}>
-                      {type.name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="TODOS">Todos los productos</SelectItem>
+                  <SelectItem value="CON_STOCK">Con stock disponible</SelectItem>
+                  <SelectItem value="SIN_STOCK">Sin stock disponible</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1376,44 +1376,25 @@ export function VentasPage() {
                     </Button>
                   </div>
 
-                  <div className="mt-4 space-y-4">
+                  <div className="mt-4 space-y-6">
                     {paymentFields.map((field, index) => {
                       const selectedMethod = selectedPaymentMethods[index]
 
                       return (
                         <div
                           key={field.id}
-                          className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2 xl:grid-cols-[1.2fr_0.8fr_1fr_auto]"
+                          className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2 xl:grid-cols-[1.4fr_0.8fr_1fr_auto]"
                         >
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Forma de pago</label>
-                            <Controller
-                              control={checkoutForm.control}
-                              name={`payments.${index}.formaPagoId`}
-                              render={({ field: inputField }) => (
-                                <Select
-                                  value={inputField.value || undefined}
-                                  onValueChange={inputField.onChange}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Selecciona forma de pago" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {options.paymentMethods.map((method) => (
-                                      <SelectItem key={method.id} value={method.id}>
-                                        {method.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            />
-                            <FieldError
-                              message={
-                                checkoutForm.formState.errors.payments?.[index]?.formaPagoId?.message
-                              }
-                            />
-                          </div>
+                          <FormPaymentMethodTwoLevelSelect
+                            control={checkoutForm.control}
+                            name={`payments.${index}.formaPagoId`}
+                            methods={options.paymentMethods}
+                            label="Medio de pago"
+                            placeholderCategory="Selecciona medio de pago"
+                            placeholderSubmethod="Selecciona tipo"
+                            id={`sale-payment-${index}`}
+                            required
+                          />
 
                           <div className="space-y-2">
                             <label className="text-sm font-medium">Monto</label>
@@ -1430,14 +1411,15 @@ export function VentasPage() {
                           </div>
 
                           <div className="space-y-2">
-                            <label className="text-sm font-medium">Referencia</label>
+                            <label className="text-sm font-medium">
+                              Referencia
+                              <span className="ml-1 text-xs font-normal text-muted-foreground">
+                                (opcional)
+                              </span>
+                            </label>
                             <Input
                               {...checkoutForm.register(`payments.${index}.referenciaExterna`)}
-                              placeholder={
-                                selectedMethod?.requiresReference
-                                  ? 'Voucher, operación o nro. externo'
-                                  : 'Opcional'
-                              }
+                              placeholder="Código de operación, voucher, N° externo..."
                             />
                             <FieldError
                               message={

@@ -1,3 +1,4 @@
+import { ProductActivePrinciplesManager } from '@/components/products/active-principles-manager/ProductActivePrinciplesManager'
 import { ProductCategoriesManager } from '@/components/products/categories-manager/ProductCategoriesManager'
 import { ProductLaboratoriesManager } from '@/components/products/laboratories-manager/ProductLaboratoriesManager'
 import { ProductMedicationTypesManager } from '@/components/products/medication-types-manager/ProductMedicationTypesManager'
@@ -9,13 +10,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export type ProductMastersCenterProps = {
   accessToken: string
-  onCategoriesChanged?: () => void
+  onMastersChanged?: () => void
   canManageMasters: boolean
 }
 
 export function ProductMastersCenter({
   accessToken,
-  onCategoriesChanged,
+  onMastersChanged,
   canManageMasters,
 }: ProductMastersCenterProps) {
   return (
@@ -32,6 +33,7 @@ export function ProductMastersCenter({
           <TabsTrigger value="categorias">Categorías</TabsTrigger>
           <TabsTrigger value="laboratorios">Laboratorios</TabsTrigger>
           <TabsTrigger value="tiposMedicamento">Tipos comerciales</TabsTrigger>
+          <TabsTrigger value="principiosActivos">Principios activos</TabsTrigger>
           <TabsTrigger value="presentaciones">Presentaciones</TabsTrigger>
           <TabsTrigger value="unidadesMedida">Unidades de medida</TabsTrigger>
           <TabsTrigger value="tiposEmpaque">Tipos de empaque</TabsTrigger>
@@ -40,7 +42,7 @@ export function ProductMastersCenter({
         <TabsContent value="categorias" className="mt-4">
           <ProductCategoriesManager
             accessToken={accessToken}
-            onCategoriesChanged={onCategoriesChanged}
+            onCategoriesChanged={onMastersChanged}
             canManage={canManageMasters}
           />
         </TabsContent>
@@ -51,6 +53,14 @@ export function ProductMastersCenter({
 
         <TabsContent value="tiposMedicamento" className="mt-4">
           <ProductMedicationTypesManager accessToken={accessToken} canManage={canManageMasters} />
+        </TabsContent>
+
+        <TabsContent value="principiosActivos" className="mt-4">
+          <ProductActivePrinciplesManager
+            accessToken={accessToken}
+            canManage={canManageMasters}
+            onChanged={onMastersChanged}
+          />
         </TabsContent>
 
         <TabsContent value="presentaciones" className="mt-4">

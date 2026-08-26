@@ -1,8 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
+  ChevronDown,
   MoreVertical,
   Edit,
   Plus,
@@ -48,6 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { customersService } from '@/services/customersService'
 import type {
@@ -57,8 +59,11 @@ import type {
   CustomerSalesResponse,
   CustomerStatusFilter,
   CustomersDashboardResponse,
+  RegisterCustomerPaymentPayload,
 } from '@/types/customers'
 import { toast } from 'sonner'
+import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
+import type { PaymentMethodOption } from '@/lib/payment-methods'
 
 const optionalEmailSchema = z
   .string()
@@ -68,8 +73,12 @@ const optionalEmailSchema = z
 const customerFormSchema = z
   .object({
     tipoPersona: z.string().min(1, 'Selecciona el tipo de persona.'),
-    tipoDocumento: z.string().optional(),
-    numeroDocumento: z.string().max(20).optional(),
+    tipoDocumento: z.string().min(1, 'Selecciona el tipo de documento.'),
+    numeroDocumento: z
+      .string()
+      .trim()
+      .min(1, 'Ingresa el número de documento.')
+      .max(20, 'Máximo 20 caracteres.'),
     nombres: z.string().max(120).optional(),
     apellidos: z.string().max(120).optional(),
     razonSocial: z.string().max(200).optional(),
@@ -105,6 +114,21 @@ const customerFormSchema = z
   })
 
 type CustomerFormValues = z.infer<typeof customerFormSchema>
+
+const customerPaymentSchema = z
+  .object({
+    monto: z
+      .number({
+        required_error: 'Ingresa el monto a pagar.',
+        invalid_type_error: 'Ingresa un monto válido.',
+      })
+      .min(0.01, 'El monto debe ser mayor a 0.'),
+    formaPagoId: z.string().min(1, 'Selecciona un medio de pago.'),
+    referenciaExterna: z.string().max(120).optional().nullable(),
+    observaciones: z.string().max(255).optional().nullable(),
+  })
+
+type CustomerPaymentFormValues = z.infer<typeof customerPaymentSchema>
 
 const defaultDashboard: CustomersDashboardResponse = {
   summary: {
@@ -214,22 +238,8 @@ function CustomerAutocomplete({
   onValueChange: (value: string) => void
   placeholder: string
 }) {
-  const selectedCustomer = useMemo(
-    () => customers.find((customer) => customer.id === value) ?? null,
-    [customers, value],
-  )
   const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
-
-  useEffect(() => {
-    if (!selectedCustomer) {
-      setQuery('')
-      return
-    }
-
-    const document = selectedCustomer.numeroDocumento ? ` · ${selectedCustomer.numeroDocumento}` : ''
-    setQuery(`${getCustomerDisplayName(selectedCustomer)}${document}`)
-  }, [selectedCustomer])
 
   const filteredCustomers = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -260,15 +270,20 @@ function CustomerAutocomplete({
               filteredCustomers.map((customer) => {
                 const name = getCustomerDisplayName(customer)
                 const document = customer.numeroDocumento ? ` · ${customer.numeroDocumento}` : ''
+                const isActive = customer.id === value
 
                 return (
                   <button
                     key={customer.id}
                     type="button"
-                    className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted/60"
+                    className={
+                      'flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm ' +
+                      (isActive ? 'bg-muted/80' : 'hover:bg-muted/60')
+                    }
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => {
                       onValueChange(customer.id)
+                      setQuery('')
                       setIsOpen(false)
                     }}
                   >
@@ -321,7 +336,7 @@ function FieldError({ message }: { message?: string }) {
 }
 
 export function ClientesPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
   const [activeTab, setActiveTab] = useState<'padron' | 'historial-compras' | 'estado-cuenta'>(
@@ -347,13 +362,28 @@ export function ClientesPage() {
   const [deleteTarget, setDeleteTarget] = useState<CustomerItem | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
+  const [isPaymentSubmitting, setIsPaymentSubmitting] = useState(false)
+  const [paymentMethodResetKey, setPaymentMethodResetKey] = useState(0)
+  const paymentAmountInputRef = useRef<HTMLInputElement | null>(null)
 
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: defaultFormValues,
   })
 
+  const paymentForm = useForm<CustomerPaymentFormValues>({
+    resolver: zodResolver(customerPaymentSchema),
+    defaultValues: {
+      monto: 0,
+      formaPagoId: '',
+      referenciaExterna: null,
+      observaciones: null,
+    },
+  })
+
   const formTipoPersona = form.watch('tipoPersona')
+  const formTipoDocumento = form.watch('tipoDocumento')
   const formPermitirCredito = form.watch('permitirCredito')
 
   const selectedCustomer = useMemo(() => {
@@ -378,10 +408,7 @@ export function ClientesPage() {
     return { creditLimit, outstanding, available }
   }, [accountStatement, selectedCustomer])
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('ClientesPage')
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -471,7 +498,9 @@ export function ClientesPage() {
   useEffect(() => {
     if (!selectedCustomerId) {
       setCustomerSales([])
+      setCustomerSalesError(null)
       setAccountStatement(null)
+      setAccountStatementError(null)
       return
     }
 
@@ -484,6 +513,149 @@ export function ClientesPage() {
       void loadAccountStatement(selectedCustomerId)
     }
   }, [activeTab, loadAccountStatement, loadCustomerSales, selectedCustomerId])
+
+  function handleClearSelectedClient() {
+    setSelectedCustomerId('')
+    setCustomerSales([])
+    setCustomerSalesError(null)
+    setAccountStatement(null)
+    setAccountStatementError(null)
+    setIsPaymentDialogOpen(false)
+    paymentForm.reset({
+      monto: 0,
+      formaPagoId: '',
+      referenciaExterna: null,
+      observaciones: null,
+    })
+  }
+
+  function openPaymentDialog() {
+    const outstanding = accountStatement?.totals?.outstandingAmount ?? 0
+    const defaultAmount = Number(outstanding.toFixed(2))
+    paymentForm.reset({
+      monto: defaultAmount,
+      formaPagoId: '',
+      referenciaExterna: null,
+      observaciones: null,
+    })
+    setPaymentMethodResetKey((prev) => prev + 1)
+    setIsPaymentDialogOpen(true)
+    window.requestAnimationFrame(() => {
+      if (paymentAmountInputRef.current) {
+        paymentAmountInputRef.current.value = defaultAmount > 0 ? defaultAmount.toFixed(2) : ''
+      }
+    })
+  }
+
+  async function handleSubmitPayment() {
+    if (!selectedCustomerId) {
+      return
+    }
+
+    const maxAmount = accountStatement?.totals?.outstandingAmount ?? 0
+    let rawAmount = 0
+    if (paymentAmountInputRef.current) {
+      const raw = paymentAmountInputRef.current.value
+      if (raw === '' || raw === null || raw === undefined) {
+        paymentForm.setError('monto', {
+          type: 'manual',
+          message: 'Ingresa el monto a pagar.',
+        })
+        return
+      }
+      const parsed = Number(raw)
+      if (!Number.isFinite(parsed)) {
+        paymentForm.setError('monto', {
+          type: 'manual',
+          message: 'Ingresa un monto válido.',
+        })
+        return
+      }
+      rawAmount = parsed
+    } else {
+      rawAmount = Number(paymentForm.getValues('monto'))
+    }
+
+    const amount = Number(rawAmount.toFixed(2))
+
+    if (amount <= 0) {
+      paymentForm.setError('monto', {
+        type: 'manual',
+        message: 'El monto debe ser mayor a 0.',
+      })
+      return
+    }
+
+    if (amount > maxAmount + 0.0001) {
+      paymentForm.setError('monto', {
+        type: 'manual',
+        message: `El monto no puede superar el saldo pendiente de ${formatCurrency(
+          maxAmount,
+        )}.`,
+      })
+      return
+    }
+
+    paymentForm.setValue('monto', amount, { shouldValidate: true })
+
+    const formaPagoId = paymentForm.getValues('formaPagoId')
+    if (!formaPagoId?.trim()) {
+      paymentForm.setError('formaPagoId', {
+        type: 'manual',
+        message: 'Selecciona un medio de pago.',
+      })
+      return
+    }
+
+    const isValid = await paymentForm.trigger()
+    if (!isValid) {
+      return
+    }
+
+    const values = paymentForm.getValues()
+
+    setIsPaymentSubmitting(true)
+    try {
+      const payload: RegisterCustomerPaymentPayload = {
+        monto: Number(values.monto.toFixed(2)),
+        formaPagoId: values.formaPagoId,
+        referenciaExterna: values.referenciaExterna?.trim() || null,
+        observaciones: values.observaciones?.trim() || null,
+      }
+
+      const response = await customersService.registerPayment(
+        accessToken,
+        selectedCustomerId,
+        payload,
+      )
+
+      toast.success(
+        `Pago de ${formatCurrency(payload.monto)} registrado. Nuevo saldo: ${formatCurrency(
+          response.newBalance,
+        )}`,
+      )
+      setIsPaymentDialogOpen(false)
+      paymentForm.reset({
+        monto: 0,
+        formaPagoId: '',
+        referenciaExterna: null,
+        observaciones: null,
+      })
+
+      await Promise.all([
+        loadAccountStatement(selectedCustomerId),
+        loadCustomerSales(selectedCustomerId),
+      ])
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(nextError))
+    } finally {
+      setIsPaymentSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     if (!selectedCustomerId) {
@@ -509,7 +681,7 @@ export function ClientesPage() {
     form.reset({
       ...defaultFormValues,
       tipoPersona: dashboard.options.tiposPersona[0] ?? 'NATURAL',
-      tipoDocumento: '',
+      tipoDocumento: dashboard.options.tiposDocumento[0] ?? '',
       activo: true,
     })
     setIsDialogOpen(true)
@@ -627,6 +799,13 @@ export function ClientesPage() {
       setIsDeleting(false)
     }
   }
+
+  const documentInputPlaceholder = useMemo(() => {
+    if (formTipoDocumento === 'RUC') return 'Número de RUC'
+    if (formTipoDocumento === 'DNI') return 'Número de DNI'
+    if (formTipoDocumento === 'CE') return 'Carné de extranjería'
+    return 'Número de documento'
+  }, [formTipoDocumento])
 
   return (
     <div className="space-y-4 p-4">
@@ -887,7 +1066,7 @@ export function ClientesPage() {
 
         <TabsContent value="historial-compras" className="space-y-4 pt-4">
           <Card className="p-4">
-            <div className="grid gap-3 md:grid-cols-[1fr_260px]">
+            <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">Historial de compras</p>
                 <p className="text-xs text-muted-foreground">
@@ -903,13 +1082,43 @@ export function ClientesPage() {
                 placeholder="Buscar cliente por nombre o documento"
               />
             </div>
+
+            {selectedCustomer ? (
+              <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Cliente seleccionado
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                      {getCustomerDisplayName(selectedCustomer)}
+                      {selectedCustomer.tipoDocumento && selectedCustomer.numeroDocumento
+                        ? ` · ${selectedCustomer.tipoDocumento} ${selectedCustomer.numeroDocumento}`
+                        : ''}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={handleClearSelectedClient}
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Limpiar cliente</span>
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
 
           {!selectedCustomer ? (
             <div className="rounded-xl border border-dashed p-8 text-center">
-              <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              <p className="text-sm font-medium text-foreground">
+                Selecciona un cliente para consultar su historial de compras.
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Usa el selector superior o el padrón para ver su historial de compras.
+                Usa el buscador superior o el padrón para comenzar.
               </p>
               <Button
                 type="button"
@@ -994,7 +1203,7 @@ export function ClientesPage() {
 
         <TabsContent value="estado-cuenta" className="space-y-4 pt-4">
           <Card className="p-4">
-            <div className="grid gap-3 md:grid-cols-[1fr_260px]">
+            <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">Estado de cuenta</p>
                 <p className="text-xs text-muted-foreground">
@@ -1010,13 +1219,43 @@ export function ClientesPage() {
                 placeholder="Buscar cliente por nombre o documento"
               />
             </div>
+
+            {selectedCustomer ? (
+              <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Cliente seleccionado
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                      {getCustomerDisplayName(selectedCustomer)}
+                      {selectedCustomer.tipoDocumento && selectedCustomer.numeroDocumento
+                        ? ` · ${selectedCustomer.tipoDocumento} ${selectedCustomer.numeroDocumento}`
+                        : ''}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={handleClearSelectedClient}
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Limpiar cliente</span>
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
 
-          {!selectedCustomer || !accountSummary ? (
+          {!selectedCustomer || !accountStatement?.totals ? (
             <div className="rounded-xl border border-dashed p-8 text-center">
-              <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              <p className="text-sm font-medium text-foreground">
+                Selecciona un cliente para consultar su saldo y movimientos.
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                El estado de cuenta se muestra por cliente.
+                Usa el buscador superior o el padrón para comenzar.
               </p>
               <Button
                 type="button"
@@ -1039,23 +1278,42 @@ export function ClientesPage() {
             <>
               <div className="grid gap-3 md:grid-cols-3">
                 <Card className="p-4">
-                  <p className="text-xs text-muted-foreground">Límite de crédito</p>
+                  <p className="text-xs text-muted-foreground">Total comprado</p>
                   <p className="mt-2 text-lg font-semibold text-foreground">
-                    {formatCurrency(accountSummary.creditLimit)}
+                    {formatCurrency(accountStatement.totals.totalPurchased)}
+                  </p>
+                </Card>
+                <Card className="p-4">
+                  <p className="text-xs text-muted-foreground">Total pagado</p>
+                  <p className="mt-2 text-lg font-semibold text-emerald-600">
+                    {formatCurrency(accountStatement.totals.totalPaid)}
                   </p>
                 </Card>
                 <Card className="p-4">
                   <p className="text-xs text-muted-foreground">Saldo pendiente</p>
-                  <p className="mt-2 text-lg font-semibold text-foreground">
-                    {formatCurrency(accountSummary.outstanding)}
+                  <p
+                    className={
+                      'mt-2 text-lg font-semibold ' +
+                      (accountStatement.totals.outstandingAmount > 0
+                        ? 'text-rose-600'
+                        : 'text-emerald-600')
+                    }
+                  >
+                    {formatCurrency(accountStatement.totals.outstandingAmount)}
                   </p>
                 </Card>
-                <Card className="p-4">
-                  <p className="text-xs text-muted-foreground">Crédito disponible</p>
-                  <p className="mt-2 text-lg font-semibold text-foreground">
-                    {formatCurrency(accountSummary.available)}
-                  </p>
-                </Card>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={openPaymentDialog}
+                  disabled={
+                    accountStatement.totals.outstandingAmount <= 0 || accountStatementLoading
+                  }
+                >
+                  Registrar pago
+                </Button>
               </div>
 
               <Card>
@@ -1066,6 +1324,7 @@ export function ClientesPage() {
                         <TableHead>Fecha</TableHead>
                         <TableHead>Tipo de movimiento</TableHead>
                         <TableHead>Documento</TableHead>
+                        <TableHead>Medio</TableHead>
                         <TableHead className="text-right">Cargo</TableHead>
                         <TableHead className="text-right">Abono</TableHead>
                         <TableHead className="text-right">Saldo</TableHead>
@@ -1080,8 +1339,22 @@ export function ClientesPage() {
                             </TableCell>
                             <TableCell className="font-medium text-foreground">
                               {movement.movement}
+                              {movement.reference ? (
+                                <span className="block text-xs font-normal text-muted-foreground">
+                                  Ref. {movement.reference}
+                                </span>
+                              ) : null}
                             </TableCell>
                             <TableCell className="text-muted-foreground">{movement.document}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {movement.paymentMethodName ? (
+                                <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+                                  {movement.paymentMethodName}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </TableCell>
                             <TableCell className="text-right text-muted-foreground">
                               {movement.chargeAmount > 0 ? formatCurrency(movement.chargeAmount) : '—'}
                             </TableCell>
@@ -1095,7 +1368,7 @@ export function ClientesPage() {
                         ))
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                          <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                             No existen movimientos para este cliente.
                           </TableCell>
                         </TableRow>
@@ -1108,6 +1381,226 @@ export function ClientesPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={isPaymentDialogOpen}
+        onOpenChange={(open) => {
+          setIsPaymentDialogOpen(open)
+          if (!open) {
+            paymentForm.reset({
+              monto: 0,
+              formaPagoId: '',
+              referenciaExterna: null,
+              observaciones: null,
+            })
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Registrar pago de cliente</DialogTitle>
+            <DialogDescription>
+              Aplica un pago a la deuda pendiente. Se afectarán las ventas más antiguas primero.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            className="space-y-5"
+            onSubmit={(ev) => {
+              ev.preventDefault()
+              void handleSubmitPayment()
+            }}
+          >
+            <div className="rounded-xl border bg-muted/30 p-4">
+              <p className="text-xs font-medium text-muted-foreground">Saldo pendiente</p>
+              <p className="mt-1 text-xl font-semibold text-rose-600">
+                {formatCurrency(accountStatement?.totals?.outstandingAmount ?? 0)}
+              </p>
+              {accountStatement?.pendingSales?.length ? (
+                <div className="mt-3 border-t border-muted pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Se aplicará a (FIFO):
+                  </p>
+                  <ul className="mt-1.5 space-y-1.5 text-xs">
+                    {accountStatement.pendingSales.slice(0, 3).map((sale) => (
+                      <li key={sale.saleId} className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-2">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-500/80" />
+                          <span className="font-medium text-foreground">{sale.document}</span>
+                          <span className="text-muted-foreground">
+                            {formatDateTime(sale.issueDate).slice(0, 10)}
+                          </span>
+                        </span>
+                        <span className="font-semibold text-foreground">
+                          {formatCurrency(sale.outstandingAmount)}
+                        </span>
+                      </li>
+                    ))}
+                    {accountStatement.pendingSales.length > 3 ? (
+                      <li className="pt-1 text-[11px] text-muted-foreground">
+                        +{accountStatement.pendingSales.length - 3} comprobante
+                        {accountStatement.pendingSales.length - 3 === 1 ? '' : 's'} más por{' '}
+                        <span className="font-semibold text-foreground">
+                          {formatCurrency(
+                            accountStatement.pendingSales
+                              .slice(3)
+                              .reduce((sum, s) => sum + s.outstandingAmount, 0),
+                          )}
+                        </span>
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Monto a pagar <span className="text-rose-600">*</span>
+              </label>
+              {(() => {
+                const maxAmount = accountStatement?.totals?.outstandingAmount ?? 0
+                const montoError = paymentForm.formState.errors.monto?.message
+                return (
+                  <div className="space-y-1">
+                    <Input
+                      ref={paymentAmountInputRef}
+                      type="number"
+                      step="0.01"
+                      min={0.01}
+                      max={maxAmount}
+                      onBlur={(ev) => {
+                        const raw = ev.target.value
+                        if (!raw) {
+                          paymentForm.setValue('monto', 0)
+                          paymentForm.setError('monto', {
+                            type: 'manual',
+                            message: 'Ingresa el monto a pagar.',
+                          })
+                          return
+                        }
+                        const parsed = Number(raw)
+                        if (!Number.isFinite(parsed)) {
+                          paymentForm.setValue('monto', 0)
+                          paymentForm.setError('monto', {
+                            type: 'manual',
+                            message: 'Ingresa un monto válido.',
+                          })
+                          return
+                        }
+                        const amount = Number(parsed.toFixed(2))
+                        paymentForm.setValue('monto', amount)
+                        if (amount <= 0) {
+                          paymentForm.setError('monto', {
+                            type: 'manual',
+                            message: 'El monto debe ser mayor a 0.',
+                          })
+                          return
+                        }
+                        if (amount > maxAmount + 0.0001) {
+                          paymentForm.setError('monto', {
+                            type: 'manual',
+                            message: `El monto no puede superar el saldo pendiente de ${formatCurrency(
+                              maxAmount,
+                            )}.`,
+                          })
+                          return
+                        }
+                        paymentForm.clearErrors('monto')
+                      }}
+                      placeholder="0.00"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Máximo a pagar: <span className="font-medium">{formatCurrency(maxAmount)}</span>
+                    </p>
+                    {montoError && (
+                      <p className="text-xs font-medium text-rose-600">{montoError}</p>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+
+            <FormPaymentMethodTwoLevelSelect
+              key={paymentMethodResetKey}
+              control={paymentForm.control}
+              name="formaPagoId"
+              methods={
+                (accountStatement?.options?.paymentMethods ??
+                  []) as PaymentMethodOption[]
+              }
+              required
+              id="customer-payment"
+            />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Referencia</label>
+              <Controller
+                control={paymentForm.control}
+                name="referenciaExterna"
+                render={({ field }) => (
+                  <Input
+                    value={field.value ?? ''}
+                    onChange={(ev) =>
+                      field.onChange(ev.target.value === '' ? null : ev.target.value)
+                    }
+                    onBlur={field.onBlur}
+                    placeholder="Opcional: código operación, voucher, N° externo..."
+                  />
+                )}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Observaciones</label>
+              <Controller
+                control={paymentForm.control}
+                name="observaciones"
+                render={({ field }) => (
+                  <Textarea
+                    value={field.value ?? ''}
+                    onChange={(ev) =>
+                      field.onChange(ev.target.value === '' ? null : ev.target.value)
+                    }
+                    onBlur={field.onBlur}
+                    rows={3}
+                    placeholder="Opcional: comentarios internos sobre este pago..."
+                  />
+                )}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPaymentSubmitting}
+                onClick={() => {
+                  setIsPaymentDialogOpen(false)
+                  paymentForm.reset({
+                    monto: 0,
+                    formaPagoId: '',
+                    referenciaExterna: null,
+                    observaciones: null,
+                  })
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isPaymentSubmitting}>
+                {isPaymentSubmitting ? (
+                  <>
+                    <Loader className="mr-2 h-4 w-4" />
+                    Registrando...
+                  </>
+                ) : (
+                  'Registrar pago'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <SidePanel
         open={isDialogOpen}
@@ -1127,7 +1620,8 @@ export function ClientesPage() {
                   {editingCustomer ? 'Editar cliente' : 'Registrar cliente'}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Completa los datos del cliente para asociar ventas y contacto.
+                  Registra lo indispensable para vender rápido. RENIEC y SUNAT podrán completar
+                  estos datos automáticamente más adelante.
                 </p>
               </div>
               <SidePanelClose asChild>
@@ -1141,7 +1635,10 @@ export function ClientesPage() {
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <div className="space-y-4">
                 <Card className="p-4">
-                  <p className="font-medium text-foreground">Información personal</p>
+                  <p className="font-medium text-foreground">Datos principales</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Solo pedimos lo necesario para registrar al cliente en menos de un minuto.
+                  </p>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Tipo de persona</label>
@@ -1172,12 +1669,11 @@ export function ClientesPage() {
                           control={form.control}
                           name="tipoDocumento"
                           render={({ field }) => (
-                            <Select value={field.value || ''} onValueChange={field.onChange}>
+                            <Select value={field.value} onValueChange={field.onChange}>
                               <SelectTrigger>
-                                <SelectValue placeholder="Opcional" />
+                                <SelectValue placeholder="Selecciona un documento" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="">Sin documento</SelectItem>
                                 {dashboard.options.tiposDocumento.map((item) => (
                                   <SelectItem key={item} value={item}>
                                     {item}
@@ -1194,7 +1690,7 @@ export function ClientesPage() {
                         <label className="text-sm font-medium">Número de documento</label>
                         <Input
                           {...form.register('numeroDocumento')}
-                          placeholder="DNI / RUC (opcional)"
+                          placeholder={documentInputPlaceholder}
                         />
                         <FieldError message={form.formState.errors.numeroDocumento?.message} />
                       </div>
@@ -1204,17 +1700,23 @@ export function ClientesPage() {
                           <label className="text-sm font-medium">Razón social</label>
                           <Input {...form.register('razonSocial')} placeholder="Empresa SAC" />
                           <FieldError message={form.formState.errors.razonSocial?.message} />
+                          <p className="text-xs text-muted-foreground">
+                            Preparado para completar automáticamente desde SUNAT.
+                          </p>
                         </div>
                       ) : (
                         <>
                           <div className="space-y-2">
-                            <label className="text-sm font-medium">Nombres</label>
-                            <Input {...form.register('nombres')} placeholder="Juan" />
+                            <label className="text-sm font-medium">Nombre completo</label>
+                            <Input {...form.register('nombres')} placeholder="Juan Pérez" />
                             <FieldError message={form.formState.errors.nombres?.message} />
+                            <p className="text-xs text-muted-foreground">
+                              Preparado para completar automáticamente desde RENIEC.
+                            </p>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-sm font-medium">Apellidos</label>
-                            <Input {...form.register('apellidos')} placeholder="Pérez" />
+                            <label className="text-sm font-medium">Apellidos (opcional)</label>
+                            <Input {...form.register('apellidos')} placeholder="Pérez Gómez" />
                             <FieldError message={form.formState.errors.apellidos?.message} />
                           </div>
                         </>
@@ -1242,18 +1744,6 @@ export function ClientesPage() {
                         <FieldError message={form.formState.errors.direccion?.message} />
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Ubigeo</label>
-                        <Input {...form.register('ubigeo')} placeholder="150101" />
-                        <FieldError message={form.formState.errors.ubigeo?.message} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Nacimiento</label>
-                        <Input {...form.register('fechaNacimiento')} type="date" />
-                        <FieldError message={form.formState.errors.fechaNacimiento?.message} />
-                      </div>
-
                       <div className="space-y-2 md:col-span-2">
                         <label className="text-sm font-medium">Observaciones</label>
                         <Textarea
@@ -1264,13 +1754,41 @@ export function ClientesPage() {
                         <FieldError message={form.formState.errors.observaciones?.message} />
                       </div>
                     </div>
+
+                    <details className="mt-4 rounded-lg border bg-muted/20 p-3">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-foreground">
+                        <span>Información adicional</span>
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      </summary>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Estos datos no son necesarios para registrar al cliente en caja.
+                      </p>
+                      <div className="mt-3 grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Fecha de nacimiento</label>
+                          <Input {...form.register('fechaNacimiento')} type="date" />
+                          <FieldError message={form.formState.errors.fechaNacimiento?.message} />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Ubigeo</label>
+                          <Input {...form.register('ubigeo')} placeholder="150101" />
+                          <FieldError message={form.formState.errors.ubigeo?.message} />
+                        </div>
+                      </div>
+                    </details>
                   </Card>
 
-                  <Card className="p-4">
-                    <p className="font-medium text-foreground">Configuración comercial</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Preparado para futuras funcionalidades de crédito y seguimiento comercial.
-                    </p>
+                  <details className="rounded-xl border bg-card p-4">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-foreground">Configuración comercial</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Opcional. Úsalo cuando el cliente maneje crédito.
+                        </p>
+                      </div>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    </summary>
 
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <div className="flex items-center justify-between rounded-lg border p-3">
@@ -1309,26 +1827,28 @@ export function ClientesPage() {
                         <FieldError message={form.formState.errors.limiteCredito?.message} />
                       </div>
                     </div>
-                  </Card>
+                  </details>
 
-                  <Card className="p-4">
-                    <p className="font-medium text-foreground">Estado</p>
-                    <div className="mt-3 flex items-center justify-between rounded-lg border p-3">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Cliente activo</p>
-                        <p className="text-xs text-muted-foreground">
-                          Disponible para selección en ventas
-                        </p>
+                  {editingCustomer ? (
+                    <Card className="p-4">
+                      <p className="font-medium text-foreground">Estado</p>
+                      <div className="mt-3 flex items-center justify-between rounded-lg border p-3">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Cliente activo</p>
+                          <p className="text-xs text-muted-foreground">
+                            Disponible para selección en ventas
+                          </p>
+                        </div>
+                        <Controller
+                          control={form.control}
+                          name="activo"
+                          render={({ field }) => (
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          )}
+                        />
                       </div>
-                      <Controller
-                        control={form.control}
-                        name="activo"
-                        render={({ field }) => (
-                          <Switch checked={field.value} onCheckedChange={field.onChange} />
-                        )}
-                      />
-                    </div>
-                  </Card>
+                    </Card>
+                  ) : null}
               </div>
             </div>
 

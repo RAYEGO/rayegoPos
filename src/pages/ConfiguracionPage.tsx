@@ -30,6 +30,7 @@ import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
 import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
 import type { CompanyProfile, UpdateCompanyProfilePayload } from '@/types/company'
@@ -226,7 +227,7 @@ function FieldError({ message }: { message?: string }) {
 }
 
 export function ConfiguracionPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const authorization = useAuthorization()
   const accessToken = session?.accessToken ?? ''
   const branchName = session?.user.branchName ?? ''
@@ -306,10 +307,7 @@ export function ConfiguracionPage() {
     name: 'items',
   })
 
-  async function handleUnauthorized() {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }
+  const handleUnauthorized = useHandleUnauthorized('ConfiguracionPage')
 
   async function loadInitialInventoryLoads() {
     if (!accessToken) return

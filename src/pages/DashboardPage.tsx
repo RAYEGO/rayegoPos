@@ -17,11 +17,11 @@ import {
 } from '@/components/ui/card'
 import { Loader } from '@/components/ui/loader'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { dashboardService } from '@/services/dashboardService'
 import type { DashboardOverviewResponse } from '@/types/dashboard'
 import { paths } from '@/routes/paths'
-import { toast } from 'sonner'
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-PE', {
@@ -69,7 +69,7 @@ function getApiErrorMessage(error: unknown) {
 }
 
 export function DashboardPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
   const navigate = useNavigate()
 
@@ -78,34 +78,58 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [showAlertDetails, setShowAlertDetails] = useState(false)
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('DashboardPage')
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
+      console.debug(
+        '[DASHBOARD] loadDashboard: accessToken NO ESTÁ DISPONIBLE (session?.accessToken vacío). Early return.',
+        {
+          sessionExists: session !== null,
+          accessTokenLength: accessToken.length,
+          accessTokenPreview: accessToken.slice(0, 16) || '(vacío)',
+        },
+      )
       return
     }
 
+    console.debug(
+      `[DASHBOARD] loadDashboard INICIADO con accessToken=${accessToken.slice(0, 16)}... (total ${accessToken.length} chars)`,
+    )
     setIsLoading(true)
     setError(null)
 
     try {
       const response = await dashboardService.getOverview(accessToken)
+      console.debug(
+        '[DASHBOARD] loadDashboard OK → dashboard data recibida.',
+        {
+          hasActiveDrawer: Boolean(response.cash?.activeDrawer),
+          todaySalesCount: response.sales?.todayCount ?? 0,
+          alertsCount:
+            (response.alerts?.expiringLotsCount ?? 0) +
+            (response.alerts?.lowStockProductsCount ?? 0),
+        },
+      )
       setDashboard(response)
     } catch (nextError) {
+      const status = nextError instanceof ApiError ? nextError.status : -1
+      const message = getApiErrorMessage(nextError)
+      console.warn(
+        `[DASHBOARD] loadDashboard ERROR en GET /api/dashboard/overview. status=${status} message="${message}"`,
+        nextError,
+      )
       if (nextError instanceof ApiError && nextError.status === 401) {
-        await handleUnauthorized()
+        await handleUnauthorized(status, message, 'GET /api/dashboard/overview')
         return
       }
 
       setDashboard(defaultDashboard)
-      setError(getApiErrorMessage(nextError))
+      setError(message)
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, handleUnauthorized])
+  }, [accessToken, handleUnauthorized, session])
 
   useEffect(() => {
     void loadDashboard()

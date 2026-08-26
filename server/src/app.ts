@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import Fastify from 'fastify'
@@ -17,9 +18,51 @@ import reportsRoutes from './routes/reports.js'
 import { implementationRoutes } from './routes/implementation.js'
 import { settingsRoutes } from './routes/settings.js'
 
+const performanceDebugConfig = (() => {
+  const fallback = {
+    url: 'http://127.0.0.1:7777/event',
+    sessionId: 'system-performance-audit',
+  }
+
+  try {
+    const content = readFileSync('.dbg/system-performance-audit.env', 'utf8')
+    return {
+      url: content.match(/DEBUG_SERVER_URL=(.+)/)?.[1]?.trim() || fallback.url,
+      sessionId:
+        content.match(/DEBUG_SESSION_ID=(.+)/)?.[1]?.trim() || fallback.sessionId,
+    }
+  } catch {
+    return fallback
+  }
+})()
+
+function reportPerformanceDebugEvent(payload: {
+  runId: 'pre-fix' | 'post-fix'
+  hypothesisId: string
+  location: string
+  msg: string
+  data: Record<string, unknown>
+}) {
+  void fetch(performanceDebugConfig.url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: performanceDebugConfig.sessionId,
+      ts: Date.now(),
+      ...payload,
+    }),
+  }).catch(() => null)
+}
+
 export function createApp() {
   const app = Fastify({
     logger: true,
+  })
+
+  app.addHook('onRequest', async (request) => {
+    // #region debug-point A:api-request-start
+    ;(request as typeof request & { __debugStartedAt?: number }).__debugStartedAt = Date.now()
+    // #endregion
   })
 
   app.register(cors, {
@@ -87,6 +130,27 @@ export function createApp() {
     } catch {
       reply.code(401).send({ message: 'La sesión ya no es válida.' })
     }
+  })
+
+  app.addHook('onResponse', async (request, reply) => {
+    // #region debug-point A:api-request-end
+    const startedAt = (request as typeof request & { __debugStartedAt?: number }).__debugStartedAt
+    const durationMs = typeof startedAt === 'number' ? Date.now() - startedAt : null
+    reportPerformanceDebugEvent({
+      runId: 'pre-fix',
+      hypothesisId: 'A',
+      location: 'server/src/app.ts:onResponse',
+      msg: '[DEBUG] API endpoint timing',
+      data: {
+        requestId: request.id,
+        method: request.method,
+        url: request.url,
+        route: request.routeOptions.url,
+        statusCode: reply.statusCode,
+        durationMs,
+      },
+    })
+    // #endregion
   })
 
   app.get('/', async () => ({

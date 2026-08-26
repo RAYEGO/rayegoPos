@@ -544,6 +544,180 @@ export async function logout(request: FastifyRequest, reply: FastifyReply) {
   return reply.code(204).send()
 }
 
+type RefreshSessionPayload = {
+  refreshToken: string
+}
+
+export async function refreshSession(
+  payload: RefreshSessionPayload,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  if (!payload.refreshToken?.trim()) {
+    return reply.code(401).send({
+      message: 'El token de renovación no fue enviado.',
+      code: 'REFRESH_TOKEN_REQUIRED',
+    })
+  }
+
+  let decoded: AuthTokenPayload | null = null
+  try {
+    decoded = await request.server.jwt.verify<AuthTokenPayload>(payload.refreshToken)
+  } catch {
+    decoded = null
+  }
+
+  if (!decoded || decoded.typ !== 'refresh') {
+    return reply.code(401).send({
+      message: 'El token de renovación no es válido o ha expirado.',
+      code: 'REFRESH_TOKEN_INVALID',
+    })
+  }
+
+  const activeBranchId = decoded.branchId ?? null
+  const activeCompanyId = decoded.companyId ?? null
+
+  const user = await prisma.usuario.findFirst({
+    where: {
+      id: decoded.sub,
+      activo: true,
+      deletedAt: null,
+    },
+    include: {
+      sucursal: {
+        select: {
+          id: true,
+          codigo: true,
+          nombre: true,
+          empresaId: true,
+          activo: true,
+          deletedAt: true,
+          empresa: {
+            select: {
+              razonSocial: true,
+            },
+          },
+        },
+      },
+      usuarioSucursales: {
+        where: {
+          deletedAt: null,
+          activo: true,
+        },
+        include: {
+          sucursal: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              empresaId: true,
+              empresa: {
+                select: {
+                  razonSocial: true,
+                },
+              },
+              activo: true,
+              deletedAt: true,
+            },
+          },
+          rol: {
+            include: {
+              rolesPermisos: {
+                where: {
+                  deletedAt: null,
+                },
+                include: {
+                  permiso: {
+                    select: {
+                      codigo: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      usuariosRoles: {
+        where: {
+          deletedAt: null,
+          activo: true,
+          OR: [{ fechaFin: null }, { fechaFin: { gte: new Date() } }],
+        },
+        include: {
+          rol: {
+            include: {
+              rolesPermisos: {
+                where: {
+                  deletedAt: null,
+                },
+                include: {
+                  permiso: {
+                    select: {
+                      codigo: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (!user) {
+    return reply.code(401).send({
+      message: 'El usuario asociado a la sesión ya no está disponible.',
+      code: 'REFRESH_USER_NOT_FOUND',
+    })
+  }
+
+  const branches = resolveAvailableBranches(user)
+  let selectedBranch = activeBranchId
+    ? branches.find((branch) => branch.id === activeBranchId)
+    : branches[0]
+
+  if (!selectedBranch) {
+    selectedBranch = branches[0]
+  }
+
+  if (!selectedBranch) {
+    return reply.code(401).send({
+      message: 'No se pudo determinar la sucursal activa para renovar la sesión.',
+      code: 'REFRESH_BRANCH_INVALID',
+    })
+  }
+
+  if (activeCompanyId && selectedBranch.companyId !== activeCompanyId) {
+    return reply.code(401).send({
+      message: 'La empresa de la sesión ya no coincide con la sucursal.',
+      code: 'REFRESH_COMPANY_MISMATCH',
+    })
+  }
+
+  const { roles } = resolveRoleContext(user, selectedBranch.id)
+
+  const { accessToken, refreshToken } = await signSessionTokens(
+    request,
+    user,
+    selectedBranch.companyId,
+    selectedBranch.id,
+    roles,
+  )
+
+  await prisma.usuario.update({
+    where: { id: user.id },
+    data: { ultimoAccesoAt: new Date() },
+  })
+
+  await writeAuditEntry(user.id, AccionAuditoria.UPDATE, request, {
+    source: 'auth.refreshSession',
+  })
+
+  return reply.send(buildSessionFromUser(user, selectedBranch, accessToken, refreshToken))
+}
+
 export async function requestPasswordReset(
   payload: ForgotPasswordPayload,
   request: FastifyRequest,

@@ -10,6 +10,7 @@ import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
+import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
 const cashDrawerInclude = {
   caja: {
@@ -243,6 +244,20 @@ export async function getCashierDashboard(
     orderBy: { nombre: 'asc' },
   })
 
+  const paymentMethods = await prisma.formaPago.findMany({
+    where: {
+      deletedAt: null,
+      activo: true,
+    },
+    select: {
+      id: true,
+      codigo: true,
+      nombre: true,
+      orden: true,
+    },
+    orderBy: [{ orden: 'asc' }, { codigo: 'asc' }],
+  })
+
   // Get all cash drawers (aperturas)
   const cashDrawers = await prisma.aperturaCaja.findMany({
     where: {
@@ -362,7 +377,6 @@ export async function getCashierDashboard(
           ? ('CERRADA' as const)
           : ('EN_CIERRE' as const)
 
-    // Calculate expected amount
     const openingAmount = decimalToNumber(drawer.montoAperturaEfectivo)
     const movementsForDrawer = cashMovements.filter(
       (m) => m.aperturaCajaId === drawer.id,
@@ -391,6 +405,55 @@ export async function getCashierDashboard(
       ? decimalToNumber(drawer.cierre.diferenciaEfectivo)
       : 0
 
+    const balancesMap = new Map<
+      string,
+      {
+        methodId: string
+        code: string
+        name: string
+        openingBase: number
+        income: number
+        expense: number
+      }
+    >()
+    for (const method of allPaymentMethods) {
+      balancesMap.set(method.id, {
+        methodId: method.id,
+        code: method.codigo,
+        name: method.nombre,
+        openingBase: method.codigo === CodigoFormaPago.EFECTIVO ? openingAmount : 0,
+        income: 0,
+        expense: 0,
+      })
+    }
+    const cashMethod = allPaymentMethods.find(
+      (m) => m.codigo === CodigoFormaPago.EFECTIVO,
+    )
+    for (const movement of movementsForDrawer) {
+      if (movement.tipo === TipoMovimientoCaja.APERTURA) continue
+      if (movement.tipo === TipoMovimientoCaja.CIERRE) continue
+      const methodId = movement.formaPagoId ?? cashMethod?.id ?? ''
+      if (!methodId) continue
+      const bucket = balancesMap.get(methodId)
+      if (!bucket) continue
+      const amount = decimalToNumber(movement.monto)
+      if (movement.operacion === OperacionCaja.INGRESO) {
+        bucket.income += amount
+      } else {
+        bucket.expense += amount
+      }
+    }
+
+    const balances = Array.from(balancesMap.values()).map((row) => ({
+      paymentMethodId: row.methodId,
+      code: row.code,
+      name: row.name,
+      openingBase: Number(row.openingBase.toFixed(2)),
+      income: Number(row.income.toFixed(2)),
+      expense: Number(row.expense.toFixed(2)),
+      expectedAmount: Number((row.openingBase + row.income - row.expense).toFixed(2)),
+    }))
+
     return {
       id: drawer.id,
       name: drawer.caja.nombre,
@@ -408,6 +471,7 @@ export async function getCashierDashboard(
       closePending:
         drawer.estado === 'ABIERTA' &&
         (drawer.cierrePendiente || !isSameDateInTimeZone(drawer.fechaApertura, now)),
+      balances,
     }
   })
 
@@ -500,6 +564,16 @@ export async function getCashierDashboard(
     },
     options: {
       branches,
+      paymentMethods: paymentMethods.map((method) => {
+        const classification = classifyPaymentMethod(method.codigo)
+        return {
+          id: method.id,
+          code: method.codigo,
+          name: method.nombre,
+          category: classification.category,
+          digitalSubmethod: classification.digitalSubmethod,
+        }
+      }),
     },
   }
 }
@@ -664,15 +738,101 @@ export async function closeCashDrawer(
 
   const latestReconciliation = opening.conciliaciones[0] ?? null
 
+  // Calculate expected by payment method (universal)
+  const { expectedMap, cashMethodId } = await buildExpectedByPaymentMethod(opening.id)
+
+  let autoReconciliationId: string | null = null
+
+  // If user did NOT save an explicit reconciliation before closing → auto-generate one now using counted cash only (for EFECTIVO) and system=declared for digital methods
   if (!latestReconciliation) {
-    throw createHttpError(
-      400,
-      'Debes realizar la conciliación antes de cerrar el turno.',
-    )
+    const paymentMethods = await prisma.formaPago.findMany({
+      where: {
+        deletedAt: null,
+        activo: true,
+      },
+      select: { id: true, codigo: true },
+    })
+
+    let totalExpected = 0
+    let totalCounted = 0
+
+    const detailsData: Array<{
+      formaPagoId: string
+      montoSistema: number
+      montoDeclarado: number
+      diferencia: number
+    }> = []
+
+    for (const method of paymentMethods) {
+      const expectedAmount = roundMoney(expectedMap.get(method.id) ?? 0)
+      const countedAmount =
+        method.id === cashMethodId
+          ? roundMoney(data.countedAmount)
+          : expectedAmount // digitales: no hay contado manual, usamos sistema
+      totalExpected += expectedAmount
+      totalCounted += countedAmount
+      detailsData.push({
+        formaPagoId: method.id,
+        montoSistema: expectedAmount,
+        montoDeclarado: countedAmount,
+        diferencia: roundMoney(countedAmount - expectedAmount),
+      })
+    }
+
+    const totalDifference = roundMoney(totalCounted - totalExpected)
+    const observationsForReconciliation = toOptionalString(data.observations)
+    if (totalDifference !== 0 && !observationsForReconciliation) {
+      throw createHttpError(
+        400,
+        'Debes registrar observaciones en el cierre cuando exista diferencia en la conciliación.',
+      )
+    }
+
+    const auto = await prisma.conciliacionCaja.create({
+      data: {
+        aperturaCajaId: opening.id,
+        usuarioId: userId,
+        montoSistemaTotal: toDecimal(totalExpected, 2),
+        montoDeclaradoTotal: toDecimal(totalCounted, 2),
+        diferenciaTotal: toDecimal(totalDifference, 2),
+        observaciones: observationsForReconciliation,
+        createdById: userId,
+        updatedById: userId,
+        detalles: {
+          createMany: {
+            data: detailsData.map((d) => ({
+              formaPagoId: d.formaPagoId,
+              montoSistema: toDecimal(d.montoSistema, 2),
+              montoDeclarado: toDecimal(d.montoDeclarado, 2),
+              diferencia: toDecimal(d.diferencia, 2),
+              createdById: userId,
+              updatedById: userId,
+            })),
+          },
+        },
+      },
+    })
+    autoReconciliationId = auto.id
   }
 
-  const reconciliationDifference = decimalToNumber(latestReconciliation.diferenciaTotal)
-  const reconciliationObservations = latestReconciliation.observaciones?.trim() ?? ''
+  const reconciliationToUse = latestReconciliation ?? autoReconciliationId
+    ? await prisma.conciliacionCaja.findFirst({
+        where: {
+          id: latestReconciliation?.id ?? autoReconciliationId ?? '',
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          diferenciaTotal: true,
+          observaciones: true,
+        },
+      })
+    : null
+
+  const reconciliationDifference = reconciliationToUse
+    ? decimalToNumber(reconciliationToUse.diferenciaTotal)
+    : 0
+  const reconciliationObservations = reconciliationToUse?.observaciones?.trim() ?? ''
 
   if (reconciliationDifference !== 0 && reconciliationObservations.length === 0) {
     throw createHttpError(
@@ -681,28 +841,15 @@ export async function closeCashDrawer(
     )
   }
 
-  // Calculate expected amount
-  const openingAmount = decimalToNumber(opening.montoAperturaEfectivo)
-  let expectedAmount = openingAmount
-  for (const movement of opening.movimientos) {
-    if (movement.deletedAt) continue
-    if (movement.tipo === TipoMovimientoCaja.APERTURA) continue
-    if (movement.tipo === TipoMovimientoCaja.CIERRE) continue
-    if (movement.operacion === OperacionCaja.INGRESO) {
-      expectedAmount += decimalToNumber(movement.monto)
-    } else {
-      expectedAmount -= decimalToNumber(movement.monto)
-    }
-  }
-
-  const differenceAmount = data.countedAmount - expectedAmount
+  const expectedCashAmount = roundMoney(expectedMap.get(cashMethodId) ?? 0)
+  const differenceAmount = roundMoney(data.countedAmount - expectedCashAmount)
 
   // Create the closing
   const closing = await prisma.cierreCaja.create({
     data: {
       aperturaCajaId: opening.id,
       usuarioId: userId,
-      montoSistemaEfectivo: toDecimal(expectedAmount, 2),
+      montoSistemaEfectivo: toDecimal(expectedCashAmount, 2),
       montoDeclaradoEfectivo: toDecimal(data.countedAmount, 2),
       diferenciaEfectivo: toDecimal(differenceAmount, 2),
       observaciones: toOptionalString(data.observations),
@@ -743,20 +890,22 @@ export async function closeCashDrawer(
   }
 }
 
+type CreateCashMovementData = {
+  openingId: string
+  type: 'INGRESO' | 'EGRESO'
+  amount: number
+  paymentMethodId?: string
+  concept: string
+  reference?: string
+  observations?: string
+}
+
 export async function createCashMovement(
   request: FastifyRequest,
-  data: {
-    openingId: string
-    type: 'INGRESO' | 'EGRESO'
-    amount: number
-    concept: string
-    reference?: string
-    observations?: string
-  },
+  data: CreateCashMovementData,
 ) {
   const userId = await getAuthenticatedUserId(request)
 
-  // Get the opening
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
       id: data.openingId,
@@ -785,7 +934,32 @@ export async function createCashMovement(
     throw createHttpError(400, 'La caja no está abierta.')
   }
 
-  // Create the movement
+  let paymentMethodId: string | null = null
+  if (data.paymentMethodId) {
+    const method = await prisma.formaPago.findFirst({
+      where: {
+        id: data.paymentMethodId,
+        deletedAt: null,
+        activo: true,
+      },
+      select: { id: true },
+    })
+    if (!method) {
+      throw createHttpError(400, 'La forma de pago seleccionada no está disponible.')
+    }
+    paymentMethodId = method.id
+  } else {
+    const defaultCash = await prisma.formaPago.findFirst({
+      where: {
+        codigo: CodigoFormaPago.EFECTIVO,
+        deletedAt: null,
+        activo: true,
+      },
+      select: { id: true },
+    })
+    paymentMethodId = defaultCash?.id ?? null
+  }
+
   const movement = await prisma.movimientoCaja.create({
     data: {
       aperturaCajaId: opening.id,
@@ -796,6 +970,7 @@ export async function createCashMovement(
       operacion:
         data.type === 'INGRESO' ? OperacionCaja.INGRESO : OperacionCaja.EGRESO,
       monto: toDecimal(data.amount, 2),
+      formaPagoId: paymentMethodId,
       referencia: toOptionalString(data.reference),
       observaciones: toOptionalString(
         data.observations || data.concept || 'Movimiento manual',

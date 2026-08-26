@@ -6,6 +6,7 @@ import {
   deleteProduct,
   getProductOptions,
   listProductCatalog,
+  previewProductPackaging,
   updateProduct,
   updateProductStatus,
   listMasterCategories,
@@ -47,34 +48,46 @@ const listProductsQuerySchema = z.object({
   sortDir: z.enum(['asc', 'desc']).optional(),
 })
 
+const packagingChainStepSchema = z.object({
+  presentacionId: z.string().uuid({ message: 'Cada nivel de empaque debe tener una presentación válida.' }),
+  permiteCompra: z.boolean().default(false),
+  permiteVenta: z.boolean().default(false),
+  precioVenta: z.number().nonnegative('El precio de venta debe ser mayor o igual a 0.').optional(),
+  cantidad: z.number().int('La cantidad debe ser un entero.').positive('La cantidad debe ser mayor que 0.').optional(),
+})
+
 const createProductSchema = z.object({
-  categoriaId: z.string().uuid(),
-  tipoComercialId: z.string().uuid(),
-  principioActivoId: z.string().uuid(),
-  laboratorioId: z.string().uuid().optional(),
-  presentacionId: z.string().uuid().optional(),
-  unidadMedidaId: z.string().uuid(),
-  compraPresentacionId: z.string().uuid(),
-  basePresentacionId: z.string().uuid(),
+  categoriaId: z.string().uuid({ message: 'Selecciona una categoría.' }),
+  tipoComercialId: z.string().uuid({ message: 'Selecciona un tipo comercial.' }),
+  principioActivoId: z.string().uuid({ message: 'Selecciona un principio activo.' }),
+  principioActivoIds: z.array(z.string().uuid({ message: 'Cada principio activo debe ser válido.' })).min(1).optional(),
+  laboratorioId: z.string().uuid({ message: 'Selecciona un laboratorio válido.' }).optional(),
+  presentacionId: z.string().uuid({ message: 'Selecciona una presentación válida.' }).optional(),
+  unidadMedidaId: z.string().uuid({ message: 'Selecciona una unidad de medida.' }),
+  compraPresentacionId: z.string().uuid({ message: 'Selecciona una presentación de compra válida.' }).optional(),
+  basePresentacionId: z.string().uuid({ message: 'Selecciona una unidad base válida.' }).optional(),
   presentacionesEmpaque: z
     .array(
       z.object({
-        presentacionId: z.string().uuid(),
+        presentacionId: z.string().uuid({ message: 'Cada presentación de empaque debe ser válida.' }),
         permiteCompra: z.boolean().default(false),
         permiteVenta: z.boolean().default(false),
-        precioVenta: z.number().nonnegative().optional(),
+        precioVenta: z.number().nonnegative('El precio de venta debe ser mayor o igual a 0.').optional(),
       }),
     )
-    .min(1),
+    .min(1, 'Agrega al menos una presentación de empaque.')
+    .optional(),
   conversionesEmpaque: z
     .array(
       z.object({
-        desdePresentacionId: z.string().uuid(),
-        haciaPresentacionId: z.string().uuid(),
-        cantidad: z.number().int().positive(),
+        desdePresentacionId: z.string().uuid({ message: 'La presentación origen debe ser válida.' }),
+        haciaPresentacionId: z.string().uuid({ message: 'La presentación destino debe ser válida.' }),
+        cantidad: z.number().int('La cantidad debe ser un entero.').positive('La cantidad debe ser mayor que 0.'),
       }),
     )
-    .default([]),
+    .default([])
+    .optional(),
+  cadenaEmpaque: z.array(packagingChainStepSchema).min(1, 'Agrega al menos un nivel de empaque.').optional(),
   sku: z.string().min(1).max(50),
   codigoBarras: z.string().max(50).optional(),
   nombre: z.string().min(3).max(180),
@@ -83,8 +96,63 @@ const createProductSchema = z.object({
   registroSanitario: z.string().max(100).optional(),
   requiereReceta: z.boolean().default(false),
   esControlado: z.boolean().default(false),
-  costoReferencia: z.number().nonnegative(),
+  costoReferencia: z.number().nonnegative().optional(),
   observaciones: z.string().max(500).optional(),
+}).superRefine((values, ctx) => {
+  const hasLegacyPackaging =
+    Boolean(values.compraPresentacionId) &&
+    Boolean(values.basePresentacionId) &&
+    Boolean(values.presentacionesEmpaque?.length)
+  const hasChainPackaging = Boolean(values.cadenaEmpaque?.length)
+
+  if (!hasLegacyPackaging && !hasChainPackaging) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'La configuración de empaque del producto es obligatoria.',
+      path: ['cadenaEmpaque'],
+    })
+  }
+})
+
+const previewPackagingSchema = z.object({
+  compraPresentacionId: z.string().uuid({ message: 'Selecciona una presentación de compra válida.' }).optional(),
+  basePresentacionId: z.string().uuid({ message: 'Selecciona una unidad base válida.' }).optional(),
+  presentacionesEmpaque: z
+    .array(
+      z.object({
+        presentacionId: z.string().uuid({ message: 'Cada presentación de empaque debe ser válida.' }),
+        permiteCompra: z.boolean().default(false),
+        permiteVenta: z.boolean().default(false),
+        precioVenta: z.number().nonnegative('El precio de venta debe ser mayor o igual a 0.').optional(),
+      }),
+    )
+    .min(1, 'Agrega al menos una presentación de empaque.')
+    .optional(),
+  conversionesEmpaque: z
+    .array(
+      z.object({
+        desdePresentacionId: z.string().uuid({ message: 'La presentación origen debe ser válida.' }),
+        haciaPresentacionId: z.string().uuid({ message: 'La presentación destino debe ser válida.' }),
+        cantidad: z.number().int('La cantidad debe ser un entero.').positive('La cantidad debe ser mayor que 0.'),
+      }),
+    )
+    .default([])
+    .optional(),
+  cadenaEmpaque: z.array(packagingChainStepSchema).min(1, 'Agrega al menos un nivel de empaque.').optional(),
+}).superRefine((values, ctx) => {
+  const hasLegacyPackaging =
+    Boolean(values.compraPresentacionId) &&
+    Boolean(values.basePresentacionId) &&
+    Boolean(values.presentacionesEmpaque?.length)
+  const hasChainPackaging = Boolean(values.cadenaEmpaque?.length)
+
+  if (!hasLegacyPackaging && !hasChainPackaging) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'La configuración de empaque es obligatoria.',
+      path: ['cadenaEmpaque'],
+    })
+  }
 })
 
 const updateProductStatusSchema = z.object({
@@ -257,6 +325,11 @@ export async function productRoutes(app: FastifyInstance) {
   app.delete('/masters/units/:id', async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params)
     return deleteMasterUnit(params.id, request)
+  })
+
+  app.post('/packaging/preview', async (request) => {
+    const body = previewPackagingSchema.parse(request.body)
+    return previewProductPackaging(body, request)
   })
 
   app.post('/', async (request) => {

@@ -1,15 +1,20 @@
 import {
   ArrowLeft,
   BadgeDollarSign,
+  ChevronDown,
+  ChevronRight,
   CircleDollarSign,
   ClipboardCheck,
+  CreditCard,
   FileDown,
   HandCoins,
+  MapPin,
   Printer,
+  Wallet,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -33,13 +38,6 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
 import {
   Table,
@@ -51,7 +49,16 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
+import {
+  buildPaymentCategoryGroups,
+  classifyPaymentMethod,
+  labelForCategory,
+  labelForMethodCode,
+} from '@/lib/payment-methods'
+import type { PaymentCategory } from '@/lib/payment-methods'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
 import { paths } from '@/routes/paths'
@@ -113,7 +120,6 @@ function getMovementVariant(type: CashMovementType) {
 
 // Zod schemas for forms
 const openCashDrawerSchema = z.object({
-  branchId: z.string().min(1, 'Selecciona una sucursal'),
   openingAmount: z
     .number()
     .min(0.01, 'El monto debe ser mayor a 0'),
@@ -123,10 +129,10 @@ const openCashDrawerSchema = z.object({
 const createCashMovementSchema = z.object({
   openingId: z.string().min(1, 'Selecciona una apertura de caja'),
   type: z.enum(['INGRESO', 'EGRESO']),
+  paymentMethodId: z.string().min(1, 'Selecciona un medio de dinero.'),
   amount: z.number().min(0.01, 'El monto debe ser mayor a 0'),
   concept: z.string().min(1, 'El concepto es obligatorio'),
   reference: z.string().optional(),
-  observations: z.string().optional(),
 })
 
 const cashCountSchema = z.object({
@@ -140,9 +146,10 @@ type CreateCashMovementFormValues = z.infer<typeof createCashMovementSchema>
 type CashCountFormValues = z.infer<typeof cashCountSchema>
 
 export function CajaPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
+  const activeBranchName = session?.user.branchName ?? 'Sucursal activa'
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -170,12 +177,12 @@ export function CajaPage() {
   const [cashCounts, setCashCounts] = useState<CashCountsResponse | null>(null)
   const [isCashCountsLoading, setIsCashCountsLoading] = useState(false)
   const [cashCountsError, setCashCountsError] = useState<string | null>(null)
+  const [digitalCategoryExpanded, setDigitalCategoryExpanded] = useState(true)
 
   // Forms
   const openDrawerForm = useForm<OpenCashDrawerFormValues>({
     resolver: zodResolver(openCashDrawerSchema),
     defaultValues: {
-      branchId: '',
       openingAmount: 0,
       observations: '',
     },
@@ -186,12 +193,15 @@ export function CajaPage() {
     defaultValues: {
       openingId: '',
       type: 'INGRESO',
+      paymentMethodId: '',
       amount: 0,
       concept: '',
       reference: '',
-      observations: '',
     },
   })
+
+  const setMovementOpeningIdRef = useRef(createMovementForm.setValue)
+  setMovementOpeningIdRef.current = createMovementForm.setValue
 
   const cashCountForm = useForm<CashCountFormValues>({
     resolver: zodResolver(cashCountSchema),
@@ -202,10 +212,7 @@ export function CajaPage() {
     },
   })
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('CajaPage')
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -219,10 +226,9 @@ export function CajaPage() {
       const response = await cashierService.getDashboard(accessToken)
       setDashboard(response)
       
-      // Set default openingId in forms
       const activeDrawer = response.cashDrawers.find((d) => d.status !== 'CERRADA')
       if (activeDrawer) {
-        createMovementForm.setValue('openingId', activeDrawer.id)
+        setMovementOpeningIdRef.current('openingId', activeDrawer.id)
         setSelectedDrawerId((current) => current ?? activeDrawer.id)
       } else {
         setSelectedDrawerId(null)
@@ -242,7 +248,7 @@ export function CajaPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, createMovementForm, handleUnauthorized])
+  }, [accessToken, handleUnauthorized])
 
   useEffect(() => {
     void loadDashboard()
@@ -254,10 +260,18 @@ export function CajaPage() {
     
     setIsSubmitting(true)
     try {
-      await cashierService.openDrawer(accessToken, values as OpenCashDrawerPayload)
+      const payload: OpenCashDrawerPayload = {
+        openingAmount: values.openingAmount,
+        observations: values.observations,
+      }
+
+      await cashierService.openDrawer(accessToken, payload)
       toast.success('Caja abierta exitosamente.')
       setOpenDrawerDialogOpen(false)
-      openDrawerForm.reset()
+      openDrawerForm.reset({
+        openingAmount: 0,
+        observations: '',
+      })
       await loadDashboard()
 
       if (window.sessionStorage.getItem('pos_pending_purchase_payment')) {
@@ -288,7 +302,6 @@ export function CajaPage() {
         amount: 0,
         concept: '',
         reference: '',
-        observations: '',
       })
       await loadDashboard()
     } catch (err) {
@@ -415,6 +428,45 @@ export function CajaPage() {
     [loadCashCounts, loadReconciliationPreview],
   )
 
+  const cashDrawers = dashboard?.cashDrawers ?? []
+  const cashMovements = dashboard?.cashMovements ?? []
+  const movementPaymentMethods = dashboard?.options.paymentMethods ?? []
+  const activeDrawer = cashDrawers.find((drawer) => drawer.status !== 'CERRADA') ?? cashDrawers[0]
+  const hasOpenDrawer = cashDrawers.some((drawer) => drawer.status !== 'CERRADA')
+  const selectedDrawer = selectedDrawerId
+    ? cashDrawers.find((drawer) => drawer.id === selectedDrawerId) ?? null
+    : null
+  const selectedMovements = selectedDrawerId
+    ? cashMovements.filter((movement) => movement.openingId === selectedDrawerId)
+    : []
+  const canOperateSelected = selectedDrawer?.status === 'ABIERTA'
+  const summaryDrawer = selectedDrawer ?? activeDrawer ?? null
+  const isSummaryClosePending = Boolean(summaryDrawer?.closePending)
+  const summaryMovements = summaryDrawer
+    ? cashMovements.filter((movement) => movement.openingId === summaryDrawer.id)
+    : []
+  const cashSummaryMovements = summaryMovements.filter(
+    (movement) =>
+      (movement.paymentMethod === 'EFECTIVO' || movement.paymentMethod === 'INTERNO') &&
+      movement.type !== 'CUADRE' &&
+      movement.description !== 'Apertura de caja',
+  )
+  const summaryEntriesAmount = cashSummaryMovements.reduce(
+    (sum, movement) => sum + (movement.amount > 0 ? movement.amount : 0),
+    0,
+  )
+  const summaryExitsAmount = cashSummaryMovements.reduce(
+    (sum, movement) => sum + (movement.amount < 0 ? Math.abs(movement.amount) : 0),
+    0,
+  )
+  const summaryExpectedCashAmount =
+    (summaryDrawer?.openingAmount ?? 0) + summaryEntriesAmount - summaryExitsAmount
+  const latestCashCount = cashCounts?.rows?.[0] ?? null
+  const expectedCashAmountForCount =
+    reconciliationPreview?.rows.find((row) => row.code === 'EFECTIVO')?.expectedAmount ?? 0
+  const openingCashDrawerName = summaryDrawer?.name ?? 'Caja Principal'
+  const openingCashDrawerCode = summaryDrawer?.code ?? 'CAJA-001'
+
   const reconciliationTotals = useMemo(() => {
     const rows = reconciliationPreview?.rows ?? []
     const expectedAmount = rows.reduce((sum, row) => sum + row.expectedAmount, 0)
@@ -448,6 +500,16 @@ export function CajaPage() {
       },
     }
   }, [reconciliationCounted, reconciliationPreview?.rows])
+
+  const summaryBalancesByCategory = useMemo(() => {
+    const balances = summaryDrawer?.balances ?? []
+    return buildPaymentCategoryGroups(balances, (b) => classifyPaymentMethod(b.code as any))
+  }, [summaryDrawer?.balances])
+
+  const closeRowsByCategory = useMemo(() => {
+    const rows = reconciliationPreview?.rows ?? []
+    return buildPaymentCategoryGroups(rows, (r) => classifyPaymentMethod(r.code as any))
+  }, [reconciliationPreview?.rows])
 
   const handleSaveReconciliation = useCallback(async () => {
     if (!accessToken || !selectedDrawerId) return
@@ -523,47 +585,46 @@ export function CajaPage() {
     selectedDrawerId,
   ])
 
-  const cashDrawers = dashboard?.cashDrawers ?? []
-  const cashMovements = dashboard?.cashMovements ?? []
-  const branches = dashboard?.options?.branches ?? []
-  const activeDrawer = cashDrawers.find((drawer) => drawer.status !== 'CERRADA') ?? cashDrawers[0]
-  const hasOpenDrawer = cashDrawers.some((drawer) => drawer.status !== 'CERRADA')
-  const selectedDrawer = selectedDrawerId
-    ? cashDrawers.find((drawer) => drawer.id === selectedDrawerId) ?? null
-    : null
-  const selectedMovements = selectedDrawerId
-    ? cashMovements.filter((movement) => movement.openingId === selectedDrawerId)
-    : []
-  const canOperateSelected = selectedDrawer?.status === 'ABIERTA'
-  const summaryDrawer = selectedDrawer ?? activeDrawer ?? null
-  const isSummaryClosePending = Boolean(summaryDrawer?.closePending)
-  const summaryMovements = summaryDrawer
-    ? cashMovements.filter((movement) => movement.openingId === summaryDrawer.id)
-    : []
-  const cashSummaryMovements = summaryMovements.filter(
-    (movement) =>
-      (movement.paymentMethod === 'EFECTIVO' || movement.paymentMethod === 'INTERNO') &&
-      movement.type !== 'CUADRE' &&
-      movement.description !== 'Apertura de caja',
-  )
-  const summaryEntriesAmount = cashSummaryMovements.reduce(
-    (sum, movement) => sum + (movement.amount > 0 ? movement.amount : 0),
-    0,
-  )
-  const summaryExitsAmount = cashSummaryMovements.reduce(
-    (sum, movement) => sum + (movement.amount < 0 ? Math.abs(movement.amount) : 0),
-    0,
-  )
-  const summaryExpectedCashAmount =
-    (summaryDrawer?.openingAmount ?? 0) + summaryEntriesAmount - summaryExitsAmount
-  const latestCashCount = cashCounts?.rows?.[0] ?? null
-  const expectedCashAmountForCount =
-    reconciliationPreview?.rows.find((row) => row.code === 'EFECTIVO')?.expectedAmount ?? 0
   const watchedCountedCashAmount = cashCountForm.watch('countedCashAmount')
   const watchedCashCountObservations = cashCountForm.watch('observations')
   const cashCountDifferenceAmount = watchedCountedCashAmount - expectedCashAmountForCount
   const watchedMovementType = createMovementForm.watch('type')
+  const watchedMovementPaymentMethodId = createMovementForm.watch('paymentMethodId')
   const isMovementIngreso = watchedMovementType === 'INGRESO'
+
+  const movementSelectedPaymentMethod = useMemo(
+    () => movementPaymentMethods.find((m) => m.id === watchedMovementPaymentMethodId) ?? null,
+    [movementPaymentMethods, watchedMovementPaymentMethodId],
+  )
+
+  const movementMethodIsCash = !watchedMovementPaymentMethodId
+    ? true
+    : classifyPaymentMethod((movementSelectedPaymentMethod?.code ?? '') as any).category === 'CASH'
+
+  const movementMethodMovements = summaryMovements.filter(
+    (m) =>
+      m.type !== 'CUADRE' &&
+      m.description !== 'Apertura de caja' &&
+      (movementMethodIsCash
+        ? m.paymentMethod === 'EFECTIVO' || m.paymentMethod === 'INTERNO'
+        : m.paymentMethod === movementSelectedPaymentMethod?.code),
+  )
+  const movementMethodEntries = movementMethodMovements.reduce(
+    (sum, m) => sum + (m.amount > 0 ? m.amount : 0),
+    0,
+  )
+  const movementMethodExits = movementMethodMovements.reduce(
+    (sum, m) => sum + (m.amount < 0 ? Math.abs(m.amount) : 0),
+    0,
+  )
+  const watchedMovementAmount = createMovementForm.watch('amount') || 0
+  const availableBalanceForMovement =
+    (movementMethodIsCash ? summaryDrawer?.openingAmount ?? 0 : 0) +
+    movementMethodEntries -
+    movementMethodExits
+  const movementRequired =
+    isMovementIngreso ? 0 : Math.max(0, Math.abs(watchedMovementAmount))
+  const movementMissing = Math.max(0, movementRequired - availableBalanceForMovement)
   const cashDrawersTotalPages = Math.max(
     1,
     Math.ceil(cashDrawers.length / cashDrawersPageSize),
@@ -869,101 +930,333 @@ export function CajaPage() {
             </TabsList>
 
             <TabsContent value="resumen" className="space-y-4 pt-4">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Card className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">Apertura</p>
-                      <p className="mt-2 truncate text-2xl font-semibold text-foreground">
-                        {formatCurrency(summaryDrawer?.openingAmount ?? 0)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {summaryDrawer?.code ?? '—'}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-2">
-                      <HandCoins className="h-4 w-4 text-primary" />
-                    </div>
-                  </div>
-                </Card>
+              {summaryDrawer?.balances?.length ? (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {(['CASH', 'DIGITAL', 'CARD'] as PaymentCategory[]).map((category) => {
+                      const items = summaryBalancesByCategory.groups[category] ?? []
+                      const categoryTotal = items.reduce((s, b) => s + b.expectedAmount, 0)
+                      const categoryIncome = items.reduce((s, b) => s + b.income, 0)
+                      const categoryExpense = items.reduce((s, b) => s + b.expense, 0)
+                      const categoryLabel = labelForCategory(category)
+                      const isDigital = category === 'DIGITAL'
+                      const isCash = category === 'CASH'
+                      const isCard = category === 'CARD'
 
-                <Card className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">Movimientos</p>
-                      <div className="mt-2 space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm text-muted-foreground">Entradas</p>
-                          <p className="text-sm font-semibold text-emerald-600">
-                            + {formatCurrency(summaryEntriesAmount)}
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm text-muted-foreground">Salidas</p>
-                          <p className="text-sm font-semibold text-rose-600">
-                            - {formatCurrency(summaryExitsAmount)}
-                          </p>
-                        </div>
+                      if (items.length === 0) {
+                        return null
+                      }
+
+                      const single = items.length === 1 ? items[0] : null
+
+                      return (
+                        <Card
+                          key={category}
+                          className={`p-4 ${isDigital ? 'ring-1 ring-indigo-200 dark:ring-indigo-900' : ''}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant={
+                                    isCash ? 'default' : isDigital ? 'secondary' : 'outline'
+                                  }
+                                >
+                                  {categoryLabel}
+                                </Badge>
+                                {isDigital ? (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    Resumen
+                                  </Badge>
+                                ) : null}
+                                {categoryTotal < 0 ? (
+                                  <Badge variant="destructive">Negativo</Badge>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {isDigital
+                                  ? `${items.length} submedio(s) · No operativo`
+                                  : single
+                                    ? single.name
+                                    : `${items.length} medios`}
+                              </p>
+                              <p className="mt-3 truncate text-2xl font-semibold text-foreground">
+                                {formatCurrency(categoryTotal)}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Saldo {isDigital ? 'informativo' : 'sistema'}
+                              </p>
+
+                              <div className="mt-4 space-y-2 border-t pt-3">
+                                {isCash && single ? (
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm text-muted-foreground">Fondo apertura</p>
+                                    <p className="text-sm font-medium text-foreground">
+                                      {formatCurrency(single.openingBase)}
+                                    </p>
+                                  </div>
+                                ) : null}
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="text-sm text-muted-foreground">Entradas</p>
+                                  <p className="text-sm font-semibold text-emerald-600">
+                                    + {formatCurrency(categoryIncome)}
+                                  </p>
+                                </div>
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="text-sm text-muted-foreground">Salidas</p>
+                                  <p className="text-sm font-semibold text-rose-600">
+                                    - {formatCurrency(categoryExpense)}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {isCash && single ? (
+                                <div className="mt-4 space-y-2 border-t pt-3">
+                                  <p className="text-sm font-medium text-foreground">Arqueo</p>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm text-muted-foreground">Contado</p>
+                                    <p className="text-sm font-semibold text-foreground">
+                                      {latestCashCount
+                                        ? formatCurrency(latestCashCount.countedCashAmount)
+                                        : 'Pendiente'}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm text-muted-foreground">Diferencia</p>
+                                    <p
+                                      className={`text-sm font-semibold ${
+                                        !latestCashCount
+                                          ? 'text-muted-foreground'
+                                          : latestCashCount.differenceCashAmount === 0
+                                          ? 'text-emerald-600'
+                                          : latestCashCount.differenceCashAmount < 0
+                                          ? 'text-rose-600'
+                                          : 'text-amber-600'
+                                      }`}
+                                    >
+                                      {latestCashCount
+                                        ? formatCurrency(latestCashCount.differenceCashAmount)
+                                        : '--'}
+                                    </p>
+                                  </div>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {latestCashCount
+                                      ? 'Arqueo registrado.'
+                                      : 'Aún no se realizó arqueo.'}
+                                  </p>
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                              <div
+                                className={`rounded-lg border bg-muted/30 p-2 shrink-0 ${
+                                  isDigital ? 'bg-indigo-50 dark:bg-indigo-950/40' : ''
+                                }`}
+                              >
+                                {isCash ? (
+                                  <HandCoins className="h-4 w-4 text-primary" />
+                                ) : isDigital ? (
+                                  <Wallet className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                                ) : (
+                                  <CreditCard className="h-4 w-4 text-primary" />
+                                )}
+                              </div>
+                              {isDigital ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() =>
+                                    setDigitalCategoryExpanded((prev) => !prev)
+                                  }
+                                  title={
+                                    digitalCategoryExpanded
+                                      ? 'Contraer submedios'
+                                      : 'Expandir submedios'
+                                  }
+                                >
+                                  {digitalCategoryExpanded ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Card>
+                      )
+                    })}
+                  </div>
+
+                  {digitalCategoryExpanded &&
+                  (summaryBalancesByCategory.groups.DIGITAL?.length ?? 0) > 0 ? (
+                    <div className="space-y-2 rounded-2xl border border-indigo-200/60 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-indigo-950/10 p-4">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          Submedios digitales
+                        </Badge>
+                        <p className="text-xs text-muted-foreground">
+                          Cada submedio mantiene su propio saldo operativo.
+                        </p>
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Incluye efectivo: ventas, ingresos manuales, egresos, retiros y devoluciones.
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-2">
-                      <BadgeDollarSign className="h-4 w-4 text-primary" />
-                    </div>
-                  </div>
-                </Card>
-
-                <Card className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">Caja esperada</p>
-                      <p className="mt-2 truncate text-2xl font-semibold text-foreground">
-                        {formatCurrency(summaryExpectedCashAmount)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Apertura + Entradas - Salidas
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-2">
-                      <CircleDollarSign className="h-4 w-4 text-primary" />
-                    </div>
-                  </div>
-                </Card>
-
-                <Card className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">Arqueo</p>
-                      <div className="mt-2 space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm text-muted-foreground">Contado</p>
-                          <p className="text-sm font-semibold text-foreground">
-                            {latestCashCount
-                              ? formatCurrency(latestCashCount.countedCashAmount)
-                              : 'Pendiente'}
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm text-muted-foreground">Diferencia</p>
-                          <p className="text-sm font-semibold text-foreground">
-                            {latestCashCount
-                              ? formatCurrency(latestCashCount.differenceCashAmount)
-                              : '--'}
-                          </p>
-                        </div>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {(summaryBalancesByCategory.groups.DIGITAL ?? []).map((balance) => {
+                          const cls = classifyPaymentMethod(balance.code as any)
+                          const methodLabel = labelForMethodCode(balance.code as any)
+                          return (
+                            <Card
+                              key={balance.paymentMethodId}
+                              className="p-3 bg-white/70 dark:bg-background/60"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline">{methodLabel}</Badge>
+                                    {balance.expectedAmount < 0 ? (
+                                      <Badge variant="destructive" className="text-[10px]">
+                                        -
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                  <p className="mt-1 text-xs text-muted-foreground truncate">
+                                    {balance.name}
+                                  </p>
+                                  <p className="mt-2 truncate text-xl font-semibold text-foreground">
+                                    {formatCurrency(balance.expectedAmount)}
+                                  </p>
+                                  <div className="mt-3 space-y-1.5 border-t pt-2 text-xs">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-muted-foreground">Entradas</span>
+                                      <span className="font-semibold text-emerald-600">
+                                        + {formatCurrency(balance.income)}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-muted-foreground">Salidas</span>
+                                      <span className="font-semibold text-rose-600">
+                                        - {formatCurrency(balance.expense)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="rounded-md border bg-muted/30 p-1.5 shrink-0">
+                                  {cls.digitalSubmethod === 'YAPE' ||
+                                  cls.digitalSubmethod === 'PLIN' ? (
+                                    <BadgeDollarSign className="h-3.5 w-3.5 text-primary" />
+                                  ) : (
+                                    <CreditCard className="h-3.5 w-3.5 text-primary" />
+                                  )}
+                                </div>
+                              </div>
+                            </Card>
+                          )
+                        })}
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {latestCashCount ? 'Arqueo registrado.' : 'Aún no se realizó arqueo.'}
-                      </p>
                     </div>
-                    <div className="rounded-lg border bg-muted/30 p-2">
-                      <ClipboardCheck className="h-4 w-4 text-primary" />
+                  ) : null}
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Card className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">Apertura</p>
+                        <p className="mt-2 truncate text-2xl font-semibold text-foreground">
+                          {formatCurrency(summaryDrawer?.openingAmount ?? 0)}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {summaryDrawer?.code ?? '—'}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border bg-muted/30 p-2">
+                        <HandCoins className="h-4 w-4 text-primary" />
+                      </div>
                     </div>
-                  </div>
-                </Card>
-              </div>
+                  </Card>
+
+                  <Card className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">Movimientos</p>
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm text-muted-foreground">Entradas</p>
+                            <p className="text-sm font-semibold text-emerald-600">
+                              + {formatCurrency(summaryEntriesAmount)}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm text-muted-foreground">Salidas</p>
+                            <p className="text-sm font-semibold text-rose-600">
+                              - {formatCurrency(summaryExitsAmount)}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Incluye efectivo: ventas, ingresos manuales, egresos, retiros y
+                          devoluciones.
+                        </p>
+                      </div>
+                      <div className="rounded-lg border bg-muted/30 p-2">
+                        <BadgeDollarSign className="h-4 w-4 text-primary" />
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">Caja esperada</p>
+                        <p className="mt-2 truncate text-2xl font-semibold text-foreground">
+                          {formatCurrency(summaryExpectedCashAmount)}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Apertura + Entradas - Salidas
+                        </p>
+                      </div>
+                      <div className="rounded-lg border bg-muted/30 p-2">
+                        <CircleDollarSign className="h-4 w-4 text-primary" />
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">Arqueo</p>
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm text-muted-foreground">Contado</p>
+                            <p className="text-sm font-semibold text-foreground">
+                              {latestCashCount
+                                ? formatCurrency(latestCashCount.countedCashAmount)
+                                : 'Pendiente'}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm text-muted-foreground">Diferencia</p>
+                            <p className="text-sm font-semibold text-foreground">
+                              {latestCashCount
+                                ? formatCurrency(latestCashCount.differenceCashAmount)
+                                : '--'}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {latestCashCount
+                            ? 'Arqueo registrado.'
+                            : 'Aún no se realizó arqueo.'}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border bg-muted/30 p-2">
+                        <ClipboardCheck className="h-4 w-4 text-primary" />
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="movimientos" className="space-y-4 pt-4">
@@ -1304,33 +1597,20 @@ export function CajaPage() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={openDrawerForm.handleSubmit(handleOpenDrawer)} className="space-y-4">
-            <div className="space-y-2">
-              <label
-                htmlFor="branchId"
-                className="text-xs font-medium text-foreground"
-              >
-                Sucursal
-              </label>
-              <Select
-                onValueChange={(value) => openDrawerForm.setValue('branchId', value)}
-                defaultValue={openDrawerForm.getValues('branchId')}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona una sucursal" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch.id} value={branch.id}>
-                      {branch.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {openDrawerForm.formState.errors.branchId ? (
-                <p className="text-xs text-destructive">
-                  {openDrawerForm.formState.errors.branchId.message}
-                </p>
-              ) : null}
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Sucursal</p>
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <MapPin className="h-4 w-4 text-muted-foreground" />
+                  <span>{activeBranchName}</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Caja</p>
+                <p className="text-sm font-medium text-foreground">{openingCashDrawerName}</p>
+                <p className="text-xs text-muted-foreground">{openingCashDrawerCode}</p>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -1395,34 +1675,181 @@ export function CajaPage() {
       </Dialog>
 
       <Dialog open={closeConfirmDialogOpen} onOpenChange={setCloseConfirmDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Cerrar turno</DialogTitle>
             <DialogDescription>
-              Confirma el cierre del turno. La conciliación debe estar registrada antes de cerrar.
+              Revisa el desglose por medio de pago antes de confirmar el cierre.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3 rounded-lg border bg-muted/20 p-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Total esperado</span>
-              <span className="font-medium text-foreground">
-                {formatCurrency(reconciliationTotals.expectedAmount)}
-              </span>
+          {reconciliationPreview?.rows?.length ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border">
+                <div className="grid grid-cols-12 gap-2 border-b bg-muted/30 p-3 text-xs font-medium text-muted-foreground">
+                  <div className="col-span-3">Medio</div>
+                  <div className="col-span-3 text-right">Esperado</div>
+                  <div className="col-span-3 text-right">Contado</div>
+                  <div className="col-span-3 text-right">Diferencia</div>
+                </div>
+                <div className="divide-y">
+                  {(['CASH', 'DIGITAL', 'CARD'] as PaymentCategory[])
+                    .flatMap((category) => {
+                      const rows = closeRowsByCategory.groups[category] ?? []
+                      if (rows.length === 0) return []
+
+                      const catExpected = rows.reduce((s, r) => s + r.expectedAmount, 0)
+                      const catCounted = rows.reduce(
+                        (s, r) =>
+                          s + (reconciliationCounted[r.paymentMethodId] ?? r.countedAmount),
+                        0,
+                      )
+                      const catDifference = catCounted - catExpected
+                      const categoryLabel = labelForCategory(category)
+                      const isCash = category === 'CASH'
+                      const isDigital = category === 'DIGITAL'
+
+                      const header = (
+                        <div
+                          key={`cat-${category}`}
+                          className={`grid grid-cols-12 items-center gap-2 px-3 py-2 text-xs ${
+                            isDigital
+                              ? 'bg-indigo-50/80 dark:bg-indigo-950/20'
+                              : 'bg-muted/40'
+                          }`}
+                        >
+                          <div className="col-span-3">
+                            <Badge
+                              variant={
+                                isCash ? 'default' : isDigital ? 'secondary' : 'outline'
+                              }
+                              className="text-[11px]"
+                            >
+                              {categoryLabel}
+                            </Badge>
+                            {isDigital ? (
+                              <span className="ml-2 text-[10px] text-muted-foreground">
+                                ({rows.length} submedios)
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="col-span-3 text-right text-[11px] font-semibold text-muted-foreground tabular-nums">
+                            {isDigital ? formatCurrency(catExpected) : '—'}
+                          </div>
+                          <div className="col-span-3 text-right text-[11px] font-semibold text-muted-foreground tabular-nums">
+                            {isDigital ? formatCurrency(catCounted) : '—'}
+                          </div>
+                          <div className="col-span-3 text-right text-[11px] tabular-nums">
+                            {isDigital ? (
+                              <span
+                                className={`font-semibold ${
+                                  catDifference === 0
+                                    ? 'text-emerald-600'
+                                    : catDifference < 0
+                                    ? 'text-rose-600'
+                                    : 'text-amber-600'
+                                }`}
+                              >
+                                {formatCurrency(catDifference)}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </div>
+                        </div>
+                      )
+
+                      const lineItems = rows.map((row) => {
+                        const countedAmount =
+                          reconciliationCounted[row.paymentMethodId] ?? row.countedAmount
+                        const difference = countedAmount - row.expectedAmount
+                        const rowIsCash = row.code === 'EFECTIVO'
+                        const methodLabel = labelForMethodCode(row.code as any)
+                        return (
+                          <div
+                            key={row.paymentMethodId}
+                            className="grid grid-cols-12 items-center gap-2 p-3 text-sm"
+                          >
+                            <div className="col-span-3 min-w-0">
+                              <Badge variant={rowIsCash ? 'default' : 'outline'}>
+                                {methodLabel}
+                              </Badge>
+                              <p className="mt-1 text-xs text-muted-foreground truncate">
+                                {row.name}
+                              </p>
+                            </div>
+                            <div className="col-span-3 text-right font-medium text-foreground tabular-nums">
+                              {formatCurrency(row.expectedAmount)}
+                            </div>
+                            <div className="col-span-3 text-right font-medium text-foreground tabular-nums">
+                              {formatCurrency(countedAmount)}
+                              {!rowIsCash ? (
+                                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                  sistema
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="col-span-3 text-right tabular-nums">
+                              <Badge
+                                variant={
+                                  difference === 0
+                                    ? 'success'
+                                    : difference < 0
+                                    ? 'destructive'
+                                    : 'warning'
+                                }
+                              >
+                                {formatCurrency(difference)}
+                              </Badge>
+                            </div>
+                          </div>
+                        )
+                      })
+
+                      return [header, ...lineItems]
+                    })
+                    .map((el) => el)}
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-xl border bg-muted/20 p-4 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Total esperado</span>
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {formatCurrency(reconciliationTotals.expectedAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Total contado</span>
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {formatCurrency(reconciliationTotals.countedAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t">
+                  <span className="font-medium text-foreground">Diferencia global</span>
+                  <Badge
+                    variant={
+                      reconciliationTotals.differenceAmount === 0
+                        ? 'success'
+                        : reconciliationTotals.differenceAmount < 0
+                        ? 'destructive'
+                        : 'warning'
+                    }
+                  >
+                    {formatCurrency(reconciliationTotals.differenceAmount)}
+                  </Badge>
+                </div>
+                {reconciliationObservations.trim() ? (
+                  <div className="pt-3 border-t mt-2">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">
+                      Observaciones
+                    </p>
+                    <p className="text-sm text-foreground">{reconciliationObservations}</p>
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Total contado</span>
-              <span className="font-medium text-foreground">
-                {formatCurrency(reconciliationTotals.countedAmount)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Diferencia</span>
-              <span className="font-medium text-foreground">
-                {formatCurrency(reconciliationTotals.differenceAmount)}
-              </span>
-            </div>
-          </div>
+          ) : null}
 
           <DialogFooter>
             <Button
@@ -1440,7 +1867,7 @@ export function CajaPage() {
                   Cerrando...
                 </>
               ) : (
-                'Cerrar turno'
+                'Confirmar cierre'
               )}
             </Button>
           </DialogFooter>
@@ -1551,11 +1978,23 @@ export function CajaPage() {
           if (!open) {
             createMovementForm.reset({
               ...createMovementForm.getValues(),
+              paymentMethodId:
+                movementPaymentMethods.find((m) => m.code === 'EFECTIVO')?.id ?? '',
               amount: 0,
               concept: '',
               reference: '',
-              observations: '',
             })
+          } else {
+            const defaultMethodId =
+              createMovementForm.getValues().paymentMethodId ||
+              movementPaymentMethods.find((m) => m.code === 'EFECTIVO')?.id ||
+              ''
+            if (defaultMethodId && !createMovementForm.getValues().paymentMethodId) {
+              createMovementForm.setValue('paymentMethodId', defaultMethodId, {
+                shouldDirty: false,
+                shouldValidate: false,
+              })
+            }
           }
         }}
       >
@@ -1568,7 +2007,13 @@ export function CajaPage() {
               <div className="space-y-1">
                 <p className="text-base font-semibold text-foreground">Registrar movimiento</p>
                 <p className="text-sm text-muted-foreground">
-                  {isMovementIngreso ? 'Ingreso de efectivo en caja.' : 'Egreso de efectivo desde caja.'}
+                  {isMovementIngreso
+                    ? movementSelectedPaymentMethod
+                      ? `Ingreso en ${movementSelectedPaymentMethod.name}.`
+                      : 'Ingreso de dinero.'
+                    : movementSelectedPaymentMethod
+                      ? `Egreso desde ${movementSelectedPaymentMethod.name}.`
+                      : 'Egreso de dinero.'}
                 </p>
               </div>
               <SidePanelClose asChild>
@@ -1622,7 +2067,92 @@ export function CajaPage() {
                   </div>
                 </div>
 
+                {isMovementIngreso ? (
+                  <div className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2">
+                    <div className="space-y-1 rounded-xl bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">Saldo disponible</p>
+                      <p className="text-lg font-semibold text-foreground">
+                        {formatCurrency(availableBalanceForMovement)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {movementSelectedPaymentMethod?.name ?? 'Medio'}
+                      </p>
+                    </div>
+                    <div className="space-y-1 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 p-3 ring-1 ring-emerald-200/60 dark:ring-emerald-900/50">
+                      <p className="text-xs text-muted-foreground">Monto a ingresar</p>
+                      <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-300">
+                        {formatCurrency(Math.max(0, watchedMovementAmount))}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {watchedMovementAmount > 0 ? 'Monto declarado' : 'Aún no se define'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 rounded-2xl border p-4 md:grid-cols-3">
+                    <div className="space-y-1 rounded-xl bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">Saldo disponible</p>
+                      <p className="text-lg font-semibold text-foreground">
+                        {formatCurrency(availableBalanceForMovement)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {movementSelectedPaymentMethod?.name ?? 'Medio'}
+                      </p>
+                    </div>
+                    <div className="space-y-1 rounded-xl bg-rose-50/60 dark:bg-rose-950/20 p-3 ring-1 ring-rose-200/60 dark:ring-rose-900/50">
+                      <p className="text-xs text-muted-foreground">Monto a retirar</p>
+                      <p className="text-lg font-semibold text-rose-700 dark:text-rose-300">
+                        {formatCurrency(Math.max(0, watchedMovementAmount))}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {watchedMovementAmount > 0 ? 'Monto declarado' : 'Aún no se define'}
+                      </p>
+                    </div>
+                    <div
+                      className="space-y-1 rounded-xl p-3"
+                      style={
+                        movementMissing > 0
+                          ? { background: 'rgba(239, 68, 68, 0.10)' }
+                          : { background: 'rgba(16, 185, 129, 0.10)' }
+                      }
+                    >
+                      <p className="text-xs text-muted-foreground">Saldo resultante</p>
+                      <p
+                        className="text-lg font-semibold"
+                        style={{
+                          color:
+                            availableBalanceForMovement - watchedMovementAmount < 0
+                              ? '#dc2626'
+                              : '#047857',
+                        }}
+                      >
+                        {formatCurrency(
+                          Math.max(0, availableBalanceForMovement) -
+                            Math.max(0, watchedMovementAmount),
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {movementMissing > 0
+                          ? `Falta ${formatCurrency(movementMissing)} · Saldo insuficiente`
+                          : 'Fondos OK'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2">
+                  <div className="md:col-span-2">
+                    <FormPaymentMethodTwoLevelSelect
+                      label="Medio de dinero"
+                      name="paymentMethodId"
+                      control={createMovementForm.control}
+                      methods={movementPaymentMethods}
+                      required
+                      placeholderCategory="Selecciona una categoría"
+                      placeholderSubmethod="Selecciona un submedio"
+                    />
+                  </div>
+
                   <div className="space-y-2">
                     <label htmlFor="amount" className="text-xs font-medium text-foreground">
                       Monto
@@ -1672,17 +2202,6 @@ export function CajaPage() {
                       </p>
                     ) : null}
                   </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <label htmlFor="observations" className="text-xs font-medium text-foreground">
-                      Observaciones (opcional)
-                    </label>
-                    <Textarea
-                      id="observations"
-                      placeholder="Agrega observaciones si es necesario..."
-                      {...createMovementForm.register('observations')}
-                    />
-                  </div>
                 </div>
               </div>
             </div>
@@ -1697,7 +2216,17 @@ export function CajaPage() {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" disabled={isSubmitting}>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || movementMissing > 0 || !watchedMovementPaymentMethodId}
+                  title={
+                    movementMissing > 0
+                      ? `Falta ${formatCurrency(movementMissing)} en ${movementSelectedPaymentMethod?.name ?? 'el medio'} para cubrir el egreso.`
+                      : !watchedMovementPaymentMethodId
+                        ? 'Selecciona un medio de dinero.'
+                        : 'Registrar movimiento'
+                  }
+                >
                   {isSubmitting ? (
                     <>
                       <Loader className="mr-2 h-4 w-4 text-current" />

@@ -10,10 +10,9 @@ import { prisma } from '../../lib/prisma.js'
 import { getAuthContext } from '../../lib/auth.js'
 import { IMPLEMENTATION_MESSAGES } from '../../shared/implementation/messages.js'
 import {
-  buildPackagingEdges,
-  resolveBasePresentation,
-  resolveFactorToBase,
-  resolvePresentationEntry,
+  convertAmountToBaseUnit,
+  convertQuantityToBaseUnits,
+  resolvePackagingOperationContext,
 } from '../../lib/productPackaging.js'
 
 function createHttpError(statusCode: number, message: string) {
@@ -221,7 +220,27 @@ export async function createInitialInventoryLoad(
     throw createHttpError(400, 'Registra al menos un lote para cargar inventario.')
   }
 
-  const uniqueProducts = new Set(payload.items.map((item) => item.productoId))
+  const normalizedItems = payload.items.map((item) => {
+    const requestedQuantity = Math.floor(item.cantidad)
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
+      throw createHttpError(400, 'La cantidad debe ser un entero mayor a 0.')
+    }
+
+    const requestedUnitCost = Number(item.costoUnitario)
+    if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
+      throw createHttpError(400, 'El costo unitario debe ser mayor o igual a 0.')
+    }
+
+    return {
+      ...item,
+      requestedQuantity,
+      requestedUnitCost,
+      lotCode: normalizeLotCode(item.numeroLote),
+      expiryDate: parseExpiryDate(item.fechaVencimiento),
+    }
+  })
+
+  const uniqueProducts = new Set(normalizedItems.map((item) => item.productoId))
 
   type LoadWithRelations = Prisma.CargaInventarioInicialGetPayload<{
     include: {
@@ -277,25 +296,33 @@ export async function createInitialInventoryLoad(
       }
 
       const payloadLots = new Set<string>()
-      for (const item of payload.items) {
-        const lotCode = normalizeLotCode(item.numeroLote)
-        const key = `${item.productoId}:${lotCode}`
+      for (const item of normalizedItems) {
+        const key = `${item.productoId}:${item.lotCode}`
         if (payloadLots.has(key)) {
           throw createHttpError(409, lotAlreadyExistsMessage())
         }
         payloadLots.add(key)
+      }
 
-        const existingLot = await tx.lote.findFirst({
-          where: {
-            deletedAt: null,
-            sucursalId: branchId,
-            productoId: item.productoId,
-            numeroLote: lotCode,
-          },
-          select: { id: true },
-        })
+      const existingLots = await tx.lote.findMany({
+        where: {
+          deletedAt: null,
+          sucursalId: branchId,
+          productoId: { in: productIds },
+        },
+        select: {
+          productoId: true,
+          numeroLote: true,
+        },
+      })
 
-        if (existingLot) {
+      const existingLotKeys = new Set(
+        existingLots.map((lot) => `${lot.productoId}:${normalizeLotCode(lot.numeroLote)}`),
+      )
+
+      for (const item of normalizedItems) {
+        const key = `${item.productoId}:${item.lotCode}`
+        if (existingLotKeys.has(key)) {
           throw createHttpError(409, lotAlreadyExistsMessage())
         }
       }
@@ -312,7 +339,7 @@ export async function createInitialInventoryLoad(
           sucursalId: branchId,
           estado: 'COMPLETADA',
           productosCargados: uniqueProducts.size,
-          lotesCreados: payload.items.length,
+          lotesCreados: normalizedItems.length,
           createdById: userId,
           updatedById: userId,
         },
@@ -331,12 +358,7 @@ export async function createInitialInventoryLoad(
         },
       })
 
-      for (const item of payload.items) {
-        const requestedQuantity = Math.floor(item.cantidad)
-        if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
-          throw createHttpError(400, 'La cantidad debe ser un entero mayor a 0.')
-        }
-
+      for (const item of normalizedItems) {
         const product = productById.get(item.productoId) ?? null
         if (!product) {
           throw createHttpError(404, IMPLEMENTATION_MESSAGES.PRODUCT_NOT_FOUND)
@@ -346,55 +368,39 @@ export async function createInitialInventoryLoad(
           throw createHttpError(400, IMPLEMENTATION_MESSAGES.PRODUCT_INACTIVE)
         }
 
-        const basePresentation = resolveBasePresentation(product.presentacionesEmpaque ?? [])
-        if (!basePresentation) {
-          throw createHttpError(400, 'El producto no tiene una presentación base configurada.')
-        }
-
         const purchasePresentationId =
-          product.compraPresentacionId ?? basePresentation.presentacion.id
+          product.compraPresentacionId ??
+          product.presentacionesEmpaque.find((entry) => entry.esBase)?.presentacion.id ??
+          ''
 
-        const resolvedPresentation = resolvePresentationEntry({
+        const packagingContext = resolvePackagingOperationContext({
           operation: 'INVENTORY_IN',
           presentationId: purchasePresentationId,
           presentations: product.presentacionesEmpaque ?? [],
-        })
-
-        if (!resolvedPresentation.ok) {
-          throw createHttpError(400, resolvedPresentation.error)
-        }
-
-        const edges = buildPackagingEdges(product.conversionesEmpaque ?? [])
-        const factor = resolveFactorToBase({
-          presentationId: purchasePresentationId,
-          basePresentationId: basePresentation.presentacion.id,
-          edges,
-        })
-
-        if (!factor) {
-          throw createHttpError(
-            400,
+          conversions: product.conversionesEmpaque ?? [],
+          unresolvedFactorMessage:
             'No fue posible resolver la equivalencia para la presentación principal de compra.',
-          )
+        })
+
+        if (!packagingContext.ok) {
+          throw createHttpError(400, packagingContext.error)
         }
 
-        const quantity = requestedQuantity * Number(factor)
-        if (!Number.isFinite(quantity) || quantity <= 0) {
+        const quantity = convertQuantityToBaseUnits({
+          quantity: item.requestedQuantity,
+          factorToBase: packagingContext.factorToBase,
+        })
+        if (quantity === null) {
           throw createHttpError(400, 'La cantidad convertida no es válida.')
         }
 
-        const requestedUnitCost = Number(item.costoUnitario)
-        if (!Number.isFinite(requestedUnitCost) || requestedUnitCost < 0) {
-          throw createHttpError(400, 'El costo unitario debe ser mayor o igual a 0.')
-        }
-
-        const costoUnitario = requestedUnitCost / Number(factor)
-        if (!Number.isFinite(costoUnitario) || costoUnitario < 0) {
+        const costoUnitario = convertAmountToBaseUnit({
+          amount: item.requestedUnitCost,
+          factorToBase: packagingContext.factorToBase,
+        })
+        if (costoUnitario === null) {
           throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
         }
-
-        const expiryDate = parseExpiryDate(item.fechaVencimiento)
-        const lotCode = normalizeLotCode(item.numeroLote)
 
         await tx.inventario.upsert({
           where: {
@@ -419,16 +425,16 @@ export async function createInitialInventoryLoad(
             productoId: item.productoId,
             proveedorId: null,
             detalleCompraId: null,
-            numeroLote: lotCode,
+            numeroLote: item.lotCode,
             fechaFabricacion: null,
-            fechaVencimiento: expiryDate,
+            fechaVencimiento: item.expiryDate,
             costoUnitario: toDecimal(costoUnitario, 6),
             stockInicial: quantity,
             stockDisponible: quantity,
             stockReservado: 0,
             stockBloqueado: 0,
             estado: resolveLotStatus({
-              expiryDate,
+              expiryDate: item.expiryDate,
               availableUnits: quantity,
               reservedUnits: 0,
               blockedUnits: 0,
@@ -464,8 +470,8 @@ export async function createInitialInventoryLoad(
             sucursalId: branchId,
             productoId: item.productoId,
             loteId: lot.id,
-            numeroLote: lotCode,
-            fechaVencimiento: expiryDate,
+            numeroLote: item.lotCode,
+            fechaVencimiento: item.expiryDate,
             costoUnitario: toDecimal(costoUnitario, 6),
             cantidad: quantity,
             createdById: userId,
@@ -475,7 +481,7 @@ export async function createInitialInventoryLoad(
       }
 
       return load
-    })
+    }, { maxWait: 10_000, timeout: 60_000 })
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       throw createHttpError(409, lotAlreadyExistsMessage())

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Loader } from '@/components/ui/loader'
 import { ReceiptViewer } from '@/components/sales/ReceiptViewer'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { salesService } from '@/services/salesService'
 import { auditService } from '@/services/auditService'
@@ -48,7 +49,7 @@ function getApiErrorMessage(error: unknown) {
 }
 
 export function VentaTicketPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
   const params = useParams()
   const [searchParams] = useSearchParams()
@@ -63,10 +64,7 @@ export function VentaTicketPage() {
     setHasLoggedView(false)
   }, [saleId])
 
-  const handleUnauthorized = useCallback(async () => {
-    toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-    await logout()
-  }, [logout])
+  const handleUnauthorized = useHandleUnauthorized('VentaTicketPage')
 
   const loadReceipt = useCallback(async () => {
     if (!accessToken || !saleId) {

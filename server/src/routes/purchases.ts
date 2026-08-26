@@ -10,9 +10,11 @@ import {
   createPurchaseOrder,
   createPurchaseReception,
   getPurchaseDashboard,
+  getPurchaseOrderById,
   registerPurchasePayment,
   receivePurchaseItem,
   returnPurchaseItem,
+  updatePurchaseOrder,
 } from '../modules/purchases/purchases.service.js'
 
 const purchaseDashboardQuerySchema = z.object({
@@ -22,6 +24,10 @@ const purchaseDashboardQuerySchema = z.object({
   financialStatus: z.nativeEnum(EstadoCompraFinanciero).optional(),
   branchId: z.string().uuid().optional(),
   supplierId: z.string().uuid().optional(),
+})
+
+const getPurchaseOrderParamSchema = z.object({
+  id: z.string().uuid(),
 })
 
 const createPurchaseOrderSchema = z.object({
@@ -45,6 +51,14 @@ const createPurchaseOrderSchema = z.object({
     )
     .min(1),
 })
+
+const updatePurchaseOrderParamSchema = z.object({
+  id: z.string().uuid(),
+})
+
+const updatePurchaseOrderBodySchema = createPurchaseOrderSchema
+  .partial()
+  .required({ items: true })
 
 const receivePurchaseItemSchema = z.object({
   detalleCompraId: z.string().uuid(),
@@ -86,9 +100,20 @@ export async function purchaseRoutes(app: FastifyInstance) {
     return getPurchaseDashboard(query, request)
   })
 
+  app.get('/orders/:id', async (request) => {
+    const { id } = getPurchaseOrderParamSchema.parse(request.params)
+    return getPurchaseOrderById(id, request)
+  })
+
   app.post('/orders', async (request) => {
     const body = createPurchaseOrderSchema.parse(request.body)
     return createPurchaseOrder(body, request)
+  })
+
+  app.put('/orders/:id', async (request) => {
+    const { id } = updatePurchaseOrderParamSchema.parse(request.params)
+    const body = updatePurchaseOrderBodySchema.parse(request.body)
+    return updatePurchaseOrder(id, body, request)
   })
 
   app.post('/receipts', async (request) => {

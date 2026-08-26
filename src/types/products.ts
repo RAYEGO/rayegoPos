@@ -1,5 +1,19 @@
 export type ProductStatus = 'ACTIVO' | 'INACTIVO' | 'DESCONTINUADO'
 
+export type ProductPackagingSummary = {
+  presentationId: string
+  presentationName: string
+  factorToBase: number
+  expression: string
+}
+
+export type ProductPackagingBreakdownEntry = {
+  presentationId: string
+  presentationName: string
+  factorToBase: number
+  quantity: number
+}
+
 export type ProductCatalogItem = {
   id: string
   sku: string
@@ -48,6 +62,11 @@ export type ProductCatalogItem = {
       toPresentationId: string
       quantity: number
     }>
+    summaries: ProductPackagingSummary[]
+    stockBreakdown: {
+      available: ProductPackagingBreakdownEntry[]
+      reserved: ProductPackagingBreakdownEntry[]
+    }
   }
   activePrinciple: string | null
   activePrincipleId: string | null
@@ -75,6 +94,37 @@ export type ProductPackagingConversionInput = {
   desdePresentacionId: string
   haciaPresentacionId: string
   cantidad: number
+}
+
+export type ProductPackagingChainStepInput = {
+  presentacionId: string
+  permiteCompra: boolean
+  permiteVenta: boolean
+  precioVenta?: number
+  cantidad?: number
+}
+
+export type ProductPackagingPreviewPayload = {
+  cadenaEmpaque: ProductPackagingChainStepInput[]
+}
+
+export type ProductPackagingPreviewResponse = {
+  preview: {
+    basePresentationId: string
+    basePresentationName: string
+    purchasePresentationId: string
+    purchasePresentationName: string
+    presentations: Array<{
+      presentationId: string
+      presentationName: string
+      isBase: boolean
+      allowsPurchase: boolean
+      allowsSale: boolean
+      salePrice: number | null
+    }>
+    summaries: ProductPackagingSummary[]
+    totalEquivalence: ProductPackagingSummary | null
+  }
 }
 
 export type ProductCatalogResponse = {
@@ -291,11 +341,13 @@ export type CreateProductPayload = {
   tipoComercialId: string
   presentacionId?: string
   unidadMedidaId: string
-  compraPresentacionId: string
-  basePresentacionId: string
-  presentacionesEmpaque: ProductPackagingPresentationInput[]
+  compraPresentacionId?: string
+  basePresentacionId?: string
+  presentacionesEmpaque?: ProductPackagingPresentationInput[]
   conversionesEmpaque?: ProductPackagingConversionInput[]
+  cadenaEmpaque?: ProductPackagingChainStepInput[]
   principioActivoId: string
+  principioActivoIds?: string[]
   sku: string
   codigoBarras?: string
   nombre: string
@@ -304,7 +356,7 @@ export type CreateProductPayload = {
   registroSanitario?: string
   requiereReceta: boolean
   esControlado: boolean
-  costoReferencia: number
+  costoReferencia?: number
   observaciones?: string
 }
 

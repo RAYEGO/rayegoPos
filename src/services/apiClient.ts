@@ -1,22 +1,37 @@
 import { API_BASE_URL } from '@/config/auth'
+import { authMockService } from '@/services/authMockService'
+import {
+  clearAllSessionStorage,
+  performTokenRefresh,
+  peekStoredSession,
+} from '@/services/tokenManager'
+import { isAccessTokenValid } from '@/utils/jwt'
 
 type ApiRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   accessToken?: string
+  skipAuth?: boolean
+  skipRefresh?: boolean
 }
 
 type ApiErrorPayload = {
   message?: string
+  code?: string
+  issues?: {
+    formErrors?: string[]
+    fieldErrors?: Record<string, string[] | undefined>
+  }
 }
 
 export class ApiError extends Error {
   status: number
-
-  constructor(message: string, status: number) {
+  code?: string
+  constructor(message: string, status: number, code?: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -27,100 +42,166 @@ export class ApiNetworkError extends Error {
   }
 }
 
+export type ApiRawResult<T> =
+  | { ok: true; data: T; status: number }
+  | {
+      ok: false
+      data: ApiErrorPayload | null
+      status: number
+      errorMessage: string
+      code?: string
+    }
+
+function getFirstApiValidationMessage(payload: ApiErrorPayload | null) {
+  const formMessage = payload?.issues?.formErrors?.find(
+    (entry) => typeof entry === 'string' && entry.trim().length > 0,
+  )
+  if (formMessage) return formMessage
+
+  const fieldEntries = Object.entries(payload?.issues?.fieldErrors ?? {})
+  for (const [field, messages] of fieldEntries) {
+    const message = messages?.find((entry) => typeof entry === 'string' && entry.trim().length > 0)
+    if (message) return `${field}: ${message}`
+  }
+  return null
+}
+
+function resolveAccessToken(explicitToken?: string): string | undefined {
+  if (explicitToken) return explicitToken
+  const stored = peekStoredSession()
+  return stored?.accessToken
+}
+
+export async function apiRequestRaw<T>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<ApiRawResult<T>> {
+  const method = options.method ?? 'GET'
+  const authToken = options.skipAuth ? undefined : resolveAccessToken(options.accessToken)
+  const authPreview = authToken
+    ? `Bearer ${authToken.slice(0, 16)}...`
+    : '(sin Authorization header)'
+  console.debug(`[API] REQUEST → ${method} ${path} | Authorization: ${authPreview}`)
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    })
+  } catch {
+    return {
+      ok: false,
+      data: null,
+      status: 0,
+      errorMessage: 'No fue posible conectar con la API. Verifica que el backend esté levantado.',
+    }
+  }
+
+  if (response.status === 204) {
+    console.debug(`[API] RESPONSE ← ${method} ${path} | status=${response.status} (no content)`)
+    return { ok: true, data: undefined as T, status: response.status }
+  }
+
+  const payload = (await response.json().catch(() => null)) as ApiErrorPayload | T | null
+
+  if (!response.ok) {
+    const errPayload = payload as ApiErrorPayload | null
+    const apiMessage =
+      getFirstApiValidationMessage(errPayload) ??
+      errPayload?.message ??
+      'La API respondió con un error.'
+    console.warn(
+      `[API] RESPONSE ERROR ← ${method} ${path} | status=${response.status} | message="${apiMessage}" | payloadKeys=${errPayload ? Object.keys(errPayload).join(',') : 'null'}`,
+    )
+    return {
+      ok: false,
+      data: errPayload,
+      status: response.status,
+      errorMessage: apiMessage,
+      code: errPayload?.code,
+    }
+  }
+
+  console.debug(
+    `[API] RESPONSE OK ← ${method} ${path} | status=${response.status} | bodyKeys=${payload ? Object.keys(payload as Record<string, unknown>).join(',') : 'null'}`,
+  )
+  return { ok: true, data: payload as T, status: response.status }
+}
+
 export async function apiRequest<T>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      method: options.method ?? 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.accessToken
-          ? { Authorization: `Bearer ${options.accessToken}` }
-          : {}),
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    })
-
-    if (response.status === 204) {
-      return undefined as T
+  if (!options.skipAuth && !options.accessToken && !options.skipRefresh) {
+    const stored = peekStoredSession()
+    if (stored?.accessToken && !isAccessTokenValid(stored.accessToken, 30_000)) {
+      if (stored.refreshToken) {
+        console.debug(
+          `[API] Access token cerca de expirar antes de ${path}. Intentando refresh silencioso.`,
+        )
+        const ref = await performTokenRefresh()
+        if (ref.ok && ref.session.accessToken) {
+          options = { ...options, accessToken: ref.session.accessToken }
+        }
+      }
     }
-
-    const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null
-
-    // #region debug-point module-white-screen:api-shape
-    ;(() => {
-      const url = 'http://127.0.0.1:7777/event'
-      const sessionId = 'module-white-screen'
-      const runId = 'pre-fix'
-      const shouldReport =
-        path.startsWith('/api/customers') ||
-        path.startsWith('/api/products') ||
-        path.startsWith('/api/sales') ||
-        path.startsWith('/api/purchases') ||
-        path.startsWith('/api/inventory') ||
-        path.startsWith('/api/cashier')
-
-      if (!shouldReport) return
-
-      const keys =
-        payload && typeof payload === 'object'
-          ? Object.keys(payload as Record<string, unknown>)
-          : []
-
-      fetch(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          runId,
-          hypothesisId: 'B',
-          location: 'src/services/apiClient.ts',
-          msg: '[DEBUG] api.response.shape',
-          data: {
-            path,
-            status: response.status,
-            ok: response.ok,
-            keys,
-            hasOptions: Boolean(payload && typeof payload === 'object' && 'options' in payload),
-          },
-          ts: Date.now(),
-        }),
-      }).catch(() => null)
-    })()
-    // #endregion
-
-    if (!response.ok) {
-      throw new ApiError(
-        payload?.message ?? 'La API respondió con un error.',
-        response.status,
-      )
-    }
-
-    return payload as T
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error
-    }
-
-    throw new ApiNetworkError(
-      'No fue posible conectar con la API. Verifica que el backend esté levantado.',
-    )
   }
+
+  let result = await apiRequestRaw<T>(path, options)
+
+  if (
+    !options.skipAuth &&
+    !options.skipRefresh &&
+    !result.ok &&
+    result.status === 401
+  ) {
+    const stored = peekStoredSession()
+    const hasRefresh = Boolean(stored?.refreshToken)
+    const sessionIsMock = stored && authMockService.isMockSession(stored)
+
+    if (!sessionIsMock && hasRefresh) {
+      console.warn(
+        `[API] 401 en ${path}. Se intentará renovar accessToken vía refreshToken y reintentar una vez.`,
+      )
+      const refresh = await performTokenRefresh()
+      if (refresh.ok) {
+        result = await apiRequestRaw<T>(path, {
+          ...options,
+          accessToken: refresh.session.accessToken,
+          skipRefresh: true,
+        })
+      } else if (refresh.code === 'REFRESH_INVALID') {
+        console.warn(
+          `[API] Refresh token inválido/expirado en ${path}. Destruyendo sesión almacenada.`,
+        )
+        clearAllSessionStorage()
+      }
+    }
+  }
+
+  if (result.ok) return result.data
+
+  if (result.status === 0) {
+    throw new ApiNetworkError(result.errorMessage)
+  }
+  throw new ApiError(result.errorMessage, result.status, result.code)
 }
 
 export async function apiRequestBlob(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<Blob> {
+  const authToken = options.skipAuth ? undefined : resolveAccessToken(options.accessToken)
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       method: options.method ?? 'GET',
       headers: {
-        ...(options.accessToken
-          ? { Authorization: `Bearer ${options.accessToken}` }
-          : {}),
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
     })
@@ -132,10 +213,7 @@ export async function apiRequestBlob(
 
     return response.blob()
   } catch (error) {
-    if (error instanceof ApiError) {
-      throw error
-    }
-
+    if (error instanceof ApiError) throw error
     throw new ApiNetworkError(
       'No fue posible conectar con la API. Verifica que el backend esté levantado.',
     )
