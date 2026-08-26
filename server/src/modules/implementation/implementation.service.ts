@@ -7,7 +7,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import { IMPLEMENTATION_MESSAGES } from '../../shared/implementation/messages.js'
 import {
   convertAmountToBaseUnit,
@@ -171,7 +171,7 @@ function lotAlreadyExistsMessage() {
 }
 
 export async function getInitialInventoryLoads(request: FastifyRequest) {
-  const { branchId } = await getAuthContext(request)
+  const { branchId } = await requireBranchAuthContext(request)
   assertAdmin(request)
 
   const loads = await prisma.cargaInventarioInicial.findMany({
@@ -212,7 +212,7 @@ export async function createInitialInventoryLoad(
   payload: InventoryInitialLoadPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId, companyId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
   assertAdmin(request)
   await assertCompanyInImplementationMode(companyId)
 
@@ -508,7 +508,7 @@ type PurgeTestDataPayload = {
 }
 
 export async function purgeTestData(payload: PurgeTestDataPayload, request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   assertAdmin(request)
   await assertCompanyInImplementationMode(companyId)
 

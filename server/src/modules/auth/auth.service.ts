@@ -6,8 +6,27 @@ import {
   getPermissionsForRoles,
   getRoleLabel,
   isAuthRole,
+  isPlatformAdminRole,
 } from './auth.permissions.js'
-import type { AuthBranch, AuthLoginResponse, AuthSession } from './auth.types.js'
+import type { AuthBranch, AuthLoginResponse, AuthRole, AuthSession } from './auth.types.js'
+
+const BOTICA_DEFAULT_MODULES = [
+  'dashboard',
+  'ventas',
+  'compras',
+  'productos',
+  'inventario',
+  'lotes',
+  'kardex',
+  'clientes',
+  'proveedores',
+  'caja',
+  'reportes',
+  'configuracion',
+  'usuarios',
+  'sesiones',
+  'auditoria',
+]
 
 type LoginPayload = {
   email: string
@@ -33,7 +52,7 @@ type AuthTokenPayload = {
   roles?: string[]
 }
 
-type AuthenticatedUser = Awaited<ReturnType<typeof findUserByIdentifier>>
+type AuthenticatedUser = any
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -41,105 +60,174 @@ function createHttpError(statusCode: number, message: string) {
   return error
 }
 
-async function findUserByIdentifier(identifier: string) {
+function isSchemaMismatchError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = String(err?.message ?? '')
+  if (/column.*tipo_empresa_id.*does not exist/i.test(msg)) return true
+  if (/does not exist.*tipo_empresa_id/i.test(msg)) return true
+  if (/Unknown argument `tipoEmpresaId`/i.test(msg)) return true
+  if (/Unknown argument `tipoEmpresa`/i.test(msg)) return true
+  return false
+}
+
+function withBoticaFallback<U extends { empresa: any } | null>(user: U): U {
+  if (!user) return user
+  if (!user.empresa) return user
+  const empresa = user.empresa as unknown as Record<string, unknown>
+  if (empresa.tipoEmpresaId == null) {
+    empresa.tipoEmpresaId = '00000000-0000-0000-0000-000000000001'
+  }
+  if (!empresa.tipoEmpresa) {
+    empresa.tipoEmpresa = {
+      id: String(empresa.tipoEmpresaId ?? '00000000-0000-0000-0000-000000000001'),
+      codigo: 'BOTICA',
+      nombre: 'Botica y Farmacia',
+      modulos: BOTICA_DEFAULT_MODULES.map((moduloCodigo) => ({ moduloCodigo })),
+    }
+  } else if (
+    Array.isArray((empresa.tipoEmpresa as any).modulos) === false ||
+    (empresa.tipoEmpresa as any).modulos.length === 0
+  ) {
+    const tipo = empresa.tipoEmpresa as any
+    tipo.modulos = BOTICA_DEFAULT_MODULES.map((moduloCodigo) => ({ moduloCodigo }))
+  }
+  return user
+}
+
+async function findUserByIdentifier(identifier: string): Promise<AuthenticatedUser | null> {
   const normalizedIdentifier = identifier.trim().toLowerCase()
   const now = new Date()
 
-  return prisma.usuario.findFirst({
-    where: {
-      deletedAt: null,
-      activo: true,
-      OR: [
-        {
-          email: normalizedIdentifier,
+  const baseInclude = {
+    sucursal: {
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        empresaId: true,
+        activo: true,
+        deletedAt: true,
+        empresa: {
+          select: { razonSocial: true },
         },
-        {
-          username: normalizedIdentifier,
-        },
-      ],
+      },
     },
-    include: {
-      sucursal: {
-        select: {
-          id: true,
-          codigo: true,
-          nombre: true,
-          empresaId: true,
-          activo: true,
-          deletedAt: true,
-          empresa: {
-            select: {
-              razonSocial: true,
-            },
+    usuarioSucursales: {
+      where: { deletedAt: null, activo: true },
+      include: {
+        sucursal: {
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            empresaId: true,
+            empresa: { select: { razonSocial: true } },
+            activo: true,
+            deletedAt: true,
           },
         },
-      },
-      usuarioSucursales: {
-        where: {
-          deletedAt: null,
-          activo: true,
-        },
-        include: {
-          sucursal: {
-            select: {
-              id: true,
-              codigo: true,
-              nombre: true,
-              empresaId: true,
-              empresa: {
-                select: {
-                  razonSocial: true,
-                },
-              },
-              activo: true,
-              deletedAt: true,
-            },
-          },
-          rol: {
-            include: {
-              rolesPermisos: {
-                where: {
-                  deletedAt: null,
-                },
-                include: {
-                  permiso: {
-                    select: {
-                      codigo: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      usuariosRoles: {
-        where: {
-          deletedAt: null,
-          activo: true,
-          OR: [{ fechaFin: null }, { fechaFin: { gte: now } }],
-        },
-        include: {
-          rol: {
-            include: {
-              rolesPermisos: {
-                where: {
-                  deletedAt: null,
-                },
-                include: {
-                  permiso: {
-                    select: {
-                      codigo: true,
-                    },
-                  },
-                },
-              },
+        rol: {
+          include: {
+            rolesPermisos: {
+              where: { deletedAt: null },
+              include: { permiso: { select: { codigo: true } } },
             },
           },
         },
       },
     },
-  })
+    usuariosRoles: {
+      where: {
+        deletedAt: null,
+        activo: true,
+        OR: [{ fechaFin: null }, { fechaFin: { gte: now } }],
+      },
+      include: {
+        rol: {
+          include: {
+            rolesPermisos: {
+              where: { deletedAt: null },
+              include: { permiso: { select: { codigo: true } } },
+            },
+          },
+        },
+      },
+    },
+  } as any
+
+  const where = {
+    deletedAt: null,
+    activo: true,
+    OR: [{ email: normalizedIdentifier }, { username: normalizedIdentifier }],
+  } as any
+
+  try {
+    const user = (await prisma.usuario.findFirst({
+      where,
+      include: {
+        empresa: {
+          select: {
+            id: true,
+            razonSocial: true,
+            tipoEmpresaId: true,
+            tipoEmpresa: {
+              select: {
+                id: true,
+                codigo: true,
+                nombre: true,
+                modulos: { select: { moduloCodigo: true } },
+              },
+            },
+          },
+        },
+        ...baseInclude,
+      },
+    })) as AuthenticatedUser | null
+
+    return withBoticaFallback(user)
+  } catch (err) {
+    if (!isSchemaMismatchError(err)) {
+      throw err
+    }
+
+    const user = (await prisma.usuario.findFirst({
+      where,
+      include: {
+        empresa: {
+          select: {
+            id: true,
+            razonSocial: true,
+          },
+        },
+        ...baseInclude,
+      },
+    })) as AuthenticatedUser | null
+
+    return withBoticaFallback(user)
+  }
+}
+
+function resolveGlobalRoles(
+  user: NonNullable<AuthenticatedUser>,
+): { roles: AuthRole[]; permissions: string[] } {
+  const roles = user.usuariosRoles
+    .map((entry: any) => entry.rol.codigo)
+    .filter(isAuthRole)
+
+  const dbPermissions = user.usuariosRoles.flatMap((entry: any) =>
+    entry.rol.rolesPermisos.map((permission: any) => permission.permiso.codigo),
+  )
+  const rolePermissions = getPermissionsForRoles(roles)
+  const permissions = rolePermissions.includes('*')
+    ? ['*']
+    : Array.from(new Set([...dbPermissions, ...rolePermissions]))
+
+  return { roles, permissions }
+}
+
+function hasPlatformAdminRole(user: NonNullable<AuthenticatedUser>): boolean {
+  const { roles } = resolveGlobalRoles(user)
+  return roles.some((r) => isPlatformAdminRole(r))
 }
 
 function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBranch[] {
@@ -147,8 +235,8 @@ function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBra
   const companyIds = new Set<string>()
 
   const memberships = user.usuarioSucursales
-    .filter((entry) => entry.sucursal.activo && entry.sucursal.deletedAt === null)
-    .map((entry) => {
+    .filter((entry: any) => entry.sucursal.activo && entry.sucursal.deletedAt === null)
+    .map((entry: any) => {
       companyIds.add(entry.sucursal.empresaId)
       return {
         id: entry.sucursal.id,
@@ -175,7 +263,7 @@ function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBra
   }
 
   if (memberships.length > 0) {
-    return memberships.filter((branch) => branch.companyId === userCompanyId)
+    return memberships.filter((branch: any) => branch.companyId === userCompanyId)
   }
 
   if (user.sucursal) {
@@ -198,18 +286,18 @@ function resolveRoleContext(
   branchId: string,
 ) {
   const membership = user.usuarioSucursales.find(
-    (entry) => entry.sucursal.id === branchId,
+    (entry: any) => entry.sucursal.id === branchId,
   )
 
   const roles = membership
     ? [membership.rol.codigo].filter(isAuthRole)
-    : user.usuariosRoles.map((entry) => entry.rol.codigo).filter(isAuthRole)
+    : user.usuariosRoles.map((entry: any) => entry.rol.codigo).filter(isAuthRole)
 
   const primaryRole = roles[0] ?? 'CAJERO'
   const dbPermissions = membership
-    ? membership.rol.rolesPermisos.map((permission) => permission.permiso.codigo)
-    : user.usuariosRoles.flatMap((entry) =>
-        entry.rol.rolesPermisos.map((permission) => permission.permiso.codigo),
+    ? membership.rol.rolesPermisos.map((permission: any) => permission.permiso.codigo)
+    : user.usuariosRoles.flatMap((entry: any) =>
+        entry.rol.rolesPermisos.map((permission: any) => permission.permiso.codigo),
       )
   const rolePermissions = getPermissionsForRoles(roles)
   const permissions =
@@ -222,13 +310,89 @@ function resolveRoleContext(
   return { roles, primaryRole, permissions }
 }
 
+function resolveEnabledModules(
+  user: NonNullable<AuthenticatedUser>,
+): { companyTypeId: string | null; companyTypeCode: string | null; enabledModules: string[] } {
+  const tipoEmpresa = user.empresa?.tipoEmpresa
+  if (!tipoEmpresa) {
+    return {
+      companyTypeId: null,
+      companyTypeCode: null,
+      enabledModules: [],
+    }
+  }
+
+  const enabledModules = tipoEmpresa.modulos
+    .map((m: any) => m.moduloCodigo)
+    .filter(Boolean) as string[]
+
+  return {
+    companyTypeId: tipoEmpresa.id,
+    companyTypeCode: tipoEmpresa.codigo,
+    enabledModules,
+  }
+}
+
 function buildSessionFromUser(
   user: NonNullable<AuthenticatedUser>,
-  branch: AuthBranch,
+  branch: AuthBranch | null,
   accessToken: string,
   refreshToken: string,
 ): AuthSession {
-  const { roles, primaryRole, permissions } = resolveRoleContext(user, branch.id)
+  const isPlatformAdmin = hasPlatformAdminRole(user)
+  const moduleCtx = resolveEnabledModules(user)
+
+  let roles: AuthRole[]
+  let primaryRole: AuthRole
+  let permissions: AuthSession['user']['permissions']
+  let companyId: string
+  let companyName: string
+  let branchId: string | null
+  let branchCode: string | null
+  let branchName: string | null
+  let companyTypeId: string | null
+  let companyTypeCode: string | null
+  let enabledModules: string[]
+
+  if (isPlatformAdmin && !branch) {
+    const globalCtx = resolveGlobalRoles(user)
+    roles = globalCtx.roles
+    primaryRole = roles[0] ?? 'ADMIN_POS'
+    const perms = globalCtx.permissions
+    permissions = (perms.includes('*') ? ['*'] : perms) as AuthSession['user']['permissions']
+    companyId = user.empresaId
+    companyName = user.empresa?.razonSocial ?? 'Plataforma'
+    branchId = null
+    branchCode = null
+    branchName = null
+    companyTypeId = null
+    companyTypeCode = null
+    enabledModules = [
+      'dashboard',
+      'tipos_empresa',
+      'empresas',
+      'usuarios',
+      'sesiones',
+      'auditoria',
+      'reportes',
+      'configuracion',
+    ]
+  } else if (branch) {
+    const roleCtx = resolveRoleContext(user, branch.id)
+    roles = roleCtx.roles
+    primaryRole = roleCtx.primaryRole
+    permissions = roleCtx.permissions
+    companyId = branch.companyId
+    companyName = branch.companyName
+    branchId = branch.id
+    branchCode = branch.code
+    branchName = branch.name
+    companyTypeId = moduleCtx.companyTypeId
+    companyTypeCode = moduleCtx.companyTypeCode
+    enabledModules = moduleCtx.enabledModules
+  } else {
+    throw createHttpError(409, 'No se pudo construir la sesión: falta sucursal o rol de plataforma.')
+  }
 
   return {
     accessToken,
@@ -238,11 +402,14 @@ function buildSessionFromUser(
       email: user.email ?? user.username,
       fullName: `${user.nombres} ${user.apellidos}`.trim(),
       roleName: getRoleLabel(primaryRole),
-      companyId: branch.companyId,
-      companyName: branch.companyName,
-      branchId: branch.id,
-      branchCode: branch.code,
-      branchName: branch.name,
+      companyId,
+      companyName,
+      branchId,
+      branchCode,
+      branchName,
+      companyTypeId,
+      companyTypeCode,
+      enabledModules,
       roles,
       permissions,
     },
@@ -326,10 +493,38 @@ export async function login(
     })
   }
 
+  const isPlatformAdmin = hasPlatformAdminRole(user)
+
+  if (isPlatformAdmin && !payload.branchId) {
+    const globalCtx = resolveGlobalRoles(user)
+    const roles = globalCtx.roles
+
+    const { accessToken, refreshToken } = await signSessionTokens(
+      request,
+      user,
+      user.empresaId,
+      null,
+      roles,
+    )
+
+    await prisma.usuario.update({
+      where: { id: user.id },
+      data: { ultimoAccesoAt: new Date() },
+    })
+
+    await writeAuditEntry(user.id, AccionAuditoria.LOGIN, request, {
+      source: 'auth.login',
+      mode: 'platform_admin_branchless',
+    })
+
+    return reply.send(buildSessionFromUser(user, null, accessToken, refreshToken))
+  }
+
   const branches = resolveAvailableBranches(user)
   if (branches.length === 0) {
     return reply.code(409).send({
-      message: 'El usuario no tiene una sucursal asignada.',
+      message:
+        'Tu cuenta no tiene ninguna sucursal asignada. Comunícate con tu administrador para que te autorice el acceso operativo.',
     })
   }
 
@@ -378,6 +573,7 @@ export async function login(
 
   await writeAuditEntry(user.id, AccionAuditoria.LOGIN, request, {
     source: 'auth.login',
+    mode: 'branch',
   })
 
   return reply.send(buildSessionFromUser(user, activeBranch, accessToken, refreshToken))
@@ -412,8 +608,6 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
     })
   }
 
-  const activeBranchId = decoded.branchId ?? null
-
   const user = await prisma.usuario.findFirst({
     where: {
       id: decoded.sub,
@@ -421,6 +615,24 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
       deletedAt: null,
     },
     include: {
+      empresa: {
+        select: {
+          id: true,
+          razonSocial: true,
+          tipoEmpresaId: true,
+          tipoEmpresa: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              modulos: {
+                where: { activo: true },
+                select: { moduloCodigo: true },
+              },
+            },
+          },
+        },
+      },
       sucursal: {
         select: {
           id: true,
@@ -509,7 +721,14 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
     })
   }
 
-  const branches = resolveAvailableBranches(user)
+  const isPlatformAdmin = hasPlatformAdminRole(user as NonNullable<AuthenticatedUser>)
+  const activeBranchId = decoded.branchId ?? null
+
+  if (isPlatformAdmin && !activeBranchId) {
+    return reply.send(buildSessionFromUser(user as NonNullable<AuthenticatedUser>, null, token, token))
+  }
+
+  const branches = resolveAvailableBranches(user as NonNullable<AuthenticatedUser>)
   const selectedBranch =
     activeBranchId ? branches.find((branch) => branch.id === activeBranchId) : branches[0]
 
@@ -519,7 +738,7 @@ export async function getCurrentSession(request: FastifyRequest, reply: FastifyR
     })
   }
 
-  return reply.send(buildSessionFromUser(user, selectedBranch, token, token))
+  return reply.send(buildSessionFromUser(user as NonNullable<AuthenticatedUser>, selectedBranch, token, token))
 }
 
 export async function logout(request: FastifyRequest, reply: FastifyReply) {
@@ -584,6 +803,24 @@ export async function refreshSession(
       deletedAt: null,
     },
     include: {
+      empresa: {
+        select: {
+          id: true,
+          razonSocial: true,
+          tipoEmpresaId: true,
+          tipoEmpresa: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              modulos: {
+                where: { activo: true },
+                select: { moduloCodigo: true },
+              },
+            },
+          },
+        },
+      },
       sucursal: {
         select: {
           id: true,
@@ -673,7 +910,34 @@ export async function refreshSession(
     })
   }
 
-  const branches = resolveAvailableBranches(user)
+  const isPlatformAdmin = hasPlatformAdminRole(user as NonNullable<AuthenticatedUser>)
+
+  if (isPlatformAdmin && !activeBranchId) {
+    const globalCtx = resolveGlobalRoles(user as NonNullable<AuthenticatedUser>)
+    const roles = globalCtx.roles
+
+    const { accessToken, refreshToken } = await signSessionTokens(
+      request,
+      user as NonNullable<AuthenticatedUser>,
+      user.empresaId,
+      null,
+      roles,
+    )
+
+    await prisma.usuario.update({
+      where: { id: user.id },
+      data: { ultimoAccesoAt: new Date() },
+    })
+
+    await writeAuditEntry(user.id, AccionAuditoria.UPDATE, request, {
+      source: 'auth.refreshSession',
+      mode: 'platform_admin_branchless',
+    })
+
+    return reply.send(buildSessionFromUser(user as NonNullable<AuthenticatedUser>, null, accessToken, refreshToken))
+  }
+
+  const branches = resolveAvailableBranches(user as NonNullable<AuthenticatedUser>)
   let selectedBranch = activeBranchId
     ? branches.find((branch) => branch.id === activeBranchId)
     : branches[0]
@@ -696,11 +960,11 @@ export async function refreshSession(
     })
   }
 
-  const { roles } = resolveRoleContext(user, selectedBranch.id)
+  const { roles } = resolveRoleContext(user as NonNullable<AuthenticatedUser>, selectedBranch.id)
 
   const { accessToken, refreshToken } = await signSessionTokens(
     request,
-    user,
+    user as NonNullable<AuthenticatedUser>,
     selectedBranch.companyId,
     selectedBranch.id,
     roles,
@@ -713,9 +977,10 @@ export async function refreshSession(
 
   await writeAuditEntry(user.id, AccionAuditoria.UPDATE, request, {
     source: 'auth.refreshSession',
+    mode: 'branch',
   })
 
-  return reply.send(buildSessionFromUser(user, selectedBranch, accessToken, refreshToken))
+  return reply.send(buildSessionFromUser(user as NonNullable<AuthenticatedUser>, selectedBranch, accessToken, refreshToken))
 }
 
 export async function requestPasswordReset(

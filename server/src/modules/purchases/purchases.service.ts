@@ -15,7 +15,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
   buildPackagingSnapshot,
@@ -409,7 +409,7 @@ function resolveLotStatus({
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const { userId } = await getAuthContext(request)
+  const { userId } = await requireBranchAuthContext(request)
   return userId
 }
 
@@ -1130,7 +1130,7 @@ export async function getPurchaseDashboard(
   request: FastifyRequest,
 ) {
   const search = filters.search?.trim().toLowerCase()
-  const { branchId, companyId } = await getAuthContext(request)
+  const { branchId, companyId } = await requireBranchAuthContext(request)
   const staticOptions = await getPurchaseDashboardStaticOptions(companyId)
 
   if (filters.branchId && filters.branchId !== branchId) {
@@ -1326,7 +1326,7 @@ export async function createPurchaseOrder(
   payload: CreatePurchaseOrderPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId, companyId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
   const targetBranchId = payload.sucursalId ?? branchId
 
   if (payload.sucursalId && payload.sucursalId !== branchId) {
@@ -1642,7 +1642,7 @@ export async function updatePurchaseOrder(
   payload: UpdatePurchaseOrderPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId, companyId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   if (!payload.items.length) {
     throw createHttpError(400, 'La orden debe tener al menos un producto.')
@@ -2114,7 +2114,7 @@ export async function registerPurchasePayment(
   payload: RegisterPurchasePaymentPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId } = await requireBranchAuthContext(request)
   const amount = Number(payload.monto)
   const paymentDate = payload.fechaPago
     ? new Date(`${payload.fechaPago}T00:00:00`)
@@ -3273,7 +3273,7 @@ export async function returnPurchaseItem(
 }
 
 export async function getPurchaseOrderById(orderId: string, request: FastifyRequest) {
-  const { userId, branchId, companyId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   const companyPromise = prisma.empresa.findFirst({
     where: {

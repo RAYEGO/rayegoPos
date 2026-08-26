@@ -8,7 +8,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
@@ -92,7 +92,7 @@ async function ensureOpeningClosePendingState(params: {
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const { userId } = await getAuthContext(request)
+  const { userId } = await requireBranchAuthContext(request)
   return userId
 }
 
@@ -115,7 +115,7 @@ export async function getActiveCashDrawer(
     paymentMethodId?: string
   },
 ) {
-  const { branchId, userId } = await getAuthContext(request)
+  const { branchId, userId } = await requireBranchAuthContext(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
@@ -229,7 +229,7 @@ export async function getCashierDashboard(
   filters: CashierDashboardFilters,
   request: FastifyRequest,
 ) {
-  const { branchId } = await getAuthContext(request)
+  const { branchId } = await requireBranchAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -586,7 +586,7 @@ export async function openCashDrawer(
     observations?: string
   },
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId } = await requireBranchAuthContext(request)
   const targetBranchId = data.branchId ?? branchId
 
   if (data.branchId && data.branchId !== branchId) {

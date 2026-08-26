@@ -6,14 +6,33 @@ export type RouteAccess = {
   allowedRoles?: AuthRole[]
   allowedPermissions?: AuthPermission[]
   match?: 'any' | 'all'
+  moduleCode?: string
 }
 
 export type AccessDecision =
   | { allowed: true }
   | {
       allowed: false
-      reason: 'unauthenticated' | 'forbidden' | 'public-only'
+      reason: 'unauthenticated' | 'forbidden' | 'public-only' | 'module-not-enabled'
     }
+
+export function permissionToModuleCode(permissionCode: string): string {
+  return permissionCode.split('.')[0] ?? permissionCode
+}
+
+export function hasEnabledModule(
+  session: AuthSession | null,
+  moduleCode: string,
+) {
+  if (!session) {
+    return false
+  }
+  const enabledModules = session.user.enabledModules ?? []
+  if (!Array.isArray(enabledModules) || enabledModules.length === 0) {
+    return true
+  }
+  return enabledModules.includes(moduleCode)
+}
 
 export function hasPermission(
   session: AuthSession | null,
@@ -81,5 +100,31 @@ export function evaluateRouteAccess(
     }
   }
 
+  if (access.moduleCode && session) {
+    if (!hasEnabledModule(session, access.moduleCode)) {
+      return { allowed: false, reason: 'module-not-enabled' }
+    }
+  }
+
   return { allowed: true }
+}
+
+export function filterRoutesByEnabledModules<T extends { access?: { moduleCode?: string } }>(
+  routes: T[],
+  session: AuthSession | null,
+): T[] {
+  if (!session) {
+    return routes
+  }
+  const enabledModules = session.user.enabledModules ?? []
+  if (!Array.isArray(enabledModules) || enabledModules.length === 0) {
+    return routes
+  }
+  return routes.filter((route) => {
+    const moduleCode = route.access?.moduleCode
+    if (!moduleCode) {
+      return true
+    }
+    return enabledModules.includes(moduleCode)
+  })
 }

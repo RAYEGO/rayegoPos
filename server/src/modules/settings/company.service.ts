@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -81,7 +81,7 @@ function mapCompany(company: {
 
 export async function getCompanyProfile(request: FastifyRequest) {
   assertAdmin(request)
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const company = await prisma.empresa.findFirst({
     where: {
@@ -131,7 +131,7 @@ export async function updateCompanyProfile(
   request: FastifyRequest,
 ) {
   assertAdmin(request)
-  const { companyId, userId } = await getAuthContext(request)
+  const { companyId, userId } = await requireBranchAuthContext(request)
 
   const existing = await prisma.empresa.findFirst({
     where: {
@@ -194,7 +194,7 @@ export async function updateCompanyOperationMode(
   request: FastifyRequest,
 ) {
   assertAdmin(request)
-  const { companyId, userId } = await getAuthContext(request)
+  const { companyId, userId } = await requireBranchAuthContext(request)
 
   const existing = await prisma.empresa.findFirst({
     where: {
@@ -330,7 +330,7 @@ async function supabaseStorageRequest({
 
 export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, request: FastifyRequest) {
   assertAdmin(request)
-  const { companyId, userId } = await getAuthContext(request)
+  const { companyId, userId } = await requireBranchAuthContext(request)
   const { url, serviceKey } = getSupabaseConfig()
 
   const extension = normalizeImageExtension(payload.mimeType)
@@ -429,7 +429,7 @@ export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, reque
 
 export async function deleteCompanyLogo(request: FastifyRequest) {
   assertAdmin(request)
-  const { companyId, userId } = await getAuthContext(request)
+  const { companyId, userId } = await requireBranchAuthContext(request)
   const { url, serviceKey } = getSupabaseConfig()
 
   const bucket = 'company-logos'

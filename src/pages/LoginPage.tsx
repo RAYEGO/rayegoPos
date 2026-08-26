@@ -8,13 +8,6 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useAuth } from '@/hooks/useAuth'
 import { AuthScreenHeader } from '@/modules/auth/AuthScreenHeader'
 import {
@@ -24,6 +17,7 @@ import {
 import { paths } from '@/routes/paths'
 import { BranchSelectionRequiredError, authService } from '@/services/authService'
 import type { AuthBranch } from '@/types/auth'
+import { ArrowLeft, Building2, MapPin, Store } from 'lucide-react'
 
 type RedirectState = {
   from?: {
@@ -37,7 +31,8 @@ export function LoginPage() {
   const { login } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableBranches, setAvailableBranches] = useState<AuthBranch[]>([])
-  const [selectedBranchId, setSelectedBranchId] = useState<string>('')
+  const [pendingCredentials, setPendingCredentials] = useState<LoginSchemaValues | null>(null)
+  const [isSelectingBranch, setIsSelectingBranch] = useState(false)
   const demoCredentials = authService.getDemoCredentials()
   const demoAccounts = authService.getDemoAccounts()
 
@@ -53,19 +48,20 @@ export function LoginPage() {
     },
   })
 
-  async function onSubmit(values: LoginSchemaValues) {
+  async function submitWithBranch(values: LoginSchemaValues, branchId?: string) {
     try {
       setIsSubmitting(true)
       await login({
         ...values,
-        branchId: availableBranches.length > 0 ? selectedBranchId : undefined,
+        branchId,
       })
       toast.success('Bienvenido a Rayego POS.')
       navigate(redirectTo, { replace: true })
     } catch (error) {
       if (error instanceof BranchSelectionRequiredError) {
         setAvailableBranches(error.branches)
-        setSelectedBranchId(error.branches[0]?.id ?? '')
+        setPendingCredentials(values)
+        setIsSelectingBranch(true)
         return
       }
       toast.error(
@@ -74,6 +70,85 @@ export function LoginPage() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  async function onSubmit(values: LoginSchemaValues) {
+    await submitWithBranch(values)
+  }
+
+  async function handleBranchSelect(branchId: string) {
+    if (!pendingCredentials) return
+    await submitWithBranch(pendingCredentials, branchId)
+  }
+
+  function handleBackToLogin() {
+    setIsSelectingBranch(false)
+    setAvailableBranches([])
+    setPendingCredentials(null)
+  }
+
+  if (isSelectingBranch && availableBranches.length > 0) {
+    return (
+      <div className="space-y-8">
+        <AuthScreenHeader
+          title="Selecciona tu sucursal"
+          description={`Hola ${pendingCredentials?.email ?? ''}. Tu cuenta tiene acceso a varias sucursales activas.`}
+        />
+
+        <div className="space-y-3">
+          {availableBranches.map((branch) => (
+            <button
+              key={branch.id}
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => void handleBranchSelect(branch.id)}
+              className="group flex w-full items-center gap-4 rounded-2xl border border-border bg-background p-5 text-left transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 hover:shadow-md disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+            >
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+                <Store className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-lg font-semibold text-foreground">
+                    {branch.name}
+                  </p>
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    {branch.code}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Building2 className="h-3 w-3" />
+                  <span className="truncate">{branch.companyName}</span>
+                </div>
+              </div>
+              <div className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                <MapPin className="h-5 w-5" />
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="lg"
+            onClick={handleBackToLogin}
+            disabled={isSubmitting}
+            className="w-full gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Volver a iniciar sesión
+          </Button>
+          {isSubmitting ? (
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
+              <Loader className="h-4 w-4" />
+              Iniciando sesión en la sucursal seleccionada...
+            </div>
+          ) : null}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -99,29 +174,6 @@ export function LoginPage() {
       ) : null}
 
       <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
-        {availableBranches.length > 0 ? (
-          <div className="space-y-2">
-            <label className="text-small font-medium text-foreground" htmlFor="branchId">
-              Sucursal
-            </label>
-            <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
-              <SelectTrigger id="branchId">
-                <SelectValue placeholder="Selecciona una sucursal" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableBranches.map((branch) => (
-                  <SelectItem key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-caption text-muted-foreground">
-              Tu cuenta tiene acceso a más de una sucursal. Selecciona una para iniciar sesión.
-            </p>
-          </div>
-        ) : null}
-
         <div className="space-y-2">
           <label className="text-small font-medium text-foreground" htmlFor="email">
             Correo corporativo

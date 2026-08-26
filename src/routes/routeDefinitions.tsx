@@ -2,12 +2,15 @@ import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3,
+  Building2,
   Boxes,
   ClipboardList,
   CreditCard,
   LayoutDashboard,
+  Layers,
   Package,
   Settings,
+  Shield,
   ShoppingCart,
   Store,
   Truck,
@@ -18,16 +21,19 @@ import { ClientesPage } from '@/pages/ClientesPage'
 import { ComprasPage } from '@/pages/ComprasPage'
 import { ConfiguracionPage } from '@/pages/ConfiguracionPage'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { EmpresasPage } from '@/pages/EmpresasPage'
+import { AdministradoresPage } from '@/pages/AdministradoresPage'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
+import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { InventarioPage } from '@/pages/InventarioPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ProductosPage } from '@/pages/ProductosPage'
 import { ProveedoresPage } from '@/pages/ProveedoresPage'
 import { ReportesPage } from '@/pages/ReportesPage'
-import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { UsuariosPage } from '@/pages/UsuariosPage'
 import { VentasPage } from '@/pages/VentasPage'
+import { TiposEmpresaPage } from '@/pages/TiposEmpresaPage'
 import { RegisterPage } from '@/public/register/RegisterPage'
 import { paths } from '@/routes/paths'
 import type { RouteAccess } from '@/routes/access-control'
@@ -41,6 +47,7 @@ export type AppRouteDefinition = {
   index?: boolean
   navLabel?: string
   navIcon?: LucideIcon
+  navSection?: 'Operaciones' | 'Seguridad' | 'Reportes' | 'Administración POS' | 'Configuración'
 }
 
 export const authRoutes: AppRouteDefinition[] = [
@@ -73,66 +80,147 @@ export const privateRoutes: AppRouteDefinition[] = [
     index: true,
     navLabel: 'Dashboard',
     navIcon: LayoutDashboard,
-    access: { requiresAuth: true, allowedPermissions: ['dashboard.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['dashboard.read'],
+      moduleCode: 'dashboard',
+    },
   },
   {
     path: paths.ventas,
     component: VentasPage,
     navLabel: 'Ventas',
     navIcon: ShoppingCart,
-    access: { requiresAuth: true, allowedPermissions: ['ventas.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['ventas.read'],
+      moduleCode: 'ventas',
+    },
   },
   {
     path: paths.productos,
     component: ProductosPage,
     navLabel: 'Productos',
     navIcon: Package,
-    access: { requiresAuth: true, allowedPermissions: ['productos.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['productos.read'],
+      moduleCode: 'productos',
+    },
   },
   {
     path: paths.compras,
     component: ComprasPage,
     navLabel: 'Compras',
     navIcon: Truck,
-    access: { requiresAuth: true, allowedPermissions: ['compras.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['compras.read'],
+      moduleCode: 'compras',
+    },
   },
   {
     path: paths.inventario,
     component: InventarioPage,
     navLabel: 'Inventario',
     navIcon: Boxes,
-    access: { requiresAuth: true, allowedPermissions: ['inventario.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['inventario.read'],
+      moduleCode: 'inventario',
+    },
   },
   {
     path: paths.clientes,
     component: ClientesPage,
     navLabel: 'Clientes',
     navIcon: Users,
-    access: { requiresAuth: true, allowedPermissions: ['clientes.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['clientes.read'],
+      moduleCode: 'clientes',
+    },
   },
   {
     path: paths.proveedores,
     component: ProveedoresPage,
     navLabel: 'Proveedores',
     navIcon: Store,
-    access: { requiresAuth: true, allowedPermissions: ['proveedores.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['proveedores.read'],
+      moduleCode: 'proveedores',
+    },
   },
   {
     path: paths.caja,
     component: CajaPage,
     navLabel: 'Caja',
     navIcon: CreditCard,
-    access: { requiresAuth: true, allowedPermissions: ['caja.read'] },
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['caja.read'],
+      moduleCode: 'caja',
+    },
   },
   {
     path: paths.usuarios,
     component: UsuariosPage,
     navLabel: 'Usuarios',
     navIcon: ClipboardList,
+    navSection: 'Seguridad',
     access: {
       requiresAuth: true,
       allowedPermissions: ['usuarios.read', 'sesiones.read', 'auditoria.read'],
       allowedRoles: ['ADMIN', 'SUPERVISOR'],
+      moduleCode: 'usuarios',
+    },
+  },
+  {
+    path: paths.empresas,
+    component: EmpresasPage,
+    navLabel: 'Empresas',
+    navIcon: Building2,
+    navSection: 'Administración POS',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['empresas.read', 'empresas.manage'],
+      allowedRoles: ['ADMIN_POS'],
+      moduleCode: 'empresas',
+    },
+  },
+  {
+    path: paths.administradores,
+    component: AdministradoresPage,
+    navLabel: 'Administradores',
+    navIcon: Shield,
+    navSection: 'Administración POS',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['administradores.manage', 'usuarios.read'],
+      allowedRoles: ['ADMIN_POS'],
+      moduleCode: 'administradores',
+    },
+  },
+  {
+    path: paths.tiposEmpresa,
+    component: TiposEmpresaPage,
+    navLabel: 'Tipos de empresa',
+    navIcon: Layers,
+    navSection: 'Administración POS',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['tipos_empresa.manage'],
+      allowedRoles: ['ADMIN_POS'],
+      moduleCode: 'tipos_empresa',
     },
   },
   {
@@ -140,17 +228,25 @@ export const privateRoutes: AppRouteDefinition[] = [
     component: ReportesPage,
     navLabel: 'Reportes',
     navIcon: BarChart3,
-    access: { requiresAuth: true, allowedPermissions: ['reportes.read'] },
+    navSection: 'Reportes',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['reportes.read'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'SUPERVISOR'],
+      moduleCode: 'reportes',
+    },
   },
   {
     path: paths.configuracion,
     component: ConfiguracionPage,
     navLabel: 'Configuración',
     navIcon: Settings,
+    navSection: 'Configuración',
     access: {
       requiresAuth: true,
       allowedPermissions: ['configuracion.read'],
-      allowedRoles: ['ADMIN'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN'],
+      moduleCode: 'configuracion',
     },
   },
   {

@@ -7,7 +7,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 
 type DashboardFilters = {
@@ -45,8 +45,7 @@ function formatFullName(user: { nombres: string; apellidos: string | null }) {
 }
 
 export async function getDashboardOverview(filters: DashboardFilters, request: FastifyRequest) {
-  const { branchId, userId } = await getAuthContext(request)
-
+  const { branchId, userId } = await requireBranchAuthContext(request)
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
   }

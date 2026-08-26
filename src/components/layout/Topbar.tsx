@@ -1,11 +1,12 @@
 import { RoleBadge } from '@/components/auth/RoleBadge'
-import { Bell, Building2, LogOut, MapPin, Menu, Search, UserCircle2 } from 'lucide-react'
+import { Bell, Building2, Globe2, LogOut, Menu, Search, UserCircle2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/hooks/useAuth'
+import { useAuthorization } from '@/hooks/useAuthorization'
 import { paths } from '@/routes/paths'
 
 type TopbarProps = {
@@ -15,6 +16,8 @@ type TopbarProps = {
 export function Topbar({ onOpenNavigation }: TopbarProps) {
   const navigate = useNavigate()
   const { session, logout } = useAuth()
+  const { hasRole } = useAuthorization()
+  const isPlatformAdmin = hasRole('ADMIN_POS')
 
   async function handleLogout() {
     await logout()
@@ -51,21 +54,23 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          {session?.user.companyName ? (
-            <div className="hidden items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
-              <Building2 className="h-3.5 w-3.5" />
-              <span className="truncate">Empresa: {session.user.companyName}</span>
+          {isPlatformAdmin ? (
+            <div className="hidden items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary sm:flex">
+              <Globe2 className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate font-medium">Rayego POS · Administración de plataforma</span>
             </div>
-          ) : null}
-          {session?.user.branchName ? (
+          ) : session?.user.companyName || session?.user.branchName ? (
             <div className="hidden items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
-              <MapPin className="h-3.5 w-3.5" />
-              <span className="truncate">Sucursal: {session.user.branchName}</span>
+              <Building2 className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                {session.user.companyName ?? '—'}
+                {session.user.branchName ? ` · ${session.user.branchName}` : ''}
+              </span>
             </div>
           ) : null}
           {session?.user.roleName ? (
             <div className="hidden items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground md:flex">
-              <span className="truncate">Usuario: {session.user.roleName}</span>
+              <span className="truncate">{session.user.roleName}</span>
             </div>
           ) : null}
           <Button type="button" variant="ghost" size="icon" aria-label="Notificaciones">
@@ -88,8 +93,11 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
                   <div className="flex items-center gap-2">
                     {session?.user.roles[0] ? <RoleBadge role={session.user.roles[0]} /> : null}
                     <span className="text-xs text-muted-foreground">
-                      {session?.user.companyName}
-                      {session?.user.branchName ? ` · ${session.user.branchName}` : ''}
+                      {isPlatformAdmin
+                        ? 'Administración de plataforma'
+                        : session?.user.companyName
+                          ? session.user.companyName + (session.user.branchName ? ` · ${session.user.branchName}` : '')
+                          : ''}
                     </span>
                   </div>
                 </div>

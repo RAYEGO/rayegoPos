@@ -8,8 +8,77 @@ datasource db {
 }
 
 /// Módulo: Configuración / Empresa
+model TipoEmpresa {
+  id              String              @id @default(uuid()) @db.Uuid
+  codigo          String              @unique @db.VarChar(50)
+  nombre          String              @db.VarChar(120)
+  descripcion     String?             @db.VarChar(255)
+  icono           String?             @db.VarChar(50)
+  color           String?             @db.VarChar(20)
+  orden           Int                 @default(0)
+  activo          Boolean             @default(true)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  deletedAt       DateTime?           @map("deleted_at")
+  createdById     String?             @map("created_by") @db.Uuid
+  updatedById     String?             @map("updated_by") @db.Uuid
+  empresas        Empresa[]
+  modulos         TipoEmpresaModulo[]
+  createdBy       Usuario?            @relation("TipoEmpresaCreatedBy", fields: [createdById], references: [id])
+  updatedBy       Usuario?            @relation("TipoEmpresaUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([activo])
+  @@index([orden])
+  @@index([deletedAt])
+  @@map("tipos_empresa")
+}
+
+/// Catálogo maestro de módulos de la plataforma.
+model Modulo {
+  id              String              @id @default(uuid()) @db.Uuid
+  codigo          String              @unique @db.VarChar(50)
+  nombre          String              @db.VarChar(120)
+  descripcion     String?             @db.VarChar(255)
+  icono           String?             @db.VarChar(50)
+  orden           Int                 @default(0)
+  categoria       String?             @db.VarChar(50)
+  activo          Boolean             @default(true)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  deletedAt       DateTime?           @map("deleted_at")
+  createdById     String?             @map("created_by") @db.Uuid
+  updatedById     String?             @map("updated_by") @db.Uuid
+  tiposEmpresa    TipoEmpresaModulo[]
+  createdBy       Usuario?            @relation("ModuloCreatedBy", fields: [createdById], references: [id])
+  updatedBy       Usuario?            @relation("ModuloUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([activo])
+  @@index([orden])
+  @@index([categoria])
+  @@index([deletedAt])
+  @@map("modulos")
+}
+
+/// Relación N:N entre TipoEmpresa y los módulos que tiene habilitados.
+model TipoEmpresaModulo {
+  id              String      @id @default(uuid()) @db.Uuid
+  tipoEmpresaId   String      @map("tipo_empresa_id") @db.Uuid
+  moduloCodigo    String      @map("modulo_codigo") @db.VarChar(50)
+  orden           Int         @default(0)
+  activo          Boolean     @default(true)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  tipoEmpresa     TipoEmpresa @relation(fields: [tipoEmpresaId], references: [id], onDelete: Cascade)
+  modulo          Modulo      @relation(fields: [moduloCodigo], references: [codigo], onDelete: Cascade)
+
+  @@unique([tipoEmpresaId, moduloCodigo])
+  @@index([moduloCodigo])
+  @@map("tipo_empresa_modulo")
+}
+
 model Empresa {
   id                String                 @id @default(uuid()) @db.Uuid
+  tipoEmpresaId     String                 @map("tipo_empresa_id") @db.Uuid
   razonSocial       String                 @map("razon_social") @db.VarChar(200)
   nombreComercial   String?                @map("nombre_comercial") @db.VarChar(200)
   tipoDocumento     TipoDocumentoIdentidad @default(RUC) @map("tipo_documento")
@@ -29,6 +98,7 @@ model Empresa {
   logoUrl           String?                @map("logo_url") @db.VarChar(500)
   igvPorDefecto     Decimal                @default(18) @map("igv_por_defecto") @db.Decimal(7, 4)
   modoOperacion     ModoOperacionEmpresa   @default(IMPLEMENTACION) @map("modo_operacion")
+  tipoEmpresa       TipoEmpresa            @relation(fields: [tipoEmpresaId], references: [id])
   categorias        Categoria[]
   clientes          Cliente[]
   configuraciones   Configuracion[]
@@ -48,6 +118,7 @@ model Empresa {
 
   @@index([deletedAt])
   @@index([modoOperacion])
+  @@index([tipoEmpresaId])
   @@map("empresas")
 }
 
@@ -109,7 +180,7 @@ model Usuario {
   deletedAt                                   DateTime?                       @map("deleted_at")
   createdById                                 String?                         @map("created_by") @db.Uuid
   updatedById                                 String?                         @map("updated_by") @db.Uuid
-  empresaId                                   String                          @map("empresa_id") @db.Uuid
+  empresaId                                   String?                         @map("empresa_id") @db.Uuid
   aperturasCreadas                            AperturaCaja[]                  @relation("AperturaCajaCreatedBy")
   aperturasActualizadas                       AperturaCaja[]                  @relation("AperturaCajaUpdatedBy")
   aperturasCaja                               AperturaCaja[]                  @relation("AperturaCajaUsuario")
@@ -198,6 +269,10 @@ model Usuario {
   sucursalesActualizadas                      Sucursal[]                      @relation("SucursalUpdatedBy")
   tiposComercialesCreados                     TipoComercial[]                 @relation("TipoComercialCreatedBy")
   tiposComercialesActualizados                TipoComercial[]                 @relation("TipoComercialUpdatedBy")
+  tiposEmpresaCreados                         TipoEmpresa[]                   @relation("TipoEmpresaCreatedBy")
+  tiposEmpresaActualizados                    TipoEmpresa[]                   @relation("TipoEmpresaUpdatedBy")
+  modulosCreados                              Modulo[]                        @relation("ModuloCreatedBy")
+  modulosActualizados                         Modulo[]                        @relation("ModuloUpdatedBy")
   unidadesCreadas                             UnidadMedida[]                  @relation("UnidadMedidaCreatedBy")
   unidadesActualizadas                        UnidadMedida[]                  @relation("UnidadMedidaUpdatedBy")
   usuarioRolesCreados                         UsuarioRol[]                    @relation("UsuarioRolCreatedBy")
@@ -208,7 +283,7 @@ model Usuario {
   usuarioSucursales                           UsuarioSucursal[]
   createdBy                                   Usuario?                        @relation("UsuarioCreatedBy", fields: [createdById], references: [id])
   usuariosCreados                             Usuario[]                       @relation("UsuarioCreatedBy")
-  empresa                                     Empresa                         @relation(fields: [empresaId], references: [id])
+  empresa                                     Empresa?                        @relation(fields: [empresaId], references: [id])
   sucursal                                    Sucursal?                       @relation(fields: [sucursalId], references: [id])
   updatedBy                                   Usuario?                        @relation("UsuarioUpdatedBy", fields: [updatedById], references: [id])
   usuariosActualizados                        Usuario[]                       @relation("UsuarioUpdatedBy")

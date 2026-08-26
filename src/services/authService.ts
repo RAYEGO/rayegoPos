@@ -8,7 +8,7 @@ import type {
   ResetPasswordPayload,
 } from '@/types/auth'
 import { apiRequest, ApiError, ApiNetworkError } from '@/services/apiClient'
-import { authMockService } from '@/services/authMockService'
+import { authMockService, isDemoAccountCredentials } from '@/services/authMockService'
 import {
   overwriteStoredSession,
   peekStoredSession,
@@ -17,19 +17,14 @@ import {
 } from '@/services/tokenManager'
 import { isRefreshTokenValid } from '@/utils/jwt'
 
-function shouldFallbackToMock(error: unknown, endpoint: 'login' | 'restoreSession' | 'logout' | 'requestPasswordReset' | 'resetPassword' | 'refreshSession' = 'restoreSession') {
-  if (!AUTH_ALLOW_MOCKS) {
-    return false
-  }
-
-  if (error instanceof ApiNetworkError) {
-    return true
-  }
-
-  if (error instanceof ApiError && error.status >= 500) {
-    return endpoint !== 'login'
-  }
-
+function shouldFallbackToMock(
+  error: unknown,
+  endpoint: 'login' | 'restoreSession' | 'logout' | 'requestPasswordReset' | 'resetPassword' | 'refreshSession' = 'restoreSession',
+  loginPayload?: LoginPayload,
+) {
+  void error
+  void endpoint
+  void loginPayload
   return false
 }
 
@@ -90,7 +85,11 @@ export const authService = {
       setSessionStorageTarget(response, payload.remember ? 'local' : 'session')
       return response
     } catch (error) {
-      if (shouldFallbackToMock(error, 'login')) {
+      if (error instanceof BranchSelectionRequiredError) {
+        throw error
+      }
+
+      if (shouldFallbackToMock(error, 'login', payload)) {
         const errStatus = error instanceof ApiError ? error.status : 'NETWORK'
         const errMessage = error instanceof ApiError || error instanceof ApiNetworkError
           ? error.message

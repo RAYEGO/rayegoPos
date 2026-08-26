@@ -1,7 +1,7 @@
 import { EstadoCompra, EstadoVenta, OperacionCaja, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 
 type ReportsFilters = {
   branchId?: string
@@ -44,7 +44,7 @@ function formatDate(value: Date) {
 }
 
 async function getReportContext(filters: ReportsFilters, request: FastifyRequest) {
-  const { branchId } = await getAuthContext(request)
+  const { branchId } = await requireBranchAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -74,7 +74,7 @@ function roundMoney(value: number) {
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const { userId } = await getAuthContext(request)
+  const { userId } = await requireBranchAuthContext(request)
   return userId
 }
 

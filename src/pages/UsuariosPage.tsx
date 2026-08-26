@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { Edit, MoreVertical, Search, UserPlus, Users2, X } from 'lucide-react'
@@ -34,9 +34,15 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { roleDefinitions } from '@/config/authorization'
+import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
-import { usersModuleBranches, usersModuleUsers, type UserStatus, type UsersModuleUserRecord } from '@/modules/users/mock-data'
-import type { AuthRole } from '@/types/auth'
+import { branchesService } from '@/services/branchesService'
+import {
+  usersService,
+  type UsersModuleUserRecord,
+} from '@/services/usersService'
+import type { AuthRole, UserStatus } from '@/types/auth'
+import type { Branch } from '@/types/settings'
 import { toast } from 'sonner'
 
 function getUserStatusVariant(status: 'ACTIVO' | 'BLOQUEADO' | 'INVITADO') {
@@ -103,6 +109,8 @@ function formatBranchSummary(branchNames: string[]) {
 
 export function UsuariosPage() {
   const { can, hasRole } = useAuthorization()
+  const { session } = useAuth()
+  const accessToken = session?.accessToken ?? ''
   const [filters, setFilters] = useState<UsersFilters>({
     search: '',
     role: 'TODOS',
@@ -111,38 +119,86 @@ export function UsuariosPage() {
   })
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<UsersModuleUserRecord | null>(null)
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [users, setUsers] = useState<UsersModuleUserRecord[]>([])
+  const [loadingBranches, setLoadingBranches] = useState(false)
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [submittingUserForm, setSubmittingUserForm] = useState(false)
+
+  const loadBranches = useCallback(async () => {
+    if (!accessToken) return
+    try {
+      setLoadingBranches(true)
+      const response = await branchesService.list(accessToken)
+      setBranches(Array.isArray(response) ? response : [])
+    } catch (error) {
+      toast.error('No se pudieron cargar las sucursales.', {
+        description: error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      })
+    } finally {
+      setLoadingBranches(false)
+    }
+  }, [accessToken])
+
+  const loadUsers = useCallback(async () => {
+    if (!accessToken) return
+    try {
+      setLoadingUsers(true)
+      const list = await usersService.list(accessToken)
+      setUsers(Array.isArray(list) ? list : [])
+    } catch (error) {
+      toast.error('No se pudieron cargar los usuarios.', {
+        description: error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      })
+    } finally {
+      setLoadingUsers(false)
+    }
+  }, [accessToken])
+
+  useEffect(() => {
+    void loadBranches()
+  }, [loadBranches])
+
+  useEffect(() => {
+    void loadUsers()
+  }, [loadUsers])
 
   const branchNameMap = useMemo(() => {
-    return Object.fromEntries(usersModuleBranches.map((branch) => [branch.id, branch.name]))
-  }, [])
+    return Object.fromEntries(branches.map((branch) => [branch.id, branch.nombre]))
+  }, [branches])
+
+  const assignableBranches = useMemo(
+    () => branches.filter((branch) => branch.activo),
+    [branches],
+  )
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = filters.search.trim().toLowerCase()
 
-    return usersModuleUsers.filter((user) => {
+    return users.filter((user) => {
       const userFullName = getUserFullName(user).toLowerCase()
       const matchesSearch =
         normalizedSearch.length === 0 ||
         userFullName.includes(normalizedSearch) ||
-        user.email.toLowerCase().includes(normalizedSearch) ||
+        (user.email ?? '').toLowerCase().includes(normalizedSearch) ||
         user.username.toLowerCase().includes(normalizedSearch)
 
       const matchesRole = filters.role === 'TODOS' || user.primaryRole === filters.role
       const matchesStatus = filters.status === 'TODOS' || user.status === filters.status
       const matchesBranch =
-        filters.branchId === 'TODAS' || user.branchIds.includes(filters.branchId)
+        filters.branchId === 'TODAS' || (user.branchIds ?? []).includes(filters.branchId)
 
       return matchesSearch && matchesRole && matchesStatus && matchesBranch
     })
-  }, [filters])
+  }, [users, filters])
 
   const usersMetrics = useMemo(() => {
     return {
-      total: usersModuleUsers.length,
-      active: usersModuleUsers.filter((user) => user.status === 'ACTIVO').length,
-      blocked: usersModuleUsers.filter((user) => user.status === 'BLOQUEADO').length,
+      total: users.length,
+      active: users.filter((user) => user.status === 'ACTIVO').length,
+      blocked: users.filter((user) => user.status === 'BLOQUEADO').length,
     }
-  }, [])
+  }, [users])
 
   const userForm = useForm<UsersFormValues>({
     resolver: zodResolver(usersFormSchema),
@@ -160,7 +216,10 @@ export function UsuariosPage() {
 
   function openCreateUserDialog() {
     setEditingUser(null)
-    userForm.reset(defaultUserFormValues)
+    userForm.reset({
+      ...defaultUserFormValues,
+      branchIds: assignableBranches.length === 1 ? [assignableBranches[0].id] : [],
+    })
     setIsUserDialogOpen(true)
   }
 
@@ -187,16 +246,46 @@ export function UsuariosPage() {
   function closeUserDialog() {
     setIsUserDialogOpen(false)
     setEditingUser(null)
+    setSubmittingUserForm(false)
   }
 
   async function onSubmitUserForm(values: UsersFormValues) {
-    toast.message(
-      editingUser
-        ? 'Interfaz lista para conectar edición de usuarios.'
-        : 'Interfaz lista para conectar creación de usuarios.',
-    )
-    closeUserDialog()
-    void values
+    if (!accessToken) return
+    try {
+      setSubmittingUserForm(true)
+      const payload = {
+        firstName: values.firstName,
+        lastName: values.lastName,
+        documentId: values.documentId,
+        phone: values.phone ?? '',
+        email: values.email ?? '',
+        username: values.username,
+        password: values.password,
+        role: values.role,
+        branchIds: values.branchIds,
+        isActive: values.isActive,
+        mustChangePassword: values.mustChangePassword,
+      }
+      if (editingUser) {
+        const updatePayload = { ...payload }
+        if (!values.password) {
+          delete (updatePayload as Partial<(typeof payload)>).password
+        }
+        await usersService.update(accessToken, editingUser.id, updatePayload as any)
+        toast.success('Usuario actualizado correctamente.')
+      } else {
+        await usersService.create(accessToken, payload as any)
+        toast.success('Usuario creado correctamente.')
+      }
+      await loadUsers()
+      closeUserDialog()
+    } catch (error) {
+      toast.error(editingUser ? 'No se pudo actualizar el usuario.' : 'No se pudo crear el usuario.', {
+        description: error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      })
+    } finally {
+      setSubmittingUserForm(false)
+    }
   }
 
   return (
@@ -334,9 +423,9 @@ export function UsuariosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TODAS">Todas las sucursales</SelectItem>
-                  {usersModuleBranches.map((branch) => (
+                  {branches.map((branch) => (
                     <SelectItem key={branch.id} value={branch.id}>
-                      {branch.name}
+                      {branch.nombre}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -351,7 +440,7 @@ export function UsuariosPage() {
                 </div>
               ) : (
                 filteredUsers.map((user) => {
-                  const branchNames = user.branchIds
+                  const branchNames = (user.branchIds ?? [])
                     .map((branchId) => branchNameMap[branchId])
                     .filter(Boolean)
                   const branchSummary = formatBranchSummary(branchNames)
@@ -524,7 +613,7 @@ export function UsuariosPage() {
                     {editingUser ? 'Editar usuario' : 'Crear usuario'}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Interfaz preparada para conectar backend. Los cambios aún no se guardan.
+                    Asigna los datos del usuario y sus sucursales autorizadas.
                   </p>
                 </div>
                 <SidePanelClose asChild>
@@ -704,7 +793,7 @@ export function UsuariosPage() {
                     </p>
                   </div>
                   <div className="mt-4 space-y-3">
-                    {usersModuleBranches.map((branch) => (
+                    {assignableBranches.map((branch) => (
                       <label
                         key={branch.id}
                         className="flex items-center gap-3 rounded-xl border px-3 py-2"
@@ -713,9 +802,33 @@ export function UsuariosPage() {
                           checked={watchedBranchIds.includes(branch.id)}
                           onCheckedChange={(checked) => toggleBranch(branch.id, Boolean(checked))}
                         />
-                        <span className="text-small text-foreground">{branch.name}</span>
+                        <span className="text-small text-foreground">{branch.nombre}</span>
                       </label>
                     ))}
+                    {editingUser &&
+                      (editingUser.branchIds ?? [])
+                        .map((bid) => branches.find((b) => b.id === bid))
+                        .filter((b): b is Branch => Boolean(b) && !b.activo)
+                        .map((branch) => (
+                          <label
+                            key={branch.id}
+                            className="flex items-center gap-3 rounded-xl border border-dashed px-3 py-2 opacity-70"
+                          >
+                            <Checkbox
+                              checked={watchedBranchIds.includes(branch.id)}
+                              onCheckedChange={(checked) => toggleBranch(branch.id, Boolean(checked))}
+                            />
+                            <span className="text-small text-foreground">
+                              {branch.nombre}{' '}
+                              <span className="text-muted-foreground">(inactiva, asignada previamente)</span>
+                            </span>
+                          </label>
+                        ))}
+                    {assignableBranches.length === 0 && (!editingUser || editingUser.branchIds.length === 0) && (
+                      <p className="text-small text-muted-foreground italic">
+                        No hay sucursales activas disponibles para asignar.
+                      </p>
+                    )}
                     {userForm.formState.errors.branchIds ? (
                       <p className="text-xs text-destructive">
                         {userForm.formState.errors.branchIds.message}
@@ -774,8 +887,12 @@ export function UsuariosPage() {
                   <Button type="button" variant="outline" onClick={closeUserDialog}>
                     Cancelar
                   </Button>
-                  <Button type="submit" disabled={!can('usuarios.manage')}>
-                    Guardar
+                  <Button type="submit" disabled={!can('usuarios.manage') || submittingUserForm}>
+                    {submittingUserForm
+                      ? editingUser
+                        ? 'Guardando…'
+                        : 'Creando…'
+                      : 'Guardar'}
                   </Button>
                 </div>
               </div>

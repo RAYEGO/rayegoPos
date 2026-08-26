@@ -10,7 +10,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
 type CustomersFilters = {
@@ -172,7 +172,7 @@ export async function getCustomersDashboard(
   filters: CustomersFilters = {},
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const search = filters.search?.trim()
   const isActive =
@@ -250,7 +250,7 @@ export async function getCustomersDashboard(
 }
 
 export async function createCustomer(payload: CreateCustomerPayload, request: FastifyRequest) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
   const tipoPersona = payload.tipoPersona ?? TipoPersona.NATURAL
 
   const normalizedDocument = toOptionalString(payload.numeroDocumento)
@@ -309,7 +309,7 @@ export async function updateCustomer(
   payload: UpdateCustomerPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   const existingCustomer = await prisma.cliente.findFirst({
     where: { id: customerId, deletedAt: null, empresaId: companyId },
@@ -397,7 +397,7 @@ export async function updateCustomer(
 }
 
 export async function deleteCustomer(customerId: string, request: FastifyRequest) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   const existingCustomer = await prisma.cliente.findFirst({
     where: { id: customerId, deletedAt: null, empresaId: companyId },
@@ -432,7 +432,7 @@ function toMoney(value: Prisma.Decimal | number) {
 }
 
 export async function getCustomerSales(customerId: string, request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const customer = await prisma.cliente.findFirst({
     where: { id: customerId, deletedAt: null, empresaId: companyId },
@@ -485,7 +485,7 @@ export async function getCustomerSales(customerId: string, request: FastifyReque
 }
 
 export async function getCustomerAccountStatement(customerId: string, request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const [customer, paymentMethods] = await Promise.all([
     prisma.cliente.findFirst({
@@ -685,7 +685,7 @@ export async function registerCustomerPayment(
   payload: RegisterCustomerPaymentPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId, companyId } = await getAuthContext(request)
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   const amountRaw = Number(payload.monto)
   if (!Number.isFinite(amountRaw) || amountRaw <= 0) {

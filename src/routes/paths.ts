@@ -17,4 +17,7 @@ export const paths = {
   configuracion: '/app/settings',
   usuarios: '/app/users',
   reportes: '/app/reports',
+  tiposEmpresa: '/app/admin-pos/tipos-empresa',
+  empresas: '/app/admin-pos/empresas',
+  administradores: '/app/admin-pos/administradores',
 } as const

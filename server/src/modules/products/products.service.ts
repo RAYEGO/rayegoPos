@@ -1,7 +1,7 @@
 import { EstadoProducto, ModoEmpaqueProducto, Prisma } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import {
   analyzePackagingStructure,
   buildPackagingEdges,
@@ -528,7 +528,7 @@ export async function previewProductPackaging(
   payload: PackagingConfigPayload,
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   return prisma.$transaction(async (tx) => {
     const packagingConfig = await buildPackagingConfig(tx, payload, { companyId })
@@ -783,7 +783,7 @@ export async function listProductCatalog(
   filters: ListProductsFilters,
   request: FastifyRequest,
 ) {
-  const { branchId, companyId } = await getAuthContext(request)
+  const { branchId, companyId } = await requireBranchAuthContext(request)
   const cacheKey = buildProductCatalogCacheKey({ companyId, branchId, filters })
   const cached = productCatalogCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) {
@@ -1182,7 +1182,7 @@ export async function listProductCatalog(
 }
 
 export async function getProductOptions(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const [categories, laboratories, commercialTypes, presentations, units, activePrinciples] =
     await Promise.all([
       prisma.categoria.findMany({
@@ -1600,7 +1600,7 @@ async function resolveUniqueInternalProductCode(companyId: string) {
 }
 
 export async function listMasterCategories(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const categories = await prisma.categoria.findMany({
     where: {
       deletedAt: null,
@@ -1639,7 +1639,7 @@ export async function createMasterCategory(
   payload: MasterCategoryPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   if (payload.parentId) {
     const parent = await prisma.categoria.findFirst({
@@ -1689,7 +1689,7 @@ export async function updateMasterCategory(
   payload: MasterCategoryPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   if (payload.parentId === categoryId) {
     throw createHttpError(400, 'La categoría padre no puede ser la misma categoría.')
@@ -1745,7 +1745,7 @@ export async function deleteMasterCategory(
   categoryId: string,
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const category = await prisma.categoria.findFirst({
     where: {
@@ -1802,7 +1802,7 @@ export async function deleteMasterCategory(
 }
 
 export async function listMasterLaboratories(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const laboratories = await prisma.laboratorio.findMany({
     where: {
       deletedAt: null,
@@ -1837,7 +1837,7 @@ export async function createMasterLaboratory(
   payload: MasterLaboratoryPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForLaboratory(companyId, payload.nombre)
@@ -1871,7 +1871,7 @@ export async function updateMasterLaboratory(
   payload: MasterLaboratoryPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForLaboratory(companyId, payload.nombre, laboratoryId)
@@ -1907,7 +1907,7 @@ export async function deleteMasterLaboratory(
   laboratoryId: string,
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const laboratory = await prisma.laboratorio.findFirst({
     where: {
@@ -1948,7 +1948,7 @@ export async function deleteMasterLaboratory(
 }
 
 export async function listMasterCommercialTypes(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const commercialTypes = await prisma.tipoComercial.findMany({
     where: {
       deletedAt: null,
@@ -1982,7 +1982,7 @@ export async function createMasterCommercialType(
   payload: MasterCommercialTypePayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForCommercialType(companyId, payload.nombre)
@@ -2015,7 +2015,7 @@ export async function updateMasterCommercialType(
   payload: MasterCommercialTypePayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForCommercialType(
@@ -2054,7 +2054,7 @@ export async function deleteMasterCommercialType(
   commercialTypeId: string,
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const commercialType = await prisma.tipoComercial.findFirst({
     where: {
@@ -2096,7 +2096,7 @@ export async function deleteMasterCommercialType(
 }
 
 export async function listMasterActivePrinciples(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const activePrinciples = await prisma.principioActivo.findMany({
     where: {
       deletedAt: null,
@@ -2138,7 +2138,7 @@ export async function createMasterActivePrinciple(
   payload: MasterActivePrinciplePayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForActivePrinciple(companyId, payload.nombre)
@@ -2171,7 +2171,7 @@ export async function updateMasterActivePrinciple(
   payload: MasterActivePrinciplePayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForActivePrinciple(
@@ -2210,7 +2210,7 @@ export async function deleteMasterActivePrinciple(
   activePrincipleId: string,
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const principle = await prisma.principioActivo.findFirst({
     where: {
@@ -2265,7 +2265,7 @@ export async function deleteMasterActivePrinciple(
 }
 
 export async function listMasterPresentations(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const presentations = await prisma.presentacion.findMany({
     where: {
       deletedAt: null,
@@ -2299,7 +2299,7 @@ export async function createMasterPresentation(
   payload: MasterPresentationPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForPresentation(companyId, payload.nombre)
@@ -2332,7 +2332,7 @@ export async function updateMasterPresentation(
   payload: MasterPresentationPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForPresentation(companyId, payload.nombre, presentationId)
@@ -2367,7 +2367,7 @@ export async function deleteMasterPresentation(
   presentationId: string,
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const presentation = await prisma.presentacion.findFirst({
     where: {
@@ -2408,7 +2408,7 @@ export async function deleteMasterPresentation(
 }
 
 export async function listMasterUnits(request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const units = await prisma.unidadMedida.findMany({
     where: {
       deletedAt: null,
@@ -2443,7 +2443,7 @@ export async function createMasterUnit(
   payload: MasterUnitPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForUnit(companyId, payload.codigo ?? payload.nombre)
@@ -2481,7 +2481,7 @@ export async function updateMasterUnit(
   payload: MasterUnitPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   try {
     const codigo = await resolveUniqueCodeForUnit(companyId, payload.codigo ?? payload.nombre, unitId)
@@ -2518,7 +2518,7 @@ export async function updateMasterUnit(
 }
 
 export async function deleteMasterUnit(unitId: string, request: FastifyRequest) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const unit = await prisma.unidadMedida.findFirst({
     where: {
@@ -2562,7 +2562,7 @@ export async function createProduct(
   payload: CreateProductPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
   const normalizedName = payload.nombre.trim()
   const activePrincipleIds = resolveProductActivePrincipleIds(payload)
   const costPrice =
@@ -2679,7 +2679,7 @@ export async function updateProduct(
   payload: CreateProductPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
   const activePrincipleIds = resolveProductActivePrincipleIds(payload)
 
   const existing = await prisma.producto.findFirst({
@@ -2814,7 +2814,7 @@ export async function updateProductStatus(
   status: EstadoProducto,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   const updated = await prisma.producto.updateMany({
     where: {
@@ -2837,7 +2837,7 @@ export async function updateProductStatus(
 }
 
 export async function deleteProduct(productId: string, request: FastifyRequest) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   const product = await prisma.producto.findFirst({
     where: {

@@ -4,6 +4,7 @@ import jwt from '@fastify/jwt'
 import Fastify from 'fastify'
 import { ZodError } from 'zod'
 import { isAllowedOrigin, serverConfig } from './config.js'
+import type { AuthContext } from './lib/auth.js'
 import { authRoutes } from './routes/auth.js'
 import { inventoryRoutes } from './routes/inventory.js'
 import { purchaseRoutes } from './routes/purchases.js'
@@ -17,6 +18,8 @@ import dashboardRoutes from './routes/dashboard.js'
 import reportsRoutes from './routes/reports.js'
 import { implementationRoutes } from './routes/implementation.js'
 import { settingsRoutes } from './routes/settings.js'
+import { adminPosRoutes } from './routes/admin-pos.js'
+import usersRoutes from './routes/users.js'
 
 const performanceDebugConfig = (() => {
   const fallback = {
@@ -111,22 +114,27 @@ export function createApp() {
         return
       }
 
-      if (!decoded.branchId) {
-        reply.code(409).send({ message: 'No hay una sucursal activa en la sesión.' })
-        return
-      }
+      const roles = (decoded.roles ?? []).filter<string>((r): r is string => typeof r === 'string')
+      const isPlatformAdmin = roles.some((r) => r === 'ADMIN_POS')
 
-      if (!decoded.companyId) {
-        reply.code(409).send({ message: 'No hay una empresa activa en la sesión.' })
-        return
+      if (!isPlatformAdmin) {
+        if (!decoded.branchId) {
+          reply.code(409).send({ message: 'No hay una sucursal activa en la sesión.' })
+          return
+        }
+
+        if (!decoded.companyId) {
+          reply.code(409).send({ message: 'No hay una empresa activa en la sesión.' })
+          return
+        }
       }
 
       request.auth = {
         userId: decoded.sub,
-        companyId: decoded.companyId,
-        branchId: decoded.branchId,
-        roles: decoded.roles ?? [],
-      }
+        companyId: decoded.companyId ?? null,
+        branchId: decoded.branchId ?? null,
+        roles,
+      } as AuthContext
     } catch {
       reply.code(401).send({ message: 'La sesión ya no es válida.' })
     }
@@ -217,6 +225,14 @@ export function createApp() {
 
     instance.register(auditRoutes, {
       prefix: '/api/audit',
+    })
+
+    instance.register(adminPosRoutes, {
+      prefix: '/api/admin-pos',
+    })
+
+    instance.register(usersRoutes, {
+      prefix: '/api/users',
     })
   })
 

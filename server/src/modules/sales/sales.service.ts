@@ -12,7 +12,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
   buildPackagingSnapshot,
@@ -260,7 +260,7 @@ function resolveLotStatus({
 }
 
 async function getAuthenticatedUserId(request: FastifyRequest) {
-  const { userId } = await getAuthContext(request)
+  const { userId } = await requireBranchAuthContext(request)
   return userId
 }
 
@@ -381,7 +381,7 @@ export async function getSalesDashboard(
   request: FastifyRequest,
 ) {
   await ensureDefaultPaymentMethods(prisma)
-  const { branchId, companyId } = await getAuthContext(request)
+  const { branchId, companyId } = await requireBranchAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -808,7 +808,7 @@ export async function getSalesDashboard(
 }
 
 export async function createSale(payload: CreateSalePayload, request: FastifyRequest) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId } = await requireBranchAuthContext(request)
   const targetBranchId = payload.sucursalId ?? branchId
 
   if (payload.sucursalId && payload.sucursalId !== branchId) {
@@ -1518,7 +1518,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
 export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
 
   const sale = await prisma.venta.findFirst({
     where: {

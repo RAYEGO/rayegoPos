@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import {
   Activity,
   AlertTriangle,
+  Building2,
+  Layers,
+  Shield,
   ShoppingCart,
+  Users2,
   WalletCards,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +21,7 @@ import {
 } from '@/components/ui/card'
 import { Loader } from '@/components/ui/loader'
 import { useAuth } from '@/hooks/useAuth'
+import { useAuthorization } from '@/hooks/useAuthorization'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { dashboardService } from '@/services/dashboardService'
@@ -70,8 +75,11 @@ function getApiErrorMessage(error: unknown) {
 
 export function DashboardPage() {
   const { session } = useAuth()
+  const { hasRole } = useAuthorization()
   const accessToken = session?.accessToken ?? ''
   const navigate = useNavigate()
+
+  const isPlatformAdmin = hasRole('ADMIN_POS')
 
   const [dashboard, setDashboard] = useState<DashboardOverviewResponse>(defaultDashboard)
   const [isLoading, setIsLoading] = useState(true)
@@ -132,8 +140,12 @@ export function DashboardPage() {
   }, [accessToken, handleUnauthorized, session])
 
   useEffect(() => {
+    if (isPlatformAdmin) {
+      setIsLoading(false)
+      return
+    }
     void loadDashboard()
-  }, [loadDashboard])
+  }, [isPlatformAdmin, loadDashboard])
 
   const activeDrawer = dashboard.cash.activeDrawer
 
@@ -166,9 +178,273 @@ export function DashboardPage() {
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
+        <h1 className="text-xl font-bold text-foreground">
+          {isPlatformAdmin ? 'Panel de plataforma' : 'Dashboard'}
+        </h1>
       </div>
 
+      {isPlatformAdmin ? (
+        <PlatformAdminDashboardContent />
+      ) : (
+        <CompanyDashboardContent
+          isLoading={isLoading}
+          error={error}
+          dashboard={dashboard}
+          activityRows={activityRows}
+          showAlertDetails={showAlertDetails}
+          onToggleAlertDetails={() => setShowAlertDetails((current) => !current)}
+          onNavigateToCashier={() => navigate(paths.caja)}
+        />
+      )}
+    </div>
+  )
+}
+
+type PlatformStats = {
+  empresasRegistradas: number
+  empresasActivas: number
+  administradoresRegistrados: number
+  tiposEmpresa: { codigo: string; nombre: string; color: string; empresasCount: number }[]
+  recentActivity: { id: string; createdAt: string; title: string; subtitle: string; variant: 'info' | 'success' | 'warning' }[]
+}
+
+const PLATFORM_STATS: PlatformStats = {
+  empresasRegistradas: 2,
+  empresasActivas: 2,
+  administradoresRegistrados: 2,
+  tiposEmpresa: [
+    { codigo: 'BOTICA', nombre: 'Botica / Farmacia', color: '#2563eb', empresasCount: 1 },
+    { codigo: 'SERVICIO_TECNICO', nombre: 'Servicio Técnico', color: '#16a34a', empresasCount: 1 },
+  ],
+  recentActivity: [
+    {
+      id: 'a1',
+      createdAt: new Date(Date.now() - 1000 * 60 * 14).toISOString(),
+      title: 'Nueva empresa registrada',
+      subtitle: 'Electro Servicios SAC · SERVICIO_TECNICO',
+      variant: 'success',
+    },
+    {
+      id: 'a2',
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+      title: 'Módulos actualizados',
+      subtitle: 'BOTICA · +Equipos · -Lotes',
+      variant: 'info',
+    },
+    {
+      id: 'a3',
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+      title: 'Administrador asignado',
+      subtitle: 'Jefe de Servicios · Electro Servicios SAC',
+      variant: 'info',
+    },
+    {
+      id: 'a4',
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+      title: 'Tipo empresa desactivado',
+      subtitle: 'OPTICA (próximamente)',
+      variant: 'warning',
+    },
+  ],
+}
+
+function PlatformAdminDashboardContent() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle>Empresas registradas</CardTitle>
+              <CardDescription>Total de clientes en la plataforma.</CardDescription>
+            </div>
+            <Building2 className="h-5 w-5 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-display text-foreground">{PLATFORM_STATS.empresasRegistradas}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => navigate(paths.empresas)}
+            >
+              Ver empresas
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle>Empresas activas</CardTitle>
+              <CardDescription>En producción actualmente.</CardDescription>
+            </div>
+            <Shield className="h-5 w-5 text-emerald-600" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-display text-foreground">{PLATFORM_STATS.empresasActivas}</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {PLATFORM_STATS.empresasActivas === PLATFORM_STATS.empresasRegistradas
+                ? 'Todas las empresas están activas.'
+                : `${PLATFORM_STATS.empresasRegistradas - PLATFORM_STATS.empresasActivas} inactiva(s).`}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle>Administradores</CardTitle>
+              <CardDescription>Administradores de empresa asignados.</CardDescription>
+            </div>
+            <Users2 className="h-5 w-5 text-indigo-600" />
+          </CardHeader>
+          <CardContent>
+            <p className="text-display text-foreground">{PLATFORM_STATS.administradoresRegistrados}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => navigate(paths.administradores)}
+            >
+              Gestionar
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle>Tipos de empresa</CardTitle>
+              <CardDescription>Categorías y módulos configurados.</CardDescription>
+            </div>
+            <Layers className="h-5 w-5 text-violet-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {PLATFORM_STATS.tiposEmpresa.map((tipo) => (
+                <Badge
+                  key={tipo.codigo}
+                  variant="outline"
+                  style={{ borderColor: tipo.color, color: tipo.color }}
+                >
+                  {tipo.nombre} · {tipo.empresasCount}
+                </Badge>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => navigate(paths.tiposEmpresa)}
+            >
+              Tipos y módulos
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-primary" />
+            Empresas por tipo
+          </CardTitle>
+          <CardDescription>Distribución de clientes según su vertical.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {PLATFORM_STATS.tiposEmpresa.map((tipo) => (
+              <div
+                key={tipo.codigo}
+                className="rounded-2xl border p-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="inline-block h-3 w-3 rounded-full"
+                      style={{ backgroundColor: tipo.color }}
+                    />
+                    <p className="text-sm font-semibold text-foreground">{tipo.nombre}</p>
+                    <Badge variant="outline" className="text-xs">
+                      {tipo.codigo}
+                    </Badge>
+                  </div>
+                  <p className="text-lg font-bold text-foreground">{tipo.empresasCount}</p>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {tipo.empresasCount === 1 ? '1 empresa' : `${tipo.empresasCount} empresas`}
+                </p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-primary" />
+            Actividad reciente de plataforma
+          </CardTitle>
+          <CardDescription>Cambios y eventos globales de la plataforma.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {PLATFORM_STATS.recentActivity.map((row) => (
+            <div
+              key={row.id}
+              className="flex items-start justify-between gap-3 rounded-2xl border p-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
+                <p className="text-xs text-muted-foreground">{row.subtitle}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {new Date(row.createdAt).toLocaleString('es-PE')}
+                </p>
+              </div>
+              <Badge variant={row.variant}>
+                {row.variant === 'success' ? 'Nuevo' : row.variant === 'warning' ? 'Aviso' : 'Cambio'}
+              </Badge>
+            </div>
+          ))}
+          <span
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Ver auditoría completa (próximamente)
+          </span>
+        </CardContent>
+      </Card>
+    </>
+  )
+}
+
+type CompanyDashboardContentProps = {
+  isLoading: boolean
+  error: string | null
+  dashboard: DashboardOverviewResponse
+  activityRows: { id: string; createdAt: string; title: string; subtitle: string; amount: number; variant: 'info' | 'success' | 'warning' }[]
+  showAlertDetails: boolean
+  onToggleAlertDetails: () => void
+  onNavigateToCashier: () => void
+}
+
+function CompanyDashboardContent({
+  isLoading,
+  error,
+  dashboard,
+  activityRows,
+  showAlertDetails,
+  onToggleAlertDetails,
+  onNavigateToCashier,
+}: CompanyDashboardContentProps) {
+  const activeDrawer = dashboard.cash.activeDrawer
+  return (
+    <>
       {isLoading ? (
         <div className="flex items-center justify-center py-10">
           <Loader className="h-8 w-8" />
@@ -251,7 +527,7 @@ export function DashboardPage() {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setShowAlertDetails((current) => !current)}
+            onClick={onToggleAlertDetails}
           >
             {showAlertDetails ? 'Ocultar' : 'Ver'}
           </Button>
@@ -271,7 +547,7 @@ export function DashboardPage() {
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() => navigate(paths.caja)}
+                  onClick={onNavigateToCashier}
                 >
                   Ir a Caja
                 </Button>
@@ -364,6 +640,6 @@ export function DashboardPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </>
   )
 }

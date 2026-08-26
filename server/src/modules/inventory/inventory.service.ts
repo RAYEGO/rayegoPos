@@ -7,7 +7,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 import {
   buildPackagingSnapshot,
   convertQuantityToBaseUnits,
@@ -358,7 +358,7 @@ export async function getInventoryDashboard(
   request: FastifyRequest,
 ) {
   const search = filters.search?.trim()
-  const { branchId, companyId } = await getAuthContext(request)
+  const { branchId, companyId } = await requireBranchAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
@@ -794,7 +794,7 @@ export async function createInventoryLot(
   payload: CreateInventoryLotPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId } = await requireBranchAuthContext(request)
   const isManualLotEnabled = false
   if (!isManualLotEnabled) {
     throw createHttpError(
@@ -1116,7 +1116,7 @@ export async function adjustInventoryLot(
   payload: AdjustInventoryLotPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId } = await requireBranchAuthContext(request)
   const requestedQuantity = Number(payload.quantity)
 
   if (
@@ -1381,7 +1381,7 @@ export async function transferInventoryLot(
   payload: TransferInventoryLotPayload,
   request: FastifyRequest,
 ) {
-  const { userId, branchId } = await getAuthContext(request)
+  const { userId, branchId } = await requireBranchAuthContext(request)
   const requestedQuantity = Number(payload.quantity)
 
   if (

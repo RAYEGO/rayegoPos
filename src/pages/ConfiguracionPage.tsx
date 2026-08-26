@@ -2,7 +2,17 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Download, ImageUp, Plus, RefreshCcw, Trash2, Upload, X } from 'lucide-react'
+import {
+  Building2,
+  Download,
+  ImageUp,
+  MoreHorizontal,
+  Plus,
+  RefreshCcw,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +25,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,11 +39,13 @@ import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/sid
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { branchesService } from '@/services/branchesService'
 import { implementationService } from '@/services/implementationService'
 import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
+import type { Branch } from '@/types/settings'
 import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
@@ -216,6 +235,41 @@ const supportedCurrencies = [
   { code: 'USD', label: 'Dólares' },
 ] as const
 
+const branchFormSchema = z.object({
+  nombre: z
+    .string({ required_error: 'El nombre es obligatorio.' })
+    .trim()
+    .min(2, 'El nombre debe tener al menos 2 caracteres.')
+    .max(120, 'Máximo 120 caracteres.'),
+  codigo: z
+    .string({ required_error: 'El código es obligatorio.' })
+    .trim()
+    .min(2, 'El código debe tener al menos 2 caracteres.')
+    .max(20, 'Máximo 20 caracteres.')
+    .regex(/^[A-Z0-9_-]+$/i, 'Usa letras, números, guion bajo o guion.')
+    .transform((value) => value.toUpperCase()),
+  direccion: nullableText(z.string().max(255).nullable().optional()),
+  telefono: nullableText(z.string().max(30).nullable().optional()),
+  email: z
+    .string()
+    .email('Ingresa un correo válido.')
+    .max(150)
+    .nullable()
+    .optional()
+    .or(z.literal(''))
+    .transform((value) => (value === '' ? null : value)),
+  activo: z.boolean().default(true),
+})
+
+const branchUpdateSchema = branchFormSchema
+  .partial()
+  .omit({ codigo: true })
+  .extend({
+    nombre: branchFormSchema.shape.nombre.optional(),
+  })
+
+type BranchFormValues = z.infer<typeof branchFormSchema>
+
 const appSystemInfo = {
   version: 'Rayego POS v1.0',
   architecture: 'Multiempresa preparada',
@@ -263,6 +317,14 @@ export function ConfiguracionPage() {
   const [productionConfirmText, setProductionConfirmText] = useState('')
   const [isSettingProduction, setIsSettingProduction] = useState(false)
 
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [isBranchesLoading, setIsBranchesLoading] = useState(false)
+  const [branchesError, setBranchesError] = useState<string | null>(null)
+  const [isBranchPanelOpen, setIsBranchPanelOpen] = useState(false)
+  const [isBranchPanelSubmitting, setIsBranchPanelSubmitting] = useState(false)
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
+  const [isBranchesRefreshing, setIsBranchesRefreshing] = useState(false)
+
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
   const companyLogoInputRef = useRef<HTMLInputElement | null>(null)
@@ -280,6 +342,19 @@ export function ConfiguracionPage() {
         },
       ],
     },
+  })
+
+  const branchForm = useForm<BranchFormValues>({
+    resolver: zodResolver(selectedBranch ? branchUpdateSchema : branchFormSchema),
+    defaultValues: {
+      nombre: '',
+      codigo: '',
+      direccion: null,
+      telefono: null,
+      email: null,
+      activo: true,
+    },
+    mode: 'onChange',
   })
 
   const companyForm = useForm<CompanyProfileFormValues>({
@@ -365,10 +440,104 @@ export function ConfiguracionPage() {
     }
   }
 
+  async function loadBranches(options?: { silent?: boolean }) {
+    if (!accessToken) return
+    if (options?.silent) {
+      setIsBranchesRefreshing(true)
+    } else {
+      setIsBranchesLoading(true)
+    }
+    setBranchesError(null)
+    try {
+      const items = await branchesService.list(accessToken)
+      setBranches(items)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setBranchesError(getApiErrorMessage(err))
+    } finally {
+      setIsBranchesLoading(false)
+      setIsBranchesRefreshing(false)
+    }
+  }
+
   useEffect(() => {
     void loadInitialInventoryLoads()
     void loadCompanyProfile()
+    void loadBranches()
   }, [accessToken])
+
+  function openCreateBranchPanel() {
+    setSelectedBranch(null)
+    branchForm.reset({
+      nombre: '',
+      codigo: '',
+      direccion: null,
+      telefono: null,
+      email: null,
+      activo: true,
+    })
+    setIsBranchPanelOpen(true)
+  }
+
+  function openEditBranchPanel(branch: Branch) {
+    setSelectedBranch(branch)
+    branchForm.reset({
+      nombre: branch.nombre,
+      codigo: branch.codigo,
+      direccion: branch.direccion ?? null,
+      telefono: branch.telefono ?? null,
+      email: branch.email ?? null,
+      activo: branch.activo,
+    })
+    setIsBranchPanelOpen(true)
+  }
+
+  async function handleBranchSubmit(values: BranchFormValues) {
+    if (!accessToken) return
+    setIsBranchPanelSubmitting(true)
+    try {
+      if (selectedBranch) {
+        const updated = await branchesService.update(accessToken, selectedBranch.id, values)
+        toast.success(`Sucursal "${updated.nombre}" actualizada.`)
+      } else {
+        const created = await branchesService.create(accessToken, values)
+        toast.success(`Sucursal "${created.nombre}" creada correctamente.`)
+      }
+      setIsBranchPanelOpen(false)
+      setSelectedBranch(null)
+      await loadBranches({ silent: true })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsBranchPanelSubmitting(false)
+    }
+  }
+
+  async function handleToggleBranchStatus(branch: Branch) {
+    if (!accessToken) return
+    try {
+      const updated = await branchesService.toggleStatus(accessToken, branch.id)
+      toast.success(
+        updated.activo
+          ? `Sucursal "${updated.nombre}" activada.`
+          : `Sucursal "${updated.nombre}" desactivada.`,
+      )
+      await loadBranches({ silent: true })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    }
+  }
 
   const totals = useMemo(() => {
     const values = initialInventoryForm.getValues()
@@ -627,45 +796,76 @@ export function ConfiguracionPage() {
         'observaciones',
       ],
       [
-        'PARA-500-CAJA',
-        '',
-        'Paracetamol 500mg',
-        'ANALGÉSICOS',
-        'ACME',
+        'EJEMPLO-AMOX-500MG',
+        '7750001234567',
+        'Amoxicilina 500 mg [EJEMPLO - NO IMPORTAR]',
+        'ANTIBIÓTICOS',
+        'LABORATORIO FARMA S.A.',
         'Genérico',
-      'Paracetamol',
-        'Tabletas',
-        'Unidad',
-        'und',
-        '0.50',
-        '0.10',
+        'Amoxicilina',
+        'Cápsulas',
+        'Cápsula',
+        'cap',
+        '2.50',
+        '0.90',
+        'SI',
         'NO',
-        'NO',
-        'Analgésico',
-        '500mg',
-        '',
-        '',
+        'Antibiótico betalactámico de amplio espectro. Unidad base = 1 Cápsula. 1 Blíster = 12 cápsulas · 1 Caja = 10 Blísteres · 1 Caja = 120 cápsulas (equivalencias / cadena de empaque se configuran luego en el módulo Productos).',
+        '500 mg',
+        'RS-PER-2026-0012345',
+        'EJEMPLO - NO IMPORTAR. Esta fila se excluye automáticamente al importar. Eliminar o editar para usar como plantilla real.',
       ],
-      [
-        'VITC-1G-UND',
-        '',
-        'Vitamina C 1g',
-        'VITAMINAS',
-        '',
-        'Marca',
-      'Vitamina C',
-        'Tabletas',
-        'Unidad',
-        'und',
-        '1.50',
-        '0.30',
-        'NO',
-        'NO',
-        '',
-        '1g',
-        '',
-        '',
-      ],
+    ]
+  }
+
+  function buildProductCatalogInstructions() {
+    return [
+      ['HOJA DE INSTRUCCIONES — Importación Masiva de Productos (Catálogo Maestro)'],
+      [],
+      ['⚠️ ANTES DE EMPEZAR'],
+      ['1. La hoja "Productos" contiene la plantilla a llenar. La Fila 2 es un EJEMPLO — nunca se importa.'],
+      ['2. Las presentaciones y equivalencias (blíster/caja/fraco) NO se importan en esta plantilla.'],
+      ['   Se configuran manualmente en el módulo Productos después de crear el catálogo.'],
+      ['3. Esta importación crea SOLAMENTE el catálogo maestro. No crea stock ni lotes.'],
+      ['   Para cargar stock inicial usar el CSV "Carga inicial de inventario".'],
+      ['4. Los maestros Tipos Comerciales y Principios Activos NO se crean automáticamente.'],
+      ['   Deben existir primero en: Configuración → Centro de Maestros → Productos.'],
+      [],
+      ['📋 COLUMNAS Y DESCRIPCIÓN'],
+      ['COLUMNA', 'REQUI?', 'FORMATO', 'DESCRIPCIÓN Y EJEMPLO'],
+      ['sku', '✅ SI', 'texto ÚNICO uppercase', 'Código interno del producto. No se puede repetir. Ej: AMOX-500-CAP'],
+      ['codigoBarras', '— opcional', 'texto numérico', 'Código EAN-13 / GTIN si lo tiene. Dejar vacío si no.'],
+      ['nombre', '✅ SI', 'texto', 'Nombre del producto como aparecerá en la venta. Ej: Amoxicilina 500 mg'],
+      ['categoria', '✅ SI', 'texto', 'Nombre de la categoría. Se crea automáticamente si no existe. Ej: ANTIBIÓTICOS'],
+      ['laboratorio', '— opcional', 'texto', 'Nombre del laboratorio. Se crea automáticamente si no existe.'],
+      ['tipoComercial', '✅ SI', 'texto (exacto)', 'Nombre exacto registrado en maestro Tipos Comerciales. Ej: Genérico / Marca / Similar'],
+      ['principioActivo', '✅ SI', 'texto (exacto)', 'Nombre exacto registrado en maestro Principios Activos. Ej: Amoxicilina'],
+      ['presentacion', '✅ SI', 'texto', 'Cómo se presenta (forma farmacéutica). Se crea auto. Ej: Cápsulas / Tabletas / Jarabe'],
+      ['unidadNombre', '✅ SI', 'texto', 'Unidad base de conteo. Se crea auto. Ej: Cápsula / Tableta / Mililitro / Unidad'],
+      ['unidadSimbolo', '✅ SI', 'texto corto', 'Símbolo / abreviatura de la unidad. Ej: cap / tab / ml / und'],
+      ['precioVenta', '✅ SI', 'número decimal', 'Precio al público en soles (S/). Usa punto decimal. Ej: 2.50'],
+      ['costoReferencia', '✅ SI', 'número decimal', 'Costo de referencia (costo compra estimado). S/ con punto decimal. Ej: 0.90'],
+      ['requiereReceta', '✅ SI', 'SI / NO', '¿Requiere receta médica para vender? Valores válidos: SI / NO / 1 / 0 / VERDADERO / FALSO'],
+      ['esControlado', '✅ SI', 'SI / NO', '¿Producto de control especial (CIS, antibiótico controlado)? Valores válidos = mismas reglas que requiereReceta.'],
+      ['descripcion', '— opcional', 'texto', 'Texto libre que aparece en la ficha del producto.'],
+      ['concentracion', '— opcional', 'texto', 'Concentración del principio activo. Ej: 500 mg / 250 mg / 120 ml'],
+      ['registroSanitario', '— opcional', 'texto', 'Número de registro sanitario de DIGEMID/MINSA si corresponde.'],
+      ['observaciones', '— opcional', 'texto', 'Notas internas sobre el producto.'],
+      [],
+      ['🧪 EJEMPLO CONCEPTUAL DE PRESENTACIONES / EQUIVALENCIAS (para configurar a mano luego)'],
+      ['Producto: Amoxicilina 500 mg · Unidad base = Cápsula'],
+      ['1 Blíster = 12 Cápsulas'],
+      ['1 Caja = 10 Blísteres'],
+      ['Resultado final: 1 Caja = 120 Cápsulas (unidades base).'],
+      [],
+      ['💡 REGLAS DE VALIDACIÓN'],
+      ['• El SKU no puede repetirse dentro del archivo ni con un producto ya existente en el sistema.'],
+      ['• Precios y costos aceptan mínimo 0.00. No aceptan moneda ni texto.'],
+      ['• Unidad: si ingresas nombre + símbolo nuevos, el sistema los crea en el maestro.'],
+      ['• Presentación: nombre es formato de presentación (Cápsulas, Tabletas, Jarabe, etc.).'],
+      ['• Equivalencias (Blíster ↔ Caja ↔ Unidad) NO están en esta plantilla: configúralas luego en Editar Producto.'],
+      ['• Campos marcados como "opcionales" se pueden dejar vacíos.'],
+      ['• Si una fila tiene el texto "EJEMPLO - NO IMPORTAR" en observaciones, nombre o sku se OMITIRÁ siempre.'],
     ]
   }
 
@@ -673,6 +873,8 @@ export function ConfiguracionPage() {
     const workbook = XLSX.utils.book_new()
     const worksheet = XLSX.utils.aoa_to_sheet(buildProductCatalogTemplate())
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Productos')
+    const instructionsSheet = XLSX.utils.aoa_to_sheet(buildProductCatalogInstructions())
+    XLSX.utils.book_append_sheet(workbook, instructionsSheet, 'INSTRUCCIONES')
     const content = XLSX.write(workbook, {
       bookType: 'xlsx',
       type: 'array',
@@ -700,6 +902,17 @@ export function ConfiguracionPage() {
 
   function normalizeMasterKey(value: string) {
     return value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  }
+
+  function isExampleNoImportRow(entry: {
+    sku: string
+    nombre: string
+    observaciones: string
+  }) {
+    const marker = 'EJEMPLO - NO IMPORTAR'
+    const check = (v: string) =>
+      v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().includes(marker)
+    return check(entry.sku) || check(entry.nombre) || check(entry.observaciones)
   }
 
   function normalizeCell(value: unknown) {
@@ -862,6 +1075,11 @@ export function ConfiguracionPage() {
 
       for (const row of rows) {
         try {
+          if (isExampleNoImportRow(row)) {
+            skipped += 1
+            continue
+          }
+
           const rawSku = row.sku.trim()
           if (!rawSku) {
             skipped += 1
@@ -1294,9 +1512,7 @@ export function ConfiguracionPage() {
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)}>
         <TabsList>
           <TabsTrigger value="empresa">Empresa</TabsTrigger>
-          <TabsTrigger value="sucursales" disabled>
-            Sucursales
-          </TabsTrigger>
+          <TabsTrigger value="sucursales">Sucursales</TabsTrigger>
           <TabsTrigger value="comprobantes" disabled>
             Comprobantes
           </TabsTrigger>
@@ -1607,19 +1823,130 @@ export function ConfiguracionPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="sucursales" className="pt-4">
+        <TabsContent value="sucursales" className="space-y-4 pt-4">
+          <div className="flex flex-col gap-3 rounded-2xl border bg-card p-4 shadow-softSm sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-foreground">Sucursales</p>
+              <p className="text-xs text-muted-foreground">
+                Administra las sucursales operativas de la empresa actual. Solo puedes ver y gestionar sucursales de la empresa de tu sesión.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void loadBranches({ silent: true })}
+                disabled={isBranchesRefreshing || !accessToken}
+              >
+                <RefreshCcw
+                  className={`mr-2 h-4 w-4 ${isBranchesRefreshing ? 'animate-spin' : ''}`}
+                />
+                Actualizar
+              </Button>
+              <Button type="button" onClick={openCreateBranchPanel} disabled={!accessToken}>
+                <Plus className="mr-2 h-4 w-4" />
+                Nueva sucursal
+              </Button>
+            </div>
+          </div>
+
           <Card>
-            <CardHeader>
-              <CardTitle>Sucursales</CardTitle>
-              <CardDescription>Disponible próximamente.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Esta sección se habilitará luego de cerrar Empresa.
-                </p>
-              </div>
+            <CardContent className="p-0">
+              {branchesError ? (
+                <div className="p-5 text-sm text-destructive">{branchesError}</div>
+              ) : isBranchesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader className="h-6 w-6" />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Dirección</TableHead>
+                      <TableHead>Teléfono</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="w-[1%] whitespace-nowrap text-right">
+                        Acciones
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {branches.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={6}
+                          className="py-10 text-center text-sm text-muted-foreground"
+                        >
+                          No hay sucursales creadas. Crea la primera para habilitar los procesos
+                          operativos.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      branches.map((branch) => (
+                        <TableRow key={branch.id}>
+                          <TableCell className="font-medium text-foreground">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
+                                <Building2 className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                              <div>
+                                <p className="font-semibold">{branch.nombre}</p>
+                                {branch.email ? (
+                                  <p className="text-xs text-muted-foreground">{branch.email}</p>
+                                ) : null}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{branch.codigo}</Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {branch.direccion ?? '—'}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {branch.telefono ?? '—'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={branch.activo ? 'success' : 'secondary'}>
+                              {branch.activo ? 'Activa' : 'Inactiva'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openEditBranchPanel(branch)}
+                              >
+                                Editar
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button type="button" variant="outline" size="sm">
+                                    <span className="sr-only">Más acciones</span>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+                                  <DropdownMenuItem
+                                    onSelect={() => void handleToggleBranchStatus(branch)}
+                                  >
+                                    {branch.activo ? 'Desactivar' : 'Activar'}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -2238,6 +2565,172 @@ export function ConfiguracionPage() {
           </SidePanel>
         </TabsContent>
       </Tabs>
+
+      <SidePanel
+        open={isBranchPanelOpen}
+        onOpenChange={(open) => {
+          setIsBranchPanelOpen(open)
+          if (!open) {
+            setSelectedBranch(null)
+            branchForm.reset({
+              nombre: '',
+              codigo: '',
+              direccion: null,
+              telefono: null,
+              email: null,
+              activo: true,
+            })
+          }
+        }}
+      >
+        <SidePanelContent>
+          <div className="space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">
+                  {selectedBranch ? 'Editar sucursal' : 'Nueva sucursal'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedBranch
+                    ? 'Actualiza los datos operativos y el estado de la sucursal.'
+                    : 'Crea una nueva sucursal para operar en la empresa actual.'}
+                </p>
+              </div>
+              <SidePanelClose asChild>
+                <Button variant="ghost" size="icon">
+                  <X className="h-4 w-4" />
+                </Button>
+              </SidePanelClose>
+            </div>
+
+            <form
+              className="space-y-4"
+              onSubmit={branchForm.handleSubmit(handleBranchSubmit)}
+            >
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Nombre <span className="text-rose-600">*</span>
+                </label>
+                <Input
+                  placeholder="Ej. Sucursal Pichanaki"
+                  {...branchForm.register('nombre')}
+                  disabled={isBranchPanelSubmitting}
+                />
+                <FieldError message={branchForm.formState.errors.nombre?.message} />
+              </div>
+
+              {selectedBranch ? (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Código</label>
+                  <Input
+                    value={selectedBranch.codigo}
+                    disabled
+                    className="cursor-not-allowed bg-muted/60"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    El código no puede modificarse después de la creación.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Código <span className="text-rose-600">*</span>
+                  </label>
+                  <Input
+                    placeholder="Ej. PICH"
+                    {...branchForm.register('codigo')}
+                    disabled={isBranchPanelSubmitting}
+                  />
+                  <FieldError message={branchForm.formState.errors.codigo?.message} />
+                  <p className="text-xs text-muted-foreground">
+                    Máximo 20 caracteres (letras, números, guion bajo o guion). Debe ser único
+                    dentro de la empresa.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Dirección</label>
+                <Input
+                  placeholder="Av. principal 123"
+                  {...branchForm.register('direccion')}
+                  disabled={isBranchPanelSubmitting}
+                />
+                <FieldError message={branchForm.formState.errors.direccion?.message} />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Teléfono</label>
+                  <Input
+                    placeholder="+51 900 000 000"
+                    {...branchForm.register('telefono')}
+                    disabled={isBranchPanelSubmitting}
+                  />
+                  <FieldError message={branchForm.formState.errors.telefono?.message} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Correo</label>
+                  <Input
+                    type="email"
+                    placeholder="sucursal@botica.pe"
+                    {...branchForm.register('email')}
+                    disabled={isBranchPanelSubmitting}
+                  />
+                  <FieldError message={branchForm.formState.errors.email?.message} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-semibold text-foreground">Estado</p>
+                  <p className="text-xs text-muted-foreground">
+                    Una sucursal inactiva no aparecerá como opción para nuevas operaciones ni
+                    al iniciar sesión, pero conserva su historial.
+                  </p>
+                </div>
+                <Controller
+                  control={branchForm.control}
+                  name="activo"
+                  render={({ field }) => (
+                    <Switch
+                      checked={Boolean(field.value)}
+                      onCheckedChange={(checked) => field.onChange(checked === true)}
+                      disabled={isBranchPanelSubmitting}
+                    />
+                  )}
+                />
+              </div>
+
+              <div className="sticky bottom-0 -mx-6 mt-6 border-t bg-card px-6 pt-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <SidePanelClose asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={isBranchPanelSubmitting}
+                    >
+                      Cancelar
+                    </Button>
+                  </SidePanelClose>
+                  <Button type="submit" disabled={isBranchPanelSubmitting}>
+                    {isBranchPanelSubmitting ? (
+                      <>
+                        <Loader className="mr-2 h-4 w-4" />
+                        Guardando
+                      </>
+                    ) : selectedBranch ? (
+                      'Guardar cambios'
+                    ) : (
+                      'Crear sucursal'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </SidePanelContent>
+      </SidePanel>
     </div>
   )
 }

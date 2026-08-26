@@ -1,12 +1,8 @@
 import 'fastify'
+import type { AuthContext } from './lib/auth.js'
 
 declare module 'fastify' {
   interface FastifyRequest {
-    auth?: {
-      userId: string
-      companyId: string
-      branchId: string
-      roles: string[]
-    }
+    auth?: AuthContext
   }
 }

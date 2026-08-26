@@ -1,4 +1,4 @@
-export type AuthRole = 'ADMIN' | 'SUPERVISOR' | 'CAJERO'
+export type AuthRole = 'ADMIN' | 'ADMIN_POS' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN'
 
 export type AuthPermission =
   | '*'
@@ -17,6 +17,10 @@ export type AuthPermission =
   | 'auditoria.read'
   | 'reportes.read'
   | 'configuracion.read'
+  | 'tipos_empresa.manage'
+  | 'empresas.read'
+  | 'empresas.manage'
+  | 'administradores.manage'
 
 export type AuthBranch = {
   id: string
@@ -36,9 +40,12 @@ export type AuthSession = {
     roleName: string
     companyId: string
     companyName: string
-    branchId: string
-    branchCode: string
-    branchName: string
+    branchId: string | null
+    branchCode: string | null
+    branchName: string | null
+    companyTypeId: string | null
+    companyTypeCode: string | null
+    enabledModules: string[]
     roles: AuthRole[]
     permissions: AuthPermission[]
   }

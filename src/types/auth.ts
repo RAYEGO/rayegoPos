@@ -1,4 +1,6 @@
-export type AuthRole = 'ADMIN' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN'
+export type AuthRole = 'ADMIN_POS' | 'ADMIN' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN'
+
+export type UserStatus = 'ACTIVO' | 'BLOQUEADO' | 'INVITADO'
 
 export type AuthPermission =
   | '*'
@@ -17,6 +19,10 @@ export type AuthPermission =
   | 'auditoria.read'
   | 'reportes.read'
   | 'configuracion.read'
+  | 'tipos_empresa.manage'
+  | 'empresas.read'
+  | 'empresas.manage'
+  | 'administradores.manage'
 
 export type AuthUser = {
   id: string
@@ -25,6 +31,9 @@ export type AuthUser = {
   roleName: string
   companyId: string
   companyName: string
+  companyTypeId: string | null
+  companyTypeCode: string | null
+  enabledModules: string[]
   branchId: string
   branchCode: string
   branchName: string

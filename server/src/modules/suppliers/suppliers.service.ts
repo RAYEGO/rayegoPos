@@ -1,7 +1,7 @@
 import { Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext } from '../../lib/auth.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -82,7 +82,7 @@ export async function getSuppliersDashboard(
   filters: GetSuppliersFilters = {},
   request: FastifyRequest,
 ) {
-  const { companyId } = await getAuthContext(request)
+  const { companyId } = await requireBranchAuthContext(request)
   const search = filters.search?.trim().toLowerCase()
   const isActive =
     filters.status === 'activo' ? true : filters.status === 'inactivo' ? false : undefined
@@ -136,7 +136,7 @@ export async function getSuppliersDashboard(
 }
 
 export async function createSupplier(payload: CreateSupplierPayload, request: FastifyRequest) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   if (!payload.razonSocial.trim()) {
     throw createHttpError(400, 'La razón social es obligatoria.')
@@ -187,7 +187,7 @@ export async function updateSupplier(
   payload: UpdateSupplierPayload,
   request: FastifyRequest,
 ) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   const existingSupplier = await prisma.proveedor.findFirst({
     where: {
@@ -266,7 +266,7 @@ export async function updateSupplier(
 }
 
 export async function deleteSupplier(supplierId: string, request: FastifyRequest) {
-  const { userId, companyId } = await getAuthContext(request)
+  const { userId, companyId } = await requireBranchAuthContext(request)
 
   const supplier = await prisma.proveedor.findFirst({
     where: { id: supplierId, deletedAt: null, empresaId: companyId },

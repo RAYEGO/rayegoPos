@@ -8,6 +8,24 @@ import type {
   ResetPasswordPayload,
 } from '@/types/auth'
 
+const MODULOS_BOTICA = [
+  'dashboard',
+  'ventas',
+  'productos',
+  'compras',
+  'inventario',
+  'lotes',
+  'kardex',
+  'clientes',
+  'proveedores',
+  'caja',
+  'reportes',
+  'configuracion',
+  'usuarios',
+  'sesiones',
+  'auditoria',
+]
+
 function createSession({
   accessToken,
   refreshToken,
@@ -16,6 +34,9 @@ function createSession({
   fullName,
   companyId,
   companyName,
+  companyTypeId = '00000000-0000-0000-0000-000000000001',
+  companyTypeCode = 'BOTICA',
+  enabledModules = MODULOS_BOTICA,
   branchId,
   branchCode,
   branchName,
@@ -28,6 +49,9 @@ function createSession({
   fullName: string
   companyId: string
   companyName: string
+  companyTypeId?: string
+  companyTypeCode?: string
+  enabledModules?: string[]
   branchId: string
   branchCode: string
   branchName: string
@@ -45,6 +69,9 @@ function createSession({
       roleName: roleDefinitionMap[primaryRole].label,
       companyId,
       companyName,
+      companyTypeId,
+      companyTypeCode,
+      enabledModules,
       branchId,
       branchCode,
       branchName,
@@ -55,6 +82,36 @@ function createSession({
 }
 
 const DEMO_ACCOUNTS = [
+  {
+    email: 'admin.pos@rayego.pe',
+    password: 'RayegoPOS2026!',
+    session: createSession({
+      accessToken: 'mock-access-token-admin-pos',
+      refreshToken: 'mock-refresh-token-admin-pos',
+      id: '00000000-0000-0000-0000-000000000001',
+      email: 'admin.pos@rayego.pe',
+      fullName: 'Administrador de Plataforma',
+      companyId: '',
+      companyName: '',
+      companyTypeId: '',
+      companyTypeCode: '',
+      enabledModules: [
+        'dashboard',
+        'tipos_empresa',
+        'empresas',
+        'usuarios',
+        'administradores',
+        'sesiones',
+        'auditoria',
+        'reportes',
+        'configuracion',
+      ],
+      branchId: '',
+      branchCode: '',
+      branchName: '',
+      roles: ['ADMIN_POS'],
+    }),
+  },
   {
     email: 'admin@rayego.pe',
     password: 'RayegoPOS2026!',
@@ -114,6 +171,15 @@ function wait(ms = 450) {
   })
 }
 
+export function isDemoAccountCredentials(email: string, password?: string): boolean {
+  const normalizedEmail = email.trim().toLowerCase()
+  return DEMO_ACCOUNTS.some((entry) => {
+    if (entry.email !== normalizedEmail) return false
+    if (typeof password === 'undefined') return true
+    return entry.password === password
+  })
+}
+
 export const authMockService = {
   async login(payload: LoginPayload): Promise<AuthSession> {
     await wait()
@@ -165,7 +231,7 @@ export const authMockService = {
   },
 
   getDemoCredentials() {
-    return DEMO_ACCOUNTS[0]
+    return DEMO_ACCOUNTS[1]
   },
 
   getDemoAccounts() {
