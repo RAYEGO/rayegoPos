@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -941,7 +941,6 @@ export function CajaPage() {
                       const categoryLabel = labelForCategory(category)
                       const isDigital = category === 'DIGITAL'
                       const isCash = category === 'CASH'
-                      const isCard = category === 'CARD'
 
                       if (items.length === 0) {
                         return null
@@ -959,7 +958,7 @@ export function CajaPage() {
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge
                                   variant={
-                                    isCash ? 'default' : isDigital ? 'secondary' : 'outline'
+                                    isCash ? 'default' : isDigital ? 'outline' : 'outline'
                                   }
                                 >
                                   {categoryLabel}
@@ -1094,7 +1093,7 @@ export function CajaPage() {
                   (summaryBalancesByCategory.groups.DIGITAL?.length ?? 0) > 0 ? (
                     <div className="space-y-2 rounded-2xl border border-indigo-200/60 dark:border-indigo-900/50 bg-indigo-50/30 dark:bg-indigo-950/10 p-4">
                       <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-xs">
+                        <Badge variant="outline" className="text-xs">
                           Submedios digitales
                         </Badge>
                         <p className="text-xs text-muted-foreground">
@@ -1721,7 +1720,7 @@ export function CajaPage() {
                           <div className="col-span-3">
                             <Badge
                               variant={
-                                isCash ? 'default' : isDigital ? 'secondary' : 'outline'
+                                isCash ? 'default' : isDigital ? 'info' : 'outline'
                               }
                               className="text-[11px]"
                             >

@@ -20,7 +20,6 @@ import {
   Trash2,
   Copy,
   TestTubeDiagonal,
-  Wand2,
   X,
 } from 'lucide-react'
 
@@ -728,7 +727,7 @@ export function ProductosPage() {
     [options.presentations],
   )
 
-  const loadPracticalPackagingExample = useCallback(() => {
+  const _loadPracticalPackagingExample = useCallback(() => {
     const normalize = (name: string) =>
       name
         .normalize('NFD')
@@ -782,6 +781,7 @@ export function ProductosPage() {
     setPackagingDraftRows(rows)
     return rows
   }, [options.presentations])
+  void _loadPracticalPackagingExample
 
   const syncPackagingInputValues = useCallback(
     (rows: PackagingFormRow[]) => {

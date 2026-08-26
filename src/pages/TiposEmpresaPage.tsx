@@ -42,9 +42,11 @@ import { useAuthorization } from '@/hooks/useAuthorization'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import type {
+  CreateTipoEmpresaPayload,
   ModuloCatalogoItem,
   TipoEmpresaDetail,
   TipoEmpresaListItem,
+  UpdateTipoEmpresaPayload,
 } from '@/types/admin-pos'
 
 type DrawerMode = 'create' | 'edit' | 'view'
@@ -73,13 +75,13 @@ function getIconByName(name: string | null) {
   return found?.component ?? Building2
 }
 
-const nullableText = (schema: z.ZodTypeAny) =>
+const nullableText = () =>
   z.preprocess((value) => {
     if (typeof value === 'string' && value.trim() === '') {
       return null
     }
     return value
-  }, schema)
+  }, z.string().nullable().optional())
 
 const tipoEmpresaFormSchema = z.object({
   codigo: z
@@ -89,15 +91,24 @@ const tipoEmpresaFormSchema = z.object({
     .max(50, 'Máximo 50 caracteres.')
     .regex(/^[A-Z0-9_]+$/, 'Usa mayúsculas, números o guion bajo.'),
   nombre: z.string().trim().min(3, 'Al menos 3 caracteres.').max(120, 'Máximo 120 caracteres.'),
-  descripcion: nullableText(z.string().max(255).nullable().optional()),
-  icono: nullableText(z.string().max(50).nullable().optional()),
-  color: nullableText(z.string().max(20).nullable().optional()),
-  orden: z.number().int().min(0).max(9999).optional().default(0),
-  activo: z.boolean().default(true),
-  modulosHabilitados: z.array(z.string()).optional().default([]),
+  descripcion: nullableText(),
+  icono: nullableText(),
+  color: nullableText(),
+  orden: z.number().int().min(0).max(9999),
+  activo: z.boolean(),
+  modulosHabilitados: z.array(z.string()),
 })
 
-type TipoEmpresaFormValues = z.infer<typeof tipoEmpresaFormSchema>
+type TipoEmpresaFormValues = {
+  codigo: string
+  nombre: string
+  descripcion: string | null | undefined
+  icono: string | null | undefined
+  color: string | null | undefined
+  orden: number
+  activo: boolean
+  modulosHabilitados: string[]
+}
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null
@@ -124,7 +135,7 @@ function agruparModulosPorCategoria(modulos: ModuloCatalogoItem[]) {
 export function TiposEmpresaPage() {
   const { session } = useAuth()
   const authorization = useAuthorization()
-  const handleUnauthorized = useHandleUnauthorized()
+  const handleUnauthorized = useHandleUnauthorized('TiposEmpresaPage')
   const accessToken = session?.accessToken ?? ''
 
   const [isLoading, setIsLoading] = useState(false)
@@ -137,7 +148,7 @@ export function TiposEmpresaPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const canManage = authorization.hasPermission('tipos_empresa.manage')
+  const canManage = authorization.can('tipos_empresa.manage')
 
   const {
     control,
@@ -147,7 +158,7 @@ export function TiposEmpresaPage() {
     watch,
     formState: { errors },
   } = useForm<TipoEmpresaFormValues>({
-    resolver: zodResolver(tipoEmpresaFormSchema),
+    resolver: zodResolver(tipoEmpresaFormSchema) as never,
     defaultValues: {
       codigo: '',
       nombre: '',
@@ -162,10 +173,10 @@ export function TiposEmpresaPage() {
 
   const watchCodigo = watch('codigo')
   const watchNombre = watch('nombre')
-  const watchIcono = watch('icono')
-  const watchColor = watch('color')
+  const watchIcono = watch('icono') as string | null
+  const watchColor = watch('color') as string | null
   const watchActivo = watch('activo')
-  const watchModulos = watch('modulosHabilitados') ?? []
+  const watchModulos = (watch('modulosHabilitados') ?? []) as string[]
   const readOnly = drawerMode === 'view'
 
   const IconCard = useMemo(() => getIconByName(watchIcono), [watchIcono])
@@ -180,7 +191,13 @@ export function TiposEmpresaPage() {
         setModulosCatalogo(modulos)
       })
       .catch((err) => {
-        handleUnauthorized(err)
+        if (err instanceof ApiError) {
+          void handleUnauthorized(err.status, err.message, { endpoint: 'listTiposEmpresa', page: 'TiposEmpresaPage' })
+        } else if (err instanceof ApiNetworkError) {
+          void handleUnauthorized(401, err.message, { endpoint: 'listTiposEmpresa', page: 'TiposEmpresaPage' })
+        } else {
+          void handleUnauthorized()
+        }
         setError(getApiErrorMessage(err))
       })
       .finally(() => setIsLoading(false))
@@ -221,7 +238,13 @@ export function TiposEmpresaPage() {
           })
         })
         .catch((err) => {
-          handleUnauthorized(err)
+          if (err instanceof ApiError) {
+            void handleUnauthorized(err.status, err.message, { endpoint: 'getTipoEmpresa', page: 'TiposEmpresaPage' })
+          } else if (err instanceof ApiNetworkError) {
+            void handleUnauthorized(401, err.message, { endpoint: 'getTipoEmpresa', page: 'TiposEmpresaPage' })
+          } else {
+            void handleUnauthorized()
+          }
           toast.error(getApiErrorMessage(err))
         })
     }
@@ -232,20 +255,41 @@ export function TiposEmpresaPage() {
     setSelectedId(null)
   }
 
-  async function onSubmit(values: TipoEmpresaFormValues) {
+  async function toggleEstado(tipo: TipoEmpresaListItem) {
+    if (!canManage) return
+    try {
+      await adminPosService.toggleTipoEmpresa(accessToken, tipo.id)
+      setItems((prev) =>
+        prev.map((it) => (it.id === tipo.id ? { ...it, activo: !it.activo } : it)),
+      )
+      toast.success(tipo.activo ? 'Tipo de empresa desactivado.' : 'Tipo de empresa activado.')
+    } catch (err) {
+      if (err instanceof ApiError) {
+        void handleUnauthorized(err.status, err.message, { endpoint: 'toggleTipoEmpresa', page: 'TiposEmpresaPage' })
+      } else if (err instanceof ApiNetworkError) {
+        void handleUnauthorized(401, err.message, { endpoint: 'toggleTipoEmpresa', page: 'TiposEmpresaPage' })
+      } else {
+        void handleUnauthorized()
+      }
+      toast.error(getApiErrorMessage(err))
+    }
+  }
+
+  async function onSubmit(values: any) {
+    const typedValues = values as TipoEmpresaFormValues
     if (!canManage || readOnly) return
     setIsSubmitting(true)
     try {
       const payload = {
-        codigo: values.codigo,
-        nombre: values.nombre,
-        descripcion: values.descripcion,
-        icono: values.icono,
-        color: values.color,
-        orden: values.orden,
-        activo: values.activo,
-        modulosHabilitados: values.modulosHabilitados,
-      }
+        codigo: typedValues.codigo,
+        nombre: typedValues.nombre,
+        descripcion: (typedValues.descripcion ?? null) as string | null,
+        icono: (typedValues.icono ?? null) as string | null,
+        color: (typedValues.color ?? null) as string | null,
+        orden: typedValues.orden ?? 0,
+        activo: typedValues.activo ?? true,
+        modulosHabilitados: typedValues.modulosHabilitados ?? [],
+      } as CreateTipoEmpresaPayload & UpdateTipoEmpresaPayload
 
       const guardado =
         drawerMode === 'create'
@@ -258,13 +302,13 @@ export function TiposEmpresaPage() {
         const modulosActualizados =
           selectedId && drawerMode === 'edit'
             ? await adminPosService.updateTipoEmpresaModulos(accessToken, selectedId, {
-                modulosHabilitados: values.modulosHabilitados,
+                modulosHabilitados: typedValues.modulosHabilitados ?? [],
               })
             : null
 
         if (drawerMode === 'edit' && selectedId && !modulosActualizados && guardado) {
           await adminPosService.updateTipoEmpresaModulos(accessToken, selectedId, {
-            modulosHabilitados: values.modulosHabilitados,
+            modulosHabilitados: typedValues.modulosHabilitados ?? [],
           })
         }
 
@@ -279,24 +323,16 @@ export function TiposEmpresaPage() {
         closeDrawer()
       }
     } catch (err) {
-      handleUnauthorized(err)
+      if (err instanceof ApiError) {
+        void handleUnauthorized(err.status, err.message, { endpoint: 'create/updateTipoEmpresa', page: 'TiposEmpresaPage' })
+      } else if (err instanceof ApiNetworkError) {
+        void handleUnauthorized(401, err.message, { endpoint: 'create/updateTipoEmpresa', page: 'TiposEmpresaPage' })
+      } else {
+        void handleUnauthorized()
+      }
       toast.error(getApiErrorMessage(err))
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  async function toggleEstado(tipo: TipoEmpresaListItem) {
-    if (!canManage) return
-    try {
-      await adminPosService.toggleTipoEmpresa(accessToken, tipo.id)
-      setItems((prev) =>
-        prev.map((it) => (it.id === tipo.id ? { ...it, activo: !it.activo } : it)),
-      )
-      toast.success(tipo.activo ? 'Tipo de empresa desactivado.' : 'Tipo de empresa activado.')
-    } catch (err) {
-      handleUnauthorized(err)
-      toast.error(getApiErrorMessage(err))
     }
   }
 
@@ -358,7 +394,13 @@ export function TiposEmpresaPage() {
                 setItems(tipos)
                 setModulosCatalogo(modulos)
               } catch (err) {
-                handleUnauthorized(err)
+                if (err instanceof ApiError) {
+                  void handleUnauthorized(err.status, err.message, { endpoint: 'listTiposEmpresa', page: 'TiposEmpresaPage' })
+                } else if (err instanceof ApiNetworkError) {
+                  void handleUnauthorized(401, err.message, { endpoint: 'listTiposEmpresa', page: 'TiposEmpresaPage' })
+                } else {
+                  void handleUnauthorized()
+                }
                 toast.error(getApiErrorMessage(err))
               } finally {
                 setIsLoading(false)

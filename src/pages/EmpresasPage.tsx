@@ -81,7 +81,7 @@ export function EmpresasPage() {
                   </div>
                   <CardDescription className="mt-1">RUC {empresa.ruc}</CardDescription>
                 </div>
-                <Badge variant={empresa.activo ? 'success' : 'secondary'}>
+                <Badge variant={empresa.activo ? 'success' : 'outline'}>
                   {empresa.activo ? 'Activo' : 'Inactivo'}
                 </Badge>
               </div>
@@ -89,8 +89,8 @@ export function EmpresasPage() {
                 <Badge variant="outline" style={{ borderColor: empresa.color, color: empresa.color }}>
                   {empresa.tipoNombre}
                 </Badge>
-                <Badge variant="secondary">{empresa.sucursalesCount} sucursales</Badge>
-                <Badge variant="secondary">{empresa.usuariosCount} usuarios</Badge>
+                <Badge variant="outline">{empresa.sucursalesCount} sucursales</Badge>
+                <Badge variant="outline">{empresa.usuariosCount} usuarios</Badge>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
                 Registro {new Date(empresa.createdAt).toLocaleDateString('es-PE')}

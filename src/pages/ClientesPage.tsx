@@ -119,8 +119,7 @@ const customerPaymentSchema = z
   .object({
     monto: z
       .number({
-        required_error: 'Ingresa el monto a pagar.',
-        invalid_type_error: 'Ingresa un monto válido.',
+        message: 'Ingresa un monto válido.',
       })
       .min(0.01, 'El monto debe ser mayor a 0.'),
     formaPagoId: z.string().min(1, 'Selecciona un medio de pago.'),
@@ -394,7 +393,7 @@ export function ClientesPage() {
     return dashboard.customers.find((customer) => customer.id === selectedCustomerId) ?? null
   }, [dashboard.customers, selectedCustomerId])
 
-  const accountSummary = useMemo(() => {
+  const _accountSummary = useMemo(() => {
     if (!selectedCustomer) {
       return null
     }
@@ -407,6 +406,7 @@ export function ClientesPage() {
 
     return { creditLimit, outstanding, available }
   }, [accountStatement, selectedCustomer])
+  void _accountSummary
 
   const handleUnauthorized = useHandleUnauthorized('ClientesPage')
 

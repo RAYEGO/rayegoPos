@@ -147,7 +147,8 @@ export function DashboardPage() {
     void loadDashboard()
   }, [isPlatformAdmin, loadDashboard])
 
-  const activeDrawer = dashboard.cash.activeDrawer
+  const _activeDrawer = dashboard.cash.activeDrawer
+  void _activeDrawer
 
   const activityRows = useMemo(() => {
     const sales = dashboard.activity.recentSales.map((sale) => ({

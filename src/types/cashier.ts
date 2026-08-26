@@ -5,6 +5,13 @@ import type {
 
 export type CashDrawerStatus = 'ABIERTA' | 'EN_CIERRE' | 'CERRADA'
 
+export type CashMovementType =
+  | 'VENTA'
+  | 'INGRESO_MANUAL'
+  | 'EGRESO'
+  | 'RETIRO'
+  | 'CUADRE'
+
 export type PaymentMethodCode =
   | 'EFECTIVO'
   | 'TARJETA'

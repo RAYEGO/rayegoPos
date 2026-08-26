@@ -222,7 +222,7 @@ export function VentasPage() {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('TODAS')
   const [availabilityFilter, setAvailabilityFilter] = useState<'TODOS' | 'CON_STOCK' | 'SIN_STOCK'>('TODOS')
-  const [medicationTypeFilter, setMedicationTypeFilter] = useState<string>('TODOS')
+  const [medicationTypeFilter, _setMedicationTypeFilter] = useState<string>('TODOS')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [cartItems, setCartItems] = useState<LocalCartItem[]>([])
@@ -290,7 +290,9 @@ export function VentasPage() {
 
   const options = {
     branches: dashboard?.options?.branches ?? [],
-    commercialTypes: dashboard?.options?.commercialTypes ?? dashboard?.options?.medicationTypes ?? [],
+    categories: dashboard?.options?.categories ?? [],
+    commercialTypes: dashboard?.options?.commercialTypes ?? [],
+    medicationTypes: dashboard?.options?.medicationTypes ?? [],
     customers: dashboard?.options?.customers ?? [],
     paymentMethods: dashboard?.options?.paymentMethods ?? [],
   }
@@ -1378,8 +1380,6 @@ export function VentasPage() {
 
                   <div className="mt-4 space-y-6">
                     {paymentFields.map((field, index) => {
-                      const selectedMethod = selectedPaymentMethods[index]
-
                       return (
                         <div
                           key={field.id}

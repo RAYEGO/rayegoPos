@@ -80,7 +80,7 @@ export function AdministradoresPage() {
                     <CardDescription className="truncate">{admin.email}</CardDescription>
                   </div>
                 </div>
-                <Badge variant={admin.activo ? 'success' : 'secondary'}>
+                <Badge variant={admin.activo ? 'success' : 'outline'}>
                   {admin.activo ? 'Activo' : 'Inactivo'}
                 </Badge>
               </div>

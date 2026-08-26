@@ -237,12 +237,12 @@ const supportedCurrencies = [
 
 const branchFormSchema = z.object({
   nombre: z
-    .string({ required_error: 'El nombre es obligatorio.' })
+    .string({ message: 'El nombre es obligatorio.' })
     .trim()
     .min(2, 'El nombre debe tener al menos 2 caracteres.')
     .max(120, 'Máximo 120 caracteres.'),
   codigo: z
-    .string({ required_error: 'El código es obligatorio.' })
+    .string({ message: 'El código es obligatorio.' })
     .trim()
     .min(2, 'El código debe tener al menos 2 caracteres.')
     .max(20, 'Máximo 20 caracteres.')
@@ -345,7 +345,7 @@ export function ConfiguracionPage() {
   })
 
   const branchForm = useForm<BranchFormValues>({
-    resolver: zodResolver(selectedBranch ? branchUpdateSchema : branchFormSchema),
+    resolver: zodResolver(selectedBranch ? branchUpdateSchema : branchFormSchema) as never,
     defaultValues: {
       nombre: '',
       codigo: '',
@@ -495,15 +495,31 @@ export function ConfiguracionPage() {
     setIsBranchPanelOpen(true)
   }
 
-  async function handleBranchSubmit(values: BranchFormValues) {
+  async function handleBranchSubmit(values: any) {
+    const typedValues = values as BranchFormValues
     if (!accessToken) return
     setIsBranchPanelSubmitting(true)
     try {
       if (selectedBranch) {
-        const updated = await branchesService.update(accessToken, selectedBranch.id, values)
+        const payload = {
+          nombre: typedValues.nombre,
+          direccion: (typedValues.direccion ?? null) as string | null,
+          telefono: (typedValues.telefono ?? null) as string | null,
+          email: typedValues.email ?? null,
+          activo: typedValues.activo ?? true,
+        }
+        const updated = await branchesService.update(accessToken, selectedBranch.id, payload)
         toast.success(`Sucursal "${updated.nombre}" actualizada.`)
       } else {
-        const created = await branchesService.create(accessToken, values)
+        const payload = {
+          nombre: typedValues.nombre,
+          codigo: typedValues.codigo,
+          direccion: (typedValues.direccion ?? null) as string | null,
+          telefono: (typedValues.telefono ?? null) as string | null,
+          email: typedValues.email ?? null,
+          activo: typedValues.activo ?? true,
+        }
+        const created = await branchesService.create(accessToken, payload)
         toast.success(`Sucursal "${created.nombre}" creada correctamente.`)
       }
       setIsBranchPanelOpen(false)
@@ -1909,7 +1925,7 @@ export function ConfiguracionPage() {
                             {branch.telefono ?? '—'}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={branch.activo ? 'success' : 'secondary'}>
+                            <Badge variant={branch.activo ? 'success' : 'outline'}>
                               {branch.activo ? 'Activa' : 'Inactiva'}
                             </Badge>
                           </TableCell>

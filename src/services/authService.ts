@@ -8,7 +8,7 @@ import type {
   ResetPasswordPayload,
 } from '@/types/auth'
 import { apiRequest, ApiError, ApiNetworkError } from '@/services/apiClient'
-import { authMockService, isDemoAccountCredentials } from '@/services/authMockService'
+import { authMockService } from '@/services/authMockService'
 import {
   overwriteStoredSession,
   peekStoredSession,

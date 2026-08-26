@@ -63,7 +63,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
-import { classifyPaymentMethod, labelForMethodCode, getMethodVariant } from '@/lib/payment-methods'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
@@ -4316,7 +4315,6 @@ export function ComprasPage() {
                   required
                   placeholderCategory="Selecciona una categoría"
                   placeholderSubmethod="Selecciona un submedio"
-                  errors={cashIncomeForm.formState.errors}
                 />
 
                 <div className="space-y-1">

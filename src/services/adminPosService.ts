@@ -1,4 +1,4 @@
-import { apiRequest, ApiError, ApiNetworkError } from '@/services/apiClient'
+import { apiRequest } from '@/services/apiClient'
 import type {
   CreateTipoEmpresaPayload,
   ModuloCatalogoItem,

@@ -62,13 +62,13 @@ const usersFormSchema = z
   .object({
     firstName: z.string().min(1, 'Ingresa los nombres.'),
     lastName: z.string().min(1, 'Ingresa los apellidos.'),
-    documentId: z.string().min(1, 'Ingresa el documento.').max(20),
-    phone: z.string().min(1, 'Ingresa el celular.').max(40),
-    email: z.string().min(1, 'Ingresa el correo.').email('Ingresa un correo válido.'),
+    documentId: z.string().min(1, 'Ingresa el documento.').max(20).or(z.null()),
+    phone: z.string().min(1, 'Ingresa el celular.').max(40).or(z.null()),
+    email: z.string().min(1, 'Ingresa el correo.').email('Ingresa un correo válido.').or(z.null()),
     username: z.string().min(1, 'Ingresa el usuario.').max(60),
-    password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.'),
-    confirmPassword: z.string().min(8, 'Confirma la contraseña.'),
-    role: z.enum(['ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
+    password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.').or(z.literal('')),
+    confirmPassword: z.string().min(8, 'Confirma la contraseña.').or(z.literal('')),
+    role: z.enum(['ADMIN_POS', 'ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
     branchIds: z.array(z.string()).min(1, 'Selecciona al menos una sucursal.'),
     isActive: z.boolean(),
     mustChangePassword: z.boolean(),
@@ -121,8 +121,8 @@ export function UsuariosPage() {
   const [editingUser, setEditingUser] = useState<UsersModuleUserRecord | null>(null)
   const [branches, setBranches] = useState<Branch[]>([])
   const [users, setUsers] = useState<UsersModuleUserRecord[]>([])
-  const [loadingBranches, setLoadingBranches] = useState(false)
-  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [_loadingBranches, setLoadingBranches] = useState(false)
+  const [_loadingUsers, setLoadingUsers] = useState(false)
   const [submittingUserForm, setSubmittingUserForm] = useState(false)
 
   const loadBranches = useCallback(async () => {
@@ -228,9 +228,9 @@ export function UsuariosPage() {
     userForm.reset({
       firstName: user.firstName,
       lastName: user.lastName,
-      documentId: user.documentId,
-      phone: user.phone,
-      email: user.email,
+      documentId: user.documentId ?? undefined,
+      phone: user.phone ?? undefined,
+      email: user.email ?? undefined,
       username: user.username,
       password: '',
       confirmPassword: '',
@@ -808,7 +808,10 @@ export function UsuariosPage() {
                     {editingUser &&
                       (editingUser.branchIds ?? [])
                         .map((bid) => branches.find((b) => b.id === bid))
-                        .filter((b): b is Branch => Boolean(b) && !b.activo)
+                        .filter((b): b is Branch => {
+                          if (!b) return false
+                          return !b.activo
+                        })
                         .map((branch) => (
                           <label
                             key={branch.id}
