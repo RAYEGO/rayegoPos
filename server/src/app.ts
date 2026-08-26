@@ -4,6 +4,7 @@ import jwt from '@fastify/jwt'
 import Fastify from 'fastify'
 import { ZodError } from 'zod'
 import { isAllowedOrigin, serverConfig } from './config.js'
+import { getAuthContext } from './lib/auth.js'
 import type { AuthContext } from './lib/auth.js'
 import { authRoutes } from './routes/auth.js'
 import { inventoryRoutes } from './routes/inventory.js'
@@ -94,49 +95,20 @@ export function createApp() {
       return
     }
 
-    const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
-    if (!token) {
-      reply.code(401).send({ message: 'Sesión no disponible.' })
-      return
-    }
-
     try {
-      const decoded = await request.server.jwt.verify<{
-        sub: string
-        typ: 'access' | 'refresh' | 'reset-password'
-        companyId?: string | null
-        branchId?: string | null
-        roles?: string[]
-      }>(token)
-
-      if (decoded.typ !== 'access') {
-        reply.code(401).send({ message: 'El token de acceso no es válido.' })
-        return
-      }
-
-      const roles = (decoded.roles ?? []).filter<string>((r): r is string => typeof r === 'string')
-      const isPlatformAdmin = roles.some((r) => r === 'ADMIN_POS')
-
-      if (!isPlatformAdmin) {
-        if (!decoded.branchId) {
-          reply.code(409).send({ message: 'No hay una sucursal activa en la sesión.' })
-          return
-        }
-
-        if (!decoded.companyId) {
-          reply.code(409).send({ message: 'No hay una empresa activa en la sesión.' })
-          return
-        }
-      }
-
-      request.auth = {
-        userId: decoded.sub,
-        companyId: decoded.companyId ?? null,
-        branchId: decoded.branchId ?? null,
-        roles,
-      } as AuthContext
-    } catch {
-      reply.code(401).send({ message: 'La sesión ya no es válida.' })
+      await getAuthContext(request)
+    } catch (error) {
+      const statusCode =
+        typeof (error as { statusCode?: unknown } | null)?.statusCode === 'number'
+          ? ((error as { statusCode: number }).statusCode ?? 401)
+          : 401
+      const message =
+        error instanceof Error
+          ? error.message
+          : statusCode === 401
+            ? 'La sesión ya no es válida.'
+            : 'No fue posible validar la sesión.'
+      reply.code(statusCode).send({ message })
     }
   })
 

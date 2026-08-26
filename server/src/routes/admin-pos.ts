@@ -1,12 +1,18 @@
 import type { FastifyInstance } from 'fastify'
+import { TipoDocumentoIdentidad } from '@prisma/client'
 import { z } from 'zod'
 import {
+  createEmpresa,
   createTipoEmpresa,
+  getEmpresaDetail,
   getTipoEmpresaDetail,
   getTipoEmpresaModulos,
+  listEmpresas,
   listModulosCatalogo,
   listTiposEmpresa,
+  toggleEmpresaStatus,
   toggleTipoEmpresaStatus,
+  updateEmpresa,
   updateTipoEmpresa,
   updateTipoEmpresaModulos,
 } from '../modules/admin-pos/admin-pos.service.js'
@@ -41,6 +47,25 @@ const updateTipoEmpresaSchema = createTipoEmpresaSchema
 const updateModulosSchema = z.object({
   modulosHabilitados: z.array(z.string().max(50)),
 })
+
+const tipoDocumentoSchema = z.nativeEnum(TipoDocumentoIdentidad)
+
+const createEmpresaSchema = z.object({
+  tipoEmpresaId: z.string().min(1),
+  razonSocial: z.string().trim().min(3).max(200),
+  nombreComercial: z.string().trim().max(200).nullable().optional().or(z.literal('')),
+  tipoDocumento: tipoDocumentoSchema.optional(),
+  numeroDocumento: z.string().trim().min(8).max(20),
+  email: z.string().trim().max(150).nullable().optional().or(z.literal('')),
+  telefono: z.string().trim().max(30).nullable().optional().or(z.literal('')),
+  direccion: z.string().trim().max(255).nullable().optional().or(z.literal('')),
+  ubigeo: z.string().trim().max(6).nullable().optional().or(z.literal('')),
+  monedaBase: z.string().trim().max(3).optional(),
+  zonaHoraria: z.string().trim().max(60).optional(),
+  activo: z.boolean().optional(),
+})
+
+const updateEmpresaSchema = createEmpresaSchema.partial()
 
 export async function adminPosRoutes(app: FastifyInstance) {
   app.get('/tipos-empresa', async (request) => listTiposEmpresa(request))
@@ -94,5 +119,49 @@ export async function adminPosRoutes(app: FastifyInstance) {
     const params = request.params as { id: string }
     const body = updateModulosSchema.parse(request.body)
     return updateTipoEmpresaModulos(params.id, body, request)
+  })
+
+  app.get('/empresas', async (request) => listEmpresas(request))
+
+  app.post('/empresas', async (request) => {
+    const body = createEmpresaSchema.parse(request.body)
+    return createEmpresa(
+      {
+        ...body,
+        nombreComercial: body.nombreComercial === '' ? null : body.nombreComercial,
+        email: body.email === '' ? null : body.email,
+        telefono: body.telefono === '' ? null : body.telefono,
+        direccion: body.direccion === '' ? null : body.direccion,
+        ubigeo: body.ubigeo === '' ? null : body.ubigeo,
+      },
+      request,
+    )
+  })
+
+  app.get('/empresas/:id', async (request) => {
+    const params = request.params as { id: string }
+    return getEmpresaDetail(params.id, request)
+  })
+
+  app.put('/empresas/:id', async (request) => {
+    const params = request.params as { id: string }
+    const body = updateEmpresaSchema.parse(request.body)
+    return updateEmpresa(
+      params.id,
+      {
+        ...body,
+        nombreComercial: body.nombreComercial === '' ? null : body.nombreComercial,
+        email: body.email === '' ? null : body.email,
+        telefono: body.telefono === '' ? null : body.telefono,
+        direccion: body.direccion === '' ? null : body.direccion,
+        ubigeo: body.ubigeo === '' ? null : body.ubigeo,
+      },
+      request,
+    )
+  })
+
+  app.patch('/empresas/:id/toggle-status', async (request) => {
+    const params = request.params as { id: string }
+    return toggleEmpresaStatus(params.id, request)
   })
 }

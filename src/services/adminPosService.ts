@@ -1,9 +1,13 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
+  CreateEmpresaPayload,
   CreateTipoEmpresaPayload,
+  EmpresaDetail,
+  EmpresaListItem,
   ModuloCatalogoItem,
   TipoEmpresaDetail,
   TipoEmpresaListItem,
+  UpdateEmpresaPayload,
   UpdateTipoEmpresaModulosPayload,
   UpdateTipoEmpresaPayload,
 } from '@/types/admin-pos'
@@ -319,5 +323,36 @@ export const adminPosService = {
         .map((c) => map.get(c))
         .filter((m): m is ModuloCatalogoItem => Boolean(m))
     }
+  },
+
+  async listEmpresas(accessToken: string): Promise<EmpresaListItem[]> {
+    return apiRequest<EmpresaListItem[]>('/api/admin-pos/empresas', { accessToken })
+  },
+
+  async createEmpresa(accessToken: string, payload: CreateEmpresaPayload): Promise<EmpresaDetail> {
+    return apiRequest<EmpresaDetail>('/api/admin-pos/empresas', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  async getEmpresa(accessToken: string, empresaId: string): Promise<EmpresaDetail> {
+    return apiRequest<EmpresaDetail>(`/api/admin-pos/empresas/${empresaId}`, { accessToken })
+  },
+
+  async updateEmpresa(accessToken: string, empresaId: string, payload: UpdateEmpresaPayload): Promise<EmpresaDetail> {
+    return apiRequest<EmpresaDetail>(`/api/admin-pos/empresas/${empresaId}`, {
+      method: 'PUT',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  async toggleEmpresa(accessToken: string, empresaId: string): Promise<EmpresaDetail> {
+    return apiRequest<EmpresaDetail>(`/api/admin-pos/empresas/${empresaId}/toggle-status`, {
+      method: 'PATCH',
+      accessToken,
+    })
   },
 }
