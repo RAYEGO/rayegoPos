@@ -582,7 +582,7 @@ export function TiposEmpresaPage() {
               </SidePanelClose>
             </header>
 
-            <ScrollArea className="flex-1 px-6 py-5">
+            <ScrollArea className="flex-1" viewportClassName="px-6 py-5 pb-28">
               <div className="space-y-6">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className="space-y-1.5">

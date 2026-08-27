@@ -1,4 +1,5 @@
 import { AccionAuditoria, Prisma, TipoDocumentoIdentidad } from '@prisma/client'
+import { hash } from 'bcryptjs'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { requirePermission, requirePlatformAdmin } from '../../lib/auth.js'
@@ -80,6 +81,39 @@ export type EmpresaDetail = {
   }
   sucursalesCount: number
   usuariosCount: number
+}
+
+export type CreateEmpresaOnboardingPayload = {
+  empresa: CreateEmpresaPayload
+  sucursal: {
+    codigo: string
+    nombre: string
+    direccion?: string | null
+    telefono?: string | null
+    email?: string | null
+    ubigeo?: string | null
+  }
+  admin: {
+    username: string
+    email?: string | null
+    password: string
+    nombres: string
+    apellidos: string
+    tipoDocumento?: TipoDocumentoIdentidad
+    numeroDocumento?: string | null
+    telefono?: string | null
+    activo?: boolean
+  }
+}
+
+export type EmpresaOnboardingResult = {
+  empresa: EmpresaDetail
+  sucursalId: string
+  adminUsuario: {
+    id: string
+    username: string
+    email: string | null
+  }
 }
 
 type CreateTipoEmpresaPayload = {
@@ -936,6 +970,219 @@ export async function createEmpresa(
   })
 
   return out
+}
+
+const SALT_ROUNDS = 10
+
+function normalizeSucursalCode(input: string) {
+  return input.trim().toUpperCase().replace(/\s+/g, '_')
+}
+
+export async function createEmpresaOnboarding(
+  payload: CreateEmpresaOnboardingPayload,
+  request: FastifyRequest,
+): Promise<EmpresaOnboardingResult> {
+  await requirePlatformAdmin(request)
+  await requirePermission(request, 'empresas.manage')
+  await requirePermission(request, 'administradores.manage')
+  await requirePermission(request, 'usuarios.manage')
+  const userId = await getPlatformUserId(request)
+
+  const empresaPayload = payload.empresa
+  const sucursalPayload = payload.sucursal
+  const adminPayload = payload.admin
+
+  const razonSocial = empresaPayload.razonSocial.trim()
+  const numeroDocumento = empresaPayload.numeroDocumento.trim()
+  const tipoEmpresaId = empresaPayload.tipoEmpresaId
+
+  if (!razonSocial) {
+    throw createHttpError(400, 'La razón social es obligatoria.')
+  }
+  if (!numeroDocumento) {
+    throw createHttpError(400, 'El número de documento es obligatorio.')
+  }
+  if (!tipoEmpresaId) {
+    throw createHttpError(400, 'El tipo de empresa es obligatorio.')
+  }
+
+  const sucursalCodigo = normalizeSucursalCode(sucursalPayload.codigo)
+  const sucursalNombre = sucursalPayload.nombre.trim()
+
+  if (!sucursalCodigo) {
+    throw createHttpError(400, 'El código de la sucursal es obligatorio.')
+  }
+  if (!sucursalNombre) {
+    throw createHttpError(400, 'El nombre de la sucursal es obligatorio.')
+  }
+
+  const adminUsername = adminPayload.username.trim()
+  const adminNombres = adminPayload.nombres.trim()
+  const adminApellidos = adminPayload.apellidos.trim()
+  const adminPassword = adminPayload.password.trim()
+
+  if (!adminUsername) {
+    throw createHttpError(400, 'El username del administrador es obligatorio.')
+  }
+  if (!adminPassword) {
+    throw createHttpError(400, 'La contraseña del administrador es obligatoria.')
+  }
+  if (!adminNombres) {
+    throw createHttpError(400, 'Los nombres del administrador son obligatorios.')
+  }
+  if (!adminApellidos) {
+    throw createHttpError(400, 'Los apellidos del administrador son obligatorios.')
+  }
+
+  const tipoEmpresa = await prisma.tipoEmpresa.findFirst({
+    where: { id: tipoEmpresaId, deletedAt: null },
+    select: { id: true },
+  })
+  if (!tipoEmpresa) {
+    throw createHttpError(400, 'El tipo de empresa seleccionado no es válido.')
+  }
+
+  const existingEmpresa = await prisma.empresa.findFirst({
+    where: { numeroDocumento, deletedAt: null },
+    select: { id: true },
+  })
+  if (existingEmpresa) {
+    throw createHttpError(409, 'Ya existe una empresa con ese número de documento.')
+  }
+
+  const existingUsername = await prisma.usuario.findFirst({
+    where: { username: adminUsername, deletedAt: null },
+    select: { id: true },
+  })
+  if (existingUsername) {
+    throw createHttpError(409, 'Ya existe un usuario con este nombre de usuario.')
+  }
+
+  const adminEmail = adminPayload.email?.trim() || null
+  if (adminEmail) {
+    const existingEmail = await prisma.usuario.findFirst({
+      where: { email: adminEmail, deletedAt: null },
+      select: { id: true },
+    })
+    if (existingEmail) {
+      throw createHttpError(409, 'Ya existe un usuario con este correo.')
+    }
+  }
+
+  const onboarding = await prisma.$transaction(async (tx) => {
+    const rolAdmin = await tx.rol.findFirst({
+      where: { codigo: 'ADMIN', deletedAt: null, activo: true },
+      select: { id: true },
+    })
+    if (!rolAdmin) {
+      throw createHttpError(500, 'No se encontró el rol ADMIN para crear el administrador de empresa.')
+    }
+
+    const empresa = await tx.empresa.create({
+      data: {
+        tipoEmpresaId,
+        razonSocial,
+        nombreComercial: empresaPayload.nombreComercial?.trim() || null,
+        tipoDocumento: empresaPayload.tipoDocumento ?? TipoDocumentoIdentidad.RUC,
+        numeroDocumento,
+        email: empresaPayload.email?.trim() || null,
+        telefono: empresaPayload.telefono?.trim() || null,
+        direccion: empresaPayload.direccion?.trim() || null,
+        ubigeo: empresaPayload.ubigeo?.trim() || null,
+        monedaBase: empresaPayload.monedaBase?.trim() || 'PEN',
+        zonaHoraria: empresaPayload.zonaHoraria?.trim() || 'America/Lima',
+        activo: empresaPayload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+      select: { id: true },
+    })
+
+    const sucursal = await tx.sucursal.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: sucursalCodigo,
+        nombre: sucursalNombre,
+        direccion: sucursalPayload.direccion?.trim() || null,
+        telefono: sucursalPayload.telefono?.trim() || null,
+        email: sucursalPayload.email?.trim() || null,
+        ubigeo: sucursalPayload.ubigeo?.trim() || null,
+        esPrincipal: true,
+        activo: true,
+        createdById: userId,
+        updatedById: userId,
+      },
+      select: { id: true },
+    })
+
+    const passwordHash = await hash(adminPassword, SALT_ROUNDS)
+
+    const usuario = await tx.usuario.create({
+      data: {
+        empresaId: empresa.id,
+        sucursalId: sucursal.id,
+        username: adminUsername,
+        email: adminEmail,
+        passwordHash,
+        nombres: adminNombres,
+        apellidos: adminApellidos,
+        tipoDocumento: adminPayload.tipoDocumento,
+        numeroDocumento: adminPayload.numeroDocumento?.trim() || null,
+        telefono: adminPayload.telefono?.trim() || null,
+        activo: adminPayload.activo ?? true,
+        createdById: userId,
+        updatedById: userId,
+      },
+      select: { id: true, username: true, email: true },
+    })
+
+    await tx.usuarioRol.create({
+      data: {
+        usuarioId: usuario.id,
+        rolId: rolAdmin.id,
+        activo: true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    await tx.usuarioSucursal.create({
+      data: {
+        usuarioId: usuario.id,
+        sucursalId: sucursal.id,
+        rolId: rolAdmin.id,
+        activo: true,
+        createdById: userId,
+        updatedById: userId,
+      },
+    })
+
+    return {
+      empresaId: empresa.id,
+      sucursalId: sucursal.id,
+      adminUsuario: usuario,
+    }
+  })
+
+  const empresaDetail = await getEmpresaDetail(onboarding.empresaId, request)
+
+  await writeAudit(request, {
+    userId,
+    action: AccionAuditoria.INSERT,
+    table: 'empresas_onboarding',
+    recordId: onboarding.empresaId,
+    nextValue: {
+      empresaId: onboarding.empresaId,
+      sucursalId: onboarding.sucursalId,
+      adminUsuarioId: onboarding.adminUsuario.id,
+    },
+  })
+
+  return {
+    empresa: empresaDetail,
+    sucursalId: onboarding.sucursalId,
+    adminUsuario: onboarding.adminUsuario,
+  }
 }
 
 export async function updateEmpresa(

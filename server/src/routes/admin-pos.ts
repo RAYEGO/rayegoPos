@@ -3,6 +3,7 @@ import { TipoDocumentoIdentidad } from '@prisma/client'
 import { z } from 'zod'
 import {
   createEmpresa,
+  createEmpresaOnboarding,
   createTipoEmpresa,
   getEmpresaDetail,
   getTipoEmpresaDetail,
@@ -66,6 +67,29 @@ const createEmpresaSchema = z.object({
 })
 
 const updateEmpresaSchema = createEmpresaSchema.partial()
+
+const createEmpresaOnboardingSchema = z.object({
+  empresa: createEmpresaSchema,
+  sucursal: z.object({
+    codigo: z.string().trim().min(1).max(20),
+    nombre: z.string().trim().min(2).max(150),
+    direccion: z.string().trim().max(255).nullable().optional().or(z.literal('')),
+    telefono: z.string().trim().max(30).nullable().optional().or(z.literal('')),
+    email: z.string().trim().max(150).nullable().optional().or(z.literal('')),
+    ubigeo: z.string().trim().max(6).nullable().optional().or(z.literal('')),
+  }),
+  admin: z.object({
+    username: z.string().trim().min(3).max(50),
+    email: z.string().trim().max(150).nullable().optional().or(z.literal('')),
+    password: z.string().trim().min(8).max(100),
+    nombres: z.string().trim().min(2).max(120),
+    apellidos: z.string().trim().min(2).max(120),
+    tipoDocumento: tipoDocumentoSchema.optional(),
+    numeroDocumento: z.string().trim().max(20).nullable().optional().or(z.literal('')),
+    telefono: z.string().trim().max(30).nullable().optional().or(z.literal('')),
+    activo: z.boolean().optional(),
+  }),
+})
 
 export async function adminPosRoutes(app: FastifyInstance) {
   app.get('/tipos-empresa', async (request) => listTiposEmpresa(request))
@@ -133,6 +157,36 @@ export async function adminPosRoutes(app: FastifyInstance) {
         telefono: body.telefono === '' ? null : body.telefono,
         direccion: body.direccion === '' ? null : body.direccion,
         ubigeo: body.ubigeo === '' ? null : body.ubigeo,
+      },
+      request,
+    )
+  })
+
+  app.post('/empresas/onboarding', async (request) => {
+    const body = createEmpresaOnboardingSchema.parse(request.body)
+    return createEmpresaOnboarding(
+      {
+        empresa: {
+          ...body.empresa,
+          nombreComercial: body.empresa.nombreComercial === '' ? null : body.empresa.nombreComercial,
+          email: body.empresa.email === '' ? null : body.empresa.email,
+          telefono: body.empresa.telefono === '' ? null : body.empresa.telefono,
+          direccion: body.empresa.direccion === '' ? null : body.empresa.direccion,
+          ubigeo: body.empresa.ubigeo === '' ? null : body.empresa.ubigeo,
+        },
+        sucursal: {
+          ...body.sucursal,
+          direccion: body.sucursal.direccion === '' ? null : body.sucursal.direccion,
+          email: body.sucursal.email === '' ? null : body.sucursal.email,
+          telefono: body.sucursal.telefono === '' ? null : body.sucursal.telefono,
+          ubigeo: body.sucursal.ubigeo === '' ? null : body.sucursal.ubigeo,
+        },
+        admin: {
+          ...body.admin,
+          email: body.admin.email === '' ? null : body.admin.email,
+          numeroDocumento: body.admin.numeroDocumento === '' ? null : body.admin.numeroDocumento,
+          telefono: body.admin.telefono === '' ? null : body.admin.telefono,
+        },
       },
       request,
     )

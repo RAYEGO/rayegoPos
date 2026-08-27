@@ -1,7 +1,9 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
   CreateEmpresaPayload,
+  CreateEmpresaOnboardingPayload,
   CreateTipoEmpresaPayload,
+  EmpresaOnboardingResult,
   EmpresaDetail,
   EmpresaListItem,
   ModuloCatalogoItem,
@@ -331,6 +333,17 @@ export const adminPosService = {
 
   async createEmpresa(accessToken: string, payload: CreateEmpresaPayload): Promise<EmpresaDetail> {
     return apiRequest<EmpresaDetail>('/api/admin-pos/empresas', {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  async createEmpresaOnboarding(
+    accessToken: string,
+    payload: CreateEmpresaOnboardingPayload,
+  ): Promise<EmpresaOnboardingResult> {
+    return apiRequest<EmpresaOnboardingResult>('/api/admin-pos/empresas/onboarding', {
       method: 'POST',
       accessToken,
       body: payload,

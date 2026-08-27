@@ -117,3 +117,36 @@ export type CreateEmpresaPayload = {
 }
 
 export type UpdateEmpresaPayload = Partial<CreateEmpresaPayload>
+
+export type CreateEmpresaOnboardingPayload = {
+  empresa: CreateEmpresaPayload
+  sucursal: {
+    codigo: string
+    nombre: string
+    direccion?: string | null
+    telefono?: string | null
+    email?: string | null
+    ubigeo?: string | null
+  }
+  admin: {
+    username: string
+    email?: string | null
+    password: string
+    nombres: string
+    apellidos: string
+    tipoDocumento?: EmpresaDetail['tipoDocumento']
+    numeroDocumento?: string | null
+    telefono?: string | null
+    activo?: boolean
+  }
+}
+
+export type EmpresaOnboardingResult = {
+  empresa: EmpresaDetail
+  sucursalId: string
+  adminUsuario: {
+    id: string
+    username: string
+    email: string | null
+  }
+}

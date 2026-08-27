@@ -32,16 +32,58 @@ const nullableText = () =>
     return value
   }, z.string().nullable().optional())
 
-const empresaFormSchema = z.object({
-  tipoEmpresaId: z.string().min(1, 'Selecciona un tipo.'),
-  razonSocial: z.string().trim().min(3, 'Al menos 3 caracteres.').max(200, 'Máximo 200 caracteres.'),
-  nombreComercial: nullableText(),
-  numeroDocumento: z.string().trim().min(8, 'Mínimo 8 caracteres.').max(20, 'Máximo 20 caracteres.'),
-  email: nullableText(),
-  telefono: nullableText(),
-  direccion: nullableText(),
-  activo: z.boolean(),
-})
+const nullableEmail = () =>
+  z.preprocess((value) => {
+    if (typeof value === 'string' && value.trim() === '') return null
+    return value
+  }, z.string().email('Email inválido.').nullable().optional())
+
+const empresaFormSchema = z
+  .object({
+    tipoEmpresaId: z.string().min(1, 'Selecciona un tipo.'),
+    razonSocial: z.string().trim().min(3, 'Al menos 3 caracteres.').max(200, 'Máximo 200 caracteres.'),
+    nombreComercial: nullableText(),
+    numeroDocumento: z.string().trim().min(8, 'Mínimo 8 caracteres.').max(20, 'Máximo 20 caracteres.'),
+    email: nullableEmail(),
+    telefono: nullableText(),
+    direccion: nullableText(),
+    activo: z.boolean(),
+    onboarding: z.boolean().optional(),
+    sucursalCodigo: z.string().trim().max(20).optional(),
+    sucursalNombre: z.string().trim().max(150).optional(),
+    sucursalDireccion: nullableText(),
+    sucursalTelefono: nullableText(),
+    sucursalEmail: nullableEmail(),
+    adminUsername: z.string().trim().max(50).optional(),
+    adminEmail: nullableEmail(),
+    adminPassword: z.string().trim().max(100).optional(),
+    adminNombres: z.string().trim().max(120).optional(),
+    adminApellidos: z.string().trim().max(120).optional(),
+    adminTelefono: nullableText(),
+    adminNumeroDocumento: nullableText(),
+    adminActivo: z.boolean().optional(),
+  })
+  .superRefine((values, ctx) => {
+    if (!values.onboarding) return
+    if (!values.sucursalCodigo || !values.sucursalCodigo.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sucursalCodigo'], message: 'Código de sucursal obligatorio.' })
+    }
+    if (!values.sucursalNombre || !values.sucursalNombre.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sucursalNombre'], message: 'Nombre de sucursal obligatorio.' })
+    }
+    if (!values.adminUsername || !values.adminUsername.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['adminUsername'], message: 'Username obligatorio.' })
+    }
+    if (!values.adminPassword || values.adminPassword.trim().length < 8) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['adminPassword'], message: 'Contraseña obligatoria (mínimo 8 caracteres).' })
+    }
+    if (!values.adminNombres || !values.adminNombres.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['adminNombres'], message: 'Nombres obligatorios.' })
+    }
+    if (!values.adminApellidos || !values.adminApellidos.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['adminApellidos'], message: 'Apellidos obligatorios.' })
+    }
+  })
 
 type EmpresaFormValues = {
   tipoEmpresaId: string
@@ -52,6 +94,20 @@ type EmpresaFormValues = {
   telefono: string | null | undefined
   direccion: string | null | undefined
   activo: boolean
+  onboarding?: boolean
+  sucursalCodigo?: string
+  sucursalNombre?: string
+  sucursalDireccion: string | null | undefined
+  sucursalTelefono: string | null | undefined
+  sucursalEmail: string | null | undefined
+  adminUsername?: string
+  adminEmail: string | null | undefined
+  adminPassword?: string
+  adminNombres?: string
+  adminApellidos?: string
+  adminTelefono: string | null | undefined
+  adminNumeroDocumento: string | null | undefined
+  adminActivo?: boolean
 }
 
 function FieldError({ message }: { message?: string }) {
@@ -101,6 +157,20 @@ export function EmpresasPage() {
       telefono: null,
       direccion: null,
       activo: true,
+      onboarding: false,
+      sucursalCodigo: 'PRINCIPAL',
+      sucursalNombre: 'Sucursal principal',
+      sucursalDireccion: null,
+      sucursalTelefono: null,
+      sucursalEmail: null,
+      adminUsername: '',
+      adminEmail: null,
+      adminPassword: '',
+      adminNombres: '',
+      adminApellidos: '',
+      adminTelefono: null,
+      adminNumeroDocumento: null,
+      adminActivo: true,
     },
   })
 
@@ -164,6 +234,20 @@ export function EmpresasPage() {
         telefono: null,
         direccion: null,
         activo: true,
+        onboarding: true,
+        sucursalCodigo: 'PRINCIPAL',
+        sucursalNombre: 'Sucursal principal',
+        sucursalDireccion: null,
+        sucursalTelefono: null,
+        sucursalEmail: null,
+        adminUsername: '',
+        adminEmail: null,
+        adminPassword: '',
+        adminNombres: '',
+        adminApellidos: '',
+        adminTelefono: null,
+        adminNumeroDocumento: null,
+        adminActivo: true,
       })
       return
     }
@@ -185,6 +269,20 @@ export function EmpresasPage() {
           telefono: detail.telefono,
           direccion: detail.direccion,
           activo: detail.activo,
+          onboarding: false,
+          sucursalCodigo: 'PRINCIPAL',
+          sucursalNombre: 'Sucursal principal',
+          sucursalDireccion: null,
+          sucursalTelefono: null,
+          sucursalEmail: null,
+          adminUsername: '',
+          adminEmail: null,
+          adminPassword: '',
+          adminNombres: '',
+          adminApellidos: '',
+          adminTelefono: null,
+          adminNumeroDocumento: null,
+          adminActivo: true,
         })
       })
       .catch((err) => {
@@ -256,7 +354,31 @@ export function EmpresasPage() {
       } as CreateEmpresaPayload & UpdateEmpresaPayload
 
       if (drawerMode === 'create') {
-        await adminPosService.createEmpresa(accessToken, payload)
+        const onboarding = Boolean(typedValues.onboarding)
+        if (onboarding) {
+          await adminPosService.createEmpresaOnboarding(accessToken, {
+            empresa: payload,
+            sucursal: {
+              codigo: (typedValues.sucursalCodigo ?? '').trim(),
+              nombre: (typedValues.sucursalNombre ?? '').trim(),
+              direccion: (typedValues.sucursalDireccion ?? null) as string | null,
+              telefono: (typedValues.sucursalTelefono ?? null) as string | null,
+              email: (typedValues.sucursalEmail ?? null) as string | null,
+            },
+            admin: {
+              username: (typedValues.adminUsername ?? '').trim(),
+              email: (typedValues.adminEmail ?? null) as string | null,
+              password: (typedValues.adminPassword ?? '').trim(),
+              nombres: (typedValues.adminNombres ?? '').trim(),
+              apellidos: (typedValues.adminApellidos ?? '').trim(),
+              numeroDocumento: (typedValues.adminNumeroDocumento ?? null) as string | null,
+              telefono: (typedValues.adminTelefono ?? null) as string | null,
+              activo: typedValues.adminActivo ?? true,
+            },
+          })
+        } else {
+          await adminPosService.createEmpresa(accessToken, payload)
+        }
         toast.success('Empresa creada correctamente.')
       } else if (drawerMode === 'edit' && selectedId) {
         await adminPosService.updateEmpresa(accessToken, selectedId, payload)
@@ -407,7 +529,7 @@ export function EmpresasPage() {
               </SidePanelClose>
             </header>
 
-            <ScrollArea className="flex-1 px-6 py-5">
+            <ScrollArea className="flex-1" viewportClassName="px-6 py-5 pb-28">
               <div className="space-y-6">
                 <div className="space-y-1.5">
                   <Label>Tipo de empresa <span className="text-destructive">*</span></Label>
@@ -507,6 +629,176 @@ export function EmpresasPage() {
                     <FieldError message={errors.direccion?.message} />
                   </div>
                 </div>
+
+                {drawerMode === 'create' ? (
+                  <div className="rounded-2xl border p-4">
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Sucursal inicial</p>
+                        <p className="text-xs text-muted-foreground">Se creará una sucursal principal para la empresa.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label>Código <span className="text-destructive">*</span></Label>
+                          <Controller
+                            control={control}
+                            name="sucursalCodigo"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value.toUpperCase().replace(/\s+/g, '_'))} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.sucursalCodigo?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Nombre <span className="text-destructive">*</span></Label>
+                          <Controller
+                            control={control}
+                            name="sucursalNombre"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.sucursalNombre?.message} />
+                        </div>
+
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <Label>Dirección</Label>
+                          <Controller
+                            control={control}
+                            name="sucursalDireccion"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.sucursalDireccion?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Teléfono</Label>
+                          <Controller
+                            control={control}
+                            name="sucursalTelefono"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.sucursalTelefono?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Email</Label>
+                          <Controller
+                            control={control}
+                            name="sucursalEmail"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.sucursalEmail?.message} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {drawerMode === 'create' ? (
+                  <div className="rounded-2xl border p-4">
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Administrador de empresa</p>
+                        <p className="text-xs text-muted-foreground">Se creará el primer administrador asociado a la sucursal principal.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label>Username <span className="text-destructive">*</span></Label>
+                          <Controller
+                            control={control}
+                            name="adminUsername"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminUsername?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Email</Label>
+                          <Controller
+                            control={control}
+                            name="adminEmail"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminEmail?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Contraseña <span className="text-destructive">*</span></Label>
+                          <Controller
+                            control={control}
+                            name="adminPassword"
+                            render={({ field }) => (
+                              <Input type="password" value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminPassword?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Teléfono</Label>
+                          <Controller
+                            control={control}
+                            name="adminTelefono"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminTelefono?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Nombres <span className="text-destructive">*</span></Label>
+                          <Controller
+                            control={control}
+                            name="adminNombres"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminNombres?.message} />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label>Apellidos <span className="text-destructive">*</span></Label>
+                          <Controller
+                            control={control}
+                            name="adminApellidos"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminApellidos?.message} />
+                        </div>
+
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <Label>Documento</Label>
+                          <Controller
+                            control={control}
+                            name="adminNumeroDocumento"
+                            render={({ field }) => (
+                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                            )}
+                          />
+                          <FieldError message={errors.adminNumeroDocumento?.message} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="rounded-2xl border p-4">
                   <div className="flex items-center justify-between gap-3">
