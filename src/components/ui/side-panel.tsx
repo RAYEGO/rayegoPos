@@ -39,6 +39,49 @@ export const SidePanelContent = React.forwardRef<
         'fixed inset-y-0 right-0 z-50 flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
         className,
       )}
+      onOpenAutoFocus={(event) => {
+        event.preventDefault()
+        const root = event.currentTarget as HTMLElement | null
+        if (!root) return
+
+        window.setTimeout(() => {
+          const pick = (selector: string) => {
+            const els = Array.from(root.querySelectorAll<HTMLElement>(selector))
+            return els.find((el) => {
+              if (el.closest('[aria-hidden="true"]')) return false
+              if (el instanceof HTMLInputElement) {
+                if (el.type === 'hidden') return false
+                if (el.disabled) return false
+                if (el.readOnly) return false
+              }
+              if (el instanceof HTMLTextAreaElement) {
+                if (el.disabled) return false
+                if (el.readOnly) return false
+              }
+              const style = window.getComputedStyle(el)
+              if (style.display === 'none') return false
+              if (style.visibility === 'hidden') return false
+              if (style.pointerEvents === 'none') return false
+              const rect = el.getBoundingClientRect()
+              if (rect.width <= 0 || rect.height <= 0) return false
+              return true
+            })
+          }
+
+          const candidate =
+            pick('input:not([type="hidden"])') ??
+            pick('textarea') ??
+            pick('[role="combobox"]') ??
+            pick('button:not([disabled])') ??
+            pick('[tabindex]:not([tabindex="-1"])')
+
+          if (!candidate) return
+          candidate.focus()
+          if (candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement) {
+            candidate.select?.()
+          }
+        }, 0)
+      }}
       {...props}
     >
       {children}
