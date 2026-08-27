@@ -2036,24 +2036,25 @@ export function ProductosPage() {
           }
         }}
       >
-        <SidePanelContent className="p-0">
-          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateProduct, handleCreateProductInvalid)}>
-            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
-              <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">
-                  {editingProduct ? 'Editar producto' : 'Registrar producto'}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {editingProduct ? 'Actualiza el maestro farmacéutico' : 'Alta inicial del maestro farmacéutico'}
-                </p>
+        {isCreateDialogOpen ? (
+          <SidePanelContent className="p-0">
+            <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateProduct, handleCreateProductInvalid)}>
+              <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-foreground">
+                    {editingProduct ? 'Editar producto' : 'Registrar producto'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {editingProduct ? 'Actualiza el maestro farmacéutico' : 'Alta inicial del maestro farmacéutico'}
+                  </p>
+                </div>
+                <SidePanelClose asChild>
+                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Cerrar</span>
+                  </Button>
+                </SidePanelClose>
               </div>
-              <SidePanelClose asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
-                  <X className="h-4 w-4" />
-                  <span className="sr-only">Cerrar</span>
-                </Button>
-              </SidePanelClose>
-            </div>
 
             <div
               ref={createDialogContentRef}
@@ -2363,21 +2364,23 @@ export function ProductosPage() {
               </div>
             </div>
           </form>
-        </SidePanelContent>
+          </SidePanelContent>
+        ) : null}
       </SidePanel>
 
-      <Dialog
-        open={isPackagingDialogOpen}
-        onOpenChange={(open) => {
-          setIsPackagingDialogOpen(open)
-          if (!open) {
-            setPackagingPreviewError(null)
-            setPackagingPreview(null)
-            setPackagingDraftRows([])
-            setIsPackagingBreakdownOpen(false)
-          }
-        }}
-      >
+      {isPackagingDialogOpen ? (
+        <Dialog
+          open={isPackagingDialogOpen}
+          onOpenChange={(open) => {
+            setIsPackagingDialogOpen(open)
+            if (!open) {
+              setPackagingPreviewError(null)
+              setPackagingPreview(null)
+              setPackagingDraftRows([])
+              setIsPackagingBreakdownOpen(false)
+            }
+          }}
+        >
         <DialogContent className="bottom-0 left-0 top-auto flex h-[94vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-3 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[86vh] sm:max-h-[86vh] sm:w-[92vw] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-4">
           <DialogHeader className="shrink-0 space-y-1">
             <div className="flex items-start justify-between gap-3">
@@ -2802,14 +2805,16 @@ export function ProductosPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      ) : null}
 
-      <Dialog
-        open={isPackagingGuideOpen}
-        onOpenChange={(open) => {
-          setIsPackagingGuideOpen(open)
-        }}
-      >
+      {isPackagingGuideOpen ? (
+        <Dialog
+          open={isPackagingGuideOpen}
+          onOpenChange={(open) => {
+            setIsPackagingGuideOpen(open)
+          }}
+        >
         <DialogContent className="max-h-[86vh] overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-[18px] leading-6">
@@ -2931,17 +2936,19 @@ export function ProductosPage() {
             </div>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      ) : null}
 
-      <Dialog
-        open={isDetailDialogOpen}
-        onOpenChange={(open) => {
-          setIsDetailDialogOpen(open)
-          if (!open) {
-            setSelectedProductDetail(null)
-          }
-        }}
-      >
+      {isDetailDialogOpen ? (
+        <Dialog
+          open={isDetailDialogOpen}
+          onOpenChange={(open) => {
+            setIsDetailDialogOpen(open)
+            if (!open) {
+              setSelectedProductDetail(null)
+            }
+          }}
+        >
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Detalle del producto</DialogTitle>
@@ -3066,17 +3073,19 @@ export function ProductosPage() {
             ) : null}
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      ) : null}
 
-      <Dialog
-        open={isConfirmDialogOpen}
-        onOpenChange={(open) => {
-          setIsConfirmDialogOpen(open)
-          if (!open) {
-            setConfirmAction(null)
-          }
-        }}
-      >
+      {isConfirmDialogOpen ? (
+        <Dialog
+          open={isConfirmDialogOpen}
+          onOpenChange={(open) => {
+            setIsConfirmDialogOpen(open)
+            if (!open) {
+              setConfirmAction(null)
+            }
+          }}
+        >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
@@ -3132,18 +3141,20 @@ export function ProductosPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      ) : null}
 
-      <Dialog
-        open={masterDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            resetMasterDialogState()
-            return
-          }
-          setMasterDialogOpen(open)
-        }}
-      >
+      {masterDialogOpen ? (
+        <Dialog
+          open={masterDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              resetMasterDialogState()
+              return
+            }
+            setMasterDialogOpen(open)
+          }}
+        >
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
@@ -3505,7 +3516,8 @@ export function ProductosPage() {
             </form>
           ) : null}
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      ) : null}
     </div>
   )
 }

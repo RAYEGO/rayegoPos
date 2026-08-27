@@ -984,27 +984,31 @@ export function ProductPresentationsManager({ accessToken, canManage }: ProductP
             )}
           </div>
 
-          <PresentationForm
-            open={dialog.open}
-            onOpenChange={(open) => {
-              if (!open) closeDialog()
-            }}
-            mode={dialog.mode}
-            selected={dialog.record}
-            existingCodes={existingCodes}
-            onSubmit={handleSubmit}
-          />
+          {dialog.open ? (
+            <PresentationForm
+              open={dialog.open}
+              onOpenChange={(open) => {
+                if (!open) closeDialog()
+              }}
+              mode={dialog.mode}
+              selected={dialog.record}
+              existingCodes={existingCodes}
+              onSubmit={handleSubmit}
+            />
+          ) : null}
 
-          <PresentationImportDialog
-            open={isImportOpen}
-            onOpenChange={setIsImportOpen}
-            accessToken={accessToken}
-            existing={records}
-            disabled={canManage === false}
-            onImported={() => {
-              void loadPresentations()
-            }}
-          />
+          {isImportOpen ? (
+            <PresentationImportDialog
+              open={isImportOpen}
+              onOpenChange={setIsImportOpen}
+              accessToken={accessToken}
+              existing={records}
+              disabled={canManage === false}
+              onImported={() => {
+                void loadPresentations()
+              }}
+            />
+          ) : null}
 
           <Dialog
             open={deleteBlocked?.open ?? false}

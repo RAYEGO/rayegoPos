@@ -988,27 +988,31 @@ export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLa
             )}
           </div>
 
-          <LaboratoryForm
-            open={dialog.open}
-            onOpenChange={(open) => {
-              if (!open) closeDialog()
-            }}
-            mode={dialog.mode}
-            selected={dialog.record}
-            existingCodes={existingCodes}
-            onSubmit={handleSubmit}
-          />
+          {dialog.open ? (
+            <LaboratoryForm
+              open={dialog.open}
+              onOpenChange={(open) => {
+                if (!open) closeDialog()
+              }}
+              mode={dialog.mode}
+              selected={dialog.record}
+              existingCodes={existingCodes}
+              onSubmit={handleSubmit}
+            />
+          ) : null}
 
-          <LaboratoryImportDialog
-            open={isImportOpen}
-            onOpenChange={setIsImportOpen}
-            accessToken={accessToken}
-            existing={records}
-            disabled={canManage === false}
-            onImported={() => {
-              void loadLaboratories()
-            }}
-          />
+          {isImportOpen ? (
+            <LaboratoryImportDialog
+              open={isImportOpen}
+              onOpenChange={setIsImportOpen}
+              accessToken={accessToken}
+              existing={records}
+              disabled={canManage === false}
+              onImported={() => {
+                void loadLaboratories()
+              }}
+            />
+          ) : null}
 
           <Dialog
             open={deleteBlocked?.open ?? false}

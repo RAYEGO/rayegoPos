@@ -312,27 +312,31 @@ export function ProductCategoriesManager({
             )}
           </div>
 
-          <CategoryForm
-            open={dialog.open}
-            onOpenChange={(open) => {
-              if (!open) closeDialog()
-            }}
-            mode={dialog.mode}
-            selected={dialog.record}
-            onSubmit={handleSubmit}
-          />
+          {dialog.open ? (
+            <CategoryForm
+              open={dialog.open}
+              onOpenChange={(open) => {
+                if (!open) closeDialog()
+              }}
+              mode={dialog.mode}
+              selected={dialog.record}
+              onSubmit={handleSubmit}
+            />
+          ) : null}
 
-          <CategoryImportDialog
-            open={isImportOpen}
-            onOpenChange={setIsImportOpen}
-            accessToken={accessToken}
-            existing={records}
-            disabled={canManage === false}
-            onImported={() => {
-              void loadCategories()
-              onCategoriesChanged?.()
-            }}
-          />
+          {isImportOpen ? (
+            <CategoryImportDialog
+              open={isImportOpen}
+              onOpenChange={setIsImportOpen}
+              accessToken={accessToken}
+              existing={records}
+              disabled={canManage === false}
+              onImported={() => {
+                void loadCategories()
+                onCategoriesChanged?.()
+              }}
+            />
+          ) : null}
 
           <Dialog
             open={deleteBlocked?.open ?? false}
