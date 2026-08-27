@@ -75,6 +75,10 @@ function getIconByName(name: string | null) {
   return found?.component ?? Building2
 }
 
+function normalizeTipoEmpresaCode(input: string) {
+  return input.trim().toUpperCase().replace(/\s+/g, '_')
+}
+
 const nullableText = () =>
   z.preprocess((value) => {
     if (typeof value === 'string' && value.trim() === '') {
@@ -593,7 +597,7 @@ export function TiposEmpresaPage() {
                           id="tp-codigo"
                           placeholder="BOTICA"
                           value={field.value ?? ''}
-                          onChange={(e) => field.onChange(e.target.value.toUpperCase())}
+                          onChange={(e) => field.onChange(normalizeTipoEmpresaCode(e.target.value))}
                           disabled={readOnly || drawerMode !== 'create'}
                         />
                       )}
@@ -705,7 +709,7 @@ export function TiposEmpresaPage() {
                           >
                             <Icon className="h-4 w-4" />
                             <span className="mt-0.5 text-[10px] text-muted-foreground">
-                              opt.id
+                              {opt.id}
                             </span>
                           </button>
                         )
