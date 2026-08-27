@@ -61,6 +61,20 @@ export function useHandleUnauthorized(page: string) {
         return { handledAsMock: true, handledViaRefresh: false }
       }
 
+      if (status !== 401) {
+        console.warn(
+          `[${page}] Error en ${endpoint} status=${status} message="${message}". Se conserva la sesión.`,
+        )
+        if (status === 403) {
+          toast.error('No tienes permisos para realizar esta acción.')
+        } else if (status >= 500) {
+          toast.error('Ocurrió un error del servidor. Inténtalo nuevamente.')
+        } else {
+          toast.error(message || 'No fue posible completar la operación.')
+        }
+        return { handledAsMock: false, handledViaRefresh: false }
+      }
+
       if (status === 401 && effectiveSession?.refreshToken) {
         console.warn(
           `[${page}] 401 en ${endpoint}. Se intenta REFRESH TOKEN antes de expulsar al usuario.`,
@@ -88,11 +102,11 @@ export function useHandleUnauthorized(page: string) {
 
       const reason = `${page}.handleUnauthorized → ${endpoint} status=${status} message="${message}"`
       console.warn(
-        `[${page}] 401 en ${endpoint} status=${status} message="${message}". Se dispara logout.`,
+        `[${page}] Sesión inválida en ${endpoint} status=${status} message="${message}". Se dispara logout.`,
       )
       toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
       markExpired({
-        reason: status === 401 ? 'auth-401-unrecoverable' : 'manual-logout',
+        reason: 'auth-401-unrecoverable',
         message: reason,
       })
       await logout(reason)
