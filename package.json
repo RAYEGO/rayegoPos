@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node scripts/run-with-project-env.mjs -- vite",
     "dev:prod-local": "node scripts/run-with-project-env.mjs --env production -- vite",
+    "prebuild": "node scripts/prisma-generate-for-build.mjs",
     "build": "node scripts/run-with-project-env.mjs -- npm run build:app",
     "build:prod-local": "node scripts/run-with-project-env.mjs --env production -- npm run build:app",
     "build:app": "tsc -b && vite build",
@@ -32,7 +33,7 @@
     "prisma:validate:prod-local": "node scripts/run-with-project-env.mjs --env production -- prisma validate",
     "prisma:generate": "node scripts/run-with-project-env.mjs -- prisma generate",
     "prisma:generate:prod-local": "node scripts/run-with-project-env.mjs --env production -- prisma generate",
-    "prisma:generate:railway": "prisma generate",
+    "prisma:generate:railway": "node scripts/prisma-generate-for-build.mjs",
     "prisma:migrate:dev": "node scripts/run-with-project-env.mjs -- prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:deploy:prod-local": "node scripts/run-with-project-env.mjs --env production -- prisma migrate deploy",
