@@ -37,7 +37,7 @@ export const SelectContent = React.forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        'z-50 min-w-48 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-softSm animate-in fade-in-0 zoom-in-95',
+        'z-[80] min-w-48 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-softSm animate-in fade-in-0 zoom-in-95 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
         className,
       )}
       {...props}

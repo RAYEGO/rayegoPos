@@ -16,7 +16,7 @@ export const SidePanelOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      'fixed inset-0 z-[50] bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className,
     )}
     {...props}
@@ -36,7 +36,7 @@ export const SidePanelContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed inset-y-0 right-0 z-50 flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
+        'fixed inset-y-0 right-0 z-[50] flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
         className,
       )}
       onOpenAutoFocus={(event) => {

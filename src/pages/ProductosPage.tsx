@@ -2378,7 +2378,7 @@ export function ProductosPage() {
           }
         }}
       >
-        <DialogContent className="bottom-0 left-0 top-auto flex h-[92vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-4 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[78vh] sm:max-h-[78vh] sm:max-w-4xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-5">
+        <DialogContent className="bottom-0 left-0 top-auto flex h-[94vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-3 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[86vh] sm:max-h-[86vh] sm:w-[92vw] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-4">
           <DialogHeader className="shrink-0 space-y-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -2400,8 +2400,8 @@ export function ProductosPage() {
             </div>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,7.3fr)_minmax(0,2.7fr)]">
-            <div className="flex min-h-0 flex-col gap-2.5 overflow-hidden">
+          <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+            <div className="flex min-h-0 flex-col gap-2.5 overflow-hidden rounded-xl border bg-background/60 p-3">
               <div className="shrink-0 flex items-center justify-between gap-2">
                 <p className="text-[14px] font-semibold text-foreground">Cadena de presentaciones</p>
                 <Button
@@ -2667,8 +2667,8 @@ export function ProductosPage() {
               <FieldError message={form.formState.errors.empaque?.message as string | undefined} />
             </div>
 
-            <div className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden">
-              <div className="shrink-0 rounded-lg border p-2.5">
+            <div className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden rounded-xl border bg-background/60 p-3">
+              <div className="shrink-0 rounded-lg border bg-background p-2.5">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Resumen
                 </p>
@@ -2713,7 +2713,7 @@ export function ProductosPage() {
                       />
                     </button>
                     {isPackagingBreakdownOpen ? (
-                      <div className="space-y-1 border-t px-2.5 py-2 text-[12px]">
+                      <div className="max-h-40 space-y-1 overflow-y-auto border-t px-2.5 py-2 text-[12px]">
                         {packagingChainPreview.map((node) => (
                           <div
                             key={node.key}
@@ -2754,7 +2754,7 @@ export function ProductosPage() {
                 ) : null}
 
                 {packagingPreviewError ? (
-                  <div className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive leading-relaxed">
+                  <div className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[12px] leading-relaxed text-destructive">
                     {packagingPreviewError}
                   </div>
                 ) : null}
