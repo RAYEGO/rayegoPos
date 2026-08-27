@@ -1014,13 +1014,14 @@ export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLa
             />
           ) : null}
 
-          <Dialog
-            open={deleteBlocked?.open ?? false}
-            onOpenChange={(open) => {
-              if (!open) setDeleteBlocked(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-lg">
+          {deleteBlocked?.open ? (
+            <Dialog
+              open={deleteBlocked?.open ?? false}
+              onOpenChange={(open) => {
+                if (!open) setDeleteBlocked(null)
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>No se puede eliminar</DialogTitle>
                 <DialogDescription className="whitespace-pre-line">
@@ -1041,6 +1042,7 @@ export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLa
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          ) : null}
         </>
       )}
     </div>

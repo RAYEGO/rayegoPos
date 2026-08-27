@@ -1010,13 +1010,14 @@ export function ProductPresentationsManager({ accessToken, canManage }: ProductP
             />
           ) : null}
 
-          <Dialog
-            open={deleteBlocked?.open ?? false}
-            onOpenChange={(open) => {
-              if (!open) setDeleteBlocked(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-lg">
+          {deleteBlocked?.open ? (
+            <Dialog
+              open={deleteBlocked?.open ?? false}
+              onOpenChange={(open) => {
+                if (!open) setDeleteBlocked(null)
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>No se puede eliminar</DialogTitle>
                 <DialogDescription className="whitespace-pre-line">
@@ -1037,6 +1038,7 @@ export function ProductPresentationsManager({ accessToken, canManage }: ProductP
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          ) : null}
         </>
       )}
     </div>

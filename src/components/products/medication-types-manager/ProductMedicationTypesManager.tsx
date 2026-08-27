@@ -901,35 +901,40 @@ export function ProductMedicationTypesManager({
             </Card>
           )}
 
-          <MedicationTypeForm
-            open={dialog.open}
-            onOpenChange={(open) => {
-              if (!open) setDialog({ open: false, mode: 'create', record: null })
-            }}
-            mode={dialog.mode}
-            selected={dialog.record}
-            existingCodes={existingCodes}
-            onSubmit={handleSave}
-          />
+          {dialog.open ? (
+            <MedicationTypeForm
+              open={dialog.open}
+              onOpenChange={(open) => {
+                if (!open) setDialog({ open: false, mode: 'create', record: null })
+              }}
+              mode={dialog.mode}
+              selected={dialog.record}
+              existingCodes={existingCodes}
+              onSubmit={handleSave}
+            />
+          ) : null}
 
-          <MedicationTypeImportDialog
-            open={isImportOpen}
-            onOpenChange={setIsImportOpen}
-            accessToken={accessToken}
-            existing={records}
-            disabled={canManage === false}
-            onImported={() => {
-              void loadRecords()
-            }}
-          />
+          {isImportOpen ? (
+            <MedicationTypeImportDialog
+              open={isImportOpen}
+              onOpenChange={setIsImportOpen}
+              accessToken={accessToken}
+              existing={records}
+              disabled={canManage === false}
+              onImported={() => {
+                void loadRecords()
+              }}
+            />
+          ) : null}
 
-          <Dialog
-            open={deleteBlocked?.open ?? false}
-            onOpenChange={(open) => {
-              if (!open) setDeleteBlocked(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-lg">
+          {deleteBlocked?.open ? (
+            <Dialog
+              open={deleteBlocked?.open ?? false}
+              onOpenChange={(open) => {
+                if (!open) setDeleteBlocked(null)
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>No se puede eliminar</DialogTitle>
                 <DialogDescription className="whitespace-pre-line">
@@ -950,6 +955,7 @@ export function ProductMedicationTypesManager({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          ) : null}
         </>
       )}
     </div>

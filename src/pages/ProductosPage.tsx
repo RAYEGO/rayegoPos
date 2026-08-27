@@ -2026,17 +2026,17 @@ export function ProductosPage() {
         </TabsContent>
       </Tabs>
 
-      <SidePanel
-        open={isCreateDialogOpen}
-        onOpenChange={(open) => {
-          setIsCreateDialogOpen(open)
-          if (!open) {
-            setEditingProduct(null)
-            form.reset(defaultFormValues)
-          }
-        }}
-      >
-        {isCreateDialogOpen ? (
+      {isCreateDialogOpen ? (
+        <SidePanel
+          open={isCreateDialogOpen}
+          onOpenChange={(open) => {
+            setIsCreateDialogOpen(open)
+            if (!open) {
+              setEditingProduct(null)
+              form.reset(defaultFormValues)
+            }
+          }}
+        >
           <SidePanelContent className="p-0">
             <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleCreateProduct, handleCreateProductInvalid)}>
               <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
@@ -2365,8 +2365,8 @@ export function ProductosPage() {
             </div>
           </form>
           </SidePanelContent>
-        ) : null}
-      </SidePanel>
+        </SidePanel>
+      ) : null}
 
       {isPackagingDialogOpen ? (
         <Dialog

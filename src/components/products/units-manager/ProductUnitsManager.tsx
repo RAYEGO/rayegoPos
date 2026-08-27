@@ -1093,36 +1093,41 @@ export function ProductUnitsManager({ accessToken, canManage }: ProductUnitsMana
             )}
           </div>
 
-          <UnitForm
-            open={dialog.open}
-            onOpenChange={(open) => {
-              if (!open) closeDialog()
-            }}
-            mode={dialog.mode}
-            selected={dialog.record}
-            existingCodes={existingCodes}
-            existingSymbols={existingSymbols}
-            onSubmit={handleSubmit}
-          />
+          {dialog.open ? (
+            <UnitForm
+              open={dialog.open}
+              onOpenChange={(open) => {
+                if (!open) closeDialog()
+              }}
+              mode={dialog.mode}
+              selected={dialog.record}
+              existingCodes={existingCodes}
+              existingSymbols={existingSymbols}
+              onSubmit={handleSubmit}
+            />
+          ) : null}
 
-          <UnitImportDialog
-            open={isImportOpen}
-            onOpenChange={setIsImportOpen}
-            accessToken={accessToken}
-            existing={records}
-            disabled={canManage === false}
-            onImported={() => {
-              void loadUnits()
-            }}
-          />
+          {isImportOpen ? (
+            <UnitImportDialog
+              open={isImportOpen}
+              onOpenChange={setIsImportOpen}
+              accessToken={accessToken}
+              existing={records}
+              disabled={canManage === false}
+              onImported={() => {
+                void loadUnits()
+              }}
+            />
+          ) : null}
 
-          <Dialog
-            open={deleteBlocked?.open ?? false}
-            onOpenChange={(open) => {
-              if (!open) setDeleteBlocked(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-lg">
+          {deleteBlocked?.open ? (
+            <Dialog
+              open={deleteBlocked?.open ?? false}
+              onOpenChange={(open) => {
+                if (!open) setDeleteBlocked(null)
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>No se puede eliminar</DialogTitle>
                 <DialogDescription className="whitespace-pre-line">
@@ -1143,6 +1148,7 @@ export function ProductUnitsManager({ accessToken, canManage }: ProductUnitsMana
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          ) : null}
         </>
       )}
     </div>

@@ -73,7 +73,7 @@ export function MasterDialog({
         ? 'Crea un registro basado en uno existente.'
         : 'Registra un nuevo elemento para mantener consistencia en tu catálogo.'
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -131,6 +131,6 @@ export function MasterDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 

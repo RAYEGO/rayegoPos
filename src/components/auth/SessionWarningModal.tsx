@@ -39,7 +39,7 @@ export function SessionWarningModal() {
     })
   }
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
         className="sm:max-w-md [&>button[type='button'][aria-label='Cerrar']]:hidden"
@@ -133,5 +133,5 @@ export function SessionWarningModal() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }

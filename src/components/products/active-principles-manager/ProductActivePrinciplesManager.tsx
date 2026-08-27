@@ -464,25 +464,28 @@ export function ProductActivePrinciplesManager({
             </Card>
           )}
 
-          <ActivePrincipleFormDialog
-            open={dialog.open}
-            onOpenChange={(open) => {
-              if (!open) {
-                setDialog({ open: false, mode: 'create', record: null })
-              }
-            }}
-            mode={dialog.mode}
-            selected={dialog.record}
-            onSubmit={handleSave}
-          />
+          {dialog.open ? (
+            <ActivePrincipleFormDialog
+              open={dialog.open}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setDialog({ open: false, mode: 'create', record: null })
+                }
+              }}
+              mode={dialog.mode}
+              selected={dialog.record}
+              onSubmit={handleSave}
+            />
+          ) : null}
 
-          <Dialog
-            open={deleteBlocked?.open ?? false}
-            onOpenChange={(open) => {
-              if (!open) setDeleteBlocked(null)
-            }}
-          >
-            <DialogContent className="sm:max-w-lg">
+          {deleteBlocked?.open ? (
+            <Dialog
+              open={deleteBlocked?.open ?? false}
+              onOpenChange={(open) => {
+                if (!open) setDeleteBlocked(null)
+              }}
+            >
+              <DialogContent className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>No se puede eliminar</DialogTitle>
                 <DialogDescription className="whitespace-pre-line">
@@ -503,6 +506,7 @@ export function ProductActivePrinciplesManager({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          ) : null}
         </>
       )}
     </div>
