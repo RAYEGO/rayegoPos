@@ -3,17 +3,22 @@ import { TipoDocumentoIdentidad } from '@prisma/client'
 import { z } from 'zod'
 import {
   createEmpresa,
+  createEmpresaAdministrador,
   createEmpresaOnboarding,
   createTipoEmpresa,
   getEmpresaDetail,
   getTipoEmpresaDetail,
   getTipoEmpresaModulos,
+  listEmpresaAdministradores,
+  listEmpresaSucursales,
   listEmpresas,
   listModulosCatalogo,
   listTiposEmpresa,
   toggleEmpresaStatus,
+  toggleEmpresaAdministradorStatus,
   toggleTipoEmpresaStatus,
   updateEmpresa,
+  updateEmpresaAdministrador,
   updateTipoEmpresa,
   updateTipoEmpresaModulos,
 } from '../modules/admin-pos/admin-pos.service.js'
@@ -90,6 +95,37 @@ const createEmpresaOnboardingSchema = z.object({
     activo: z.boolean().optional(),
   }),
 })
+
+const createEmpresaAdminSchema = z.object({
+  username: z.string().trim().min(3).max(50),
+  email: z.string().trim().max(150).nullable().optional().or(z.literal('')),
+  password: z.string().trim().min(8).max(100),
+  nombres: z.string().trim().min(2).max(120),
+  apellidos: z.string().trim().min(2).max(120),
+  tipoDocumento: tipoDocumentoSchema.optional(),
+  numeroDocumento: z.string().trim().max(20).nullable().optional().or(z.literal('')),
+  telefono: z.string().trim().max(30).nullable().optional().or(z.literal('')),
+  activo: z.boolean().optional(),
+  sucursalId: z.string().uuid().nullable().optional().or(z.literal('')),
+  sucursal: z
+    .object({
+      codigo: z.string().trim().min(1).max(20),
+      nombre: z.string().trim().min(2).max(150),
+      direccion: z.string().trim().max(255).nullable().optional().or(z.literal('')),
+      telefono: z.string().trim().max(30).nullable().optional().or(z.literal('')),
+      email: z.string().trim().max(150).nullable().optional().or(z.literal('')),
+      ubigeo: z.string().trim().max(6).nullable().optional().or(z.literal('')),
+    })
+    .nullable()
+    .optional(),
+})
+
+const updateEmpresaAdminSchema = createEmpresaAdminSchema
+  .partial()
+  .omit({ username: true })
+  .extend({
+    password: z.string().trim().min(8).max(100).nullable().optional().or(z.literal('')),
+  })
 
 export async function adminPosRoutes(app: FastifyInstance) {
   app.get('/tipos-empresa', async (request) => listTiposEmpresa(request))
@@ -195,6 +231,65 @@ export async function adminPosRoutes(app: FastifyInstance) {
   app.get('/empresas/:id', async (request) => {
     const params = request.params as { id: string }
     return getEmpresaDetail(params.id, request)
+  })
+
+  app.get('/empresas/:id/sucursales', async (request) => {
+    const params = request.params as { id: string }
+    return listEmpresaSucursales(params.id, request)
+  })
+
+  app.get('/empresas/:id/administradores', async (request) => {
+    const params = request.params as { id: string }
+    return listEmpresaAdministradores(params.id, request)
+  })
+
+  app.post('/empresas/:id/administradores', async (request) => {
+    const params = request.params as { id: string }
+    const body = createEmpresaAdminSchema.parse(request.body)
+    return createEmpresaAdministrador(
+      params.id,
+      {
+        ...body,
+        email: body.email === '' ? null : body.email,
+        numeroDocumento: body.numeroDocumento === '' ? null : body.numeroDocumento,
+        telefono: body.telefono === '' ? null : body.telefono,
+        sucursalId: body.sucursalId === '' ? null : body.sucursalId,
+        sucursal:
+          body.sucursal == null
+            ? null
+            : {
+                ...body.sucursal,
+                direccion: body.sucursal.direccion === '' ? null : body.sucursal.direccion,
+                email: body.sucursal.email === '' ? null : body.sucursal.email,
+                telefono: body.sucursal.telefono === '' ? null : body.sucursal.telefono,
+                ubigeo: body.sucursal.ubigeo === '' ? null : body.sucursal.ubigeo,
+              },
+      },
+      request,
+    )
+  })
+
+  app.put('/empresas/:id/administradores/:adminId', async (request) => {
+    const params = request.params as { id: string; adminId: string }
+    const body = updateEmpresaAdminSchema.parse(request.body)
+    return updateEmpresaAdministrador(
+      params.id,
+      params.adminId,
+      {
+        ...body,
+        email: body.email === '' ? null : body.email,
+        password: body.password === '' ? null : body.password,
+        numeroDocumento: body.numeroDocumento === '' ? null : body.numeroDocumento,
+        telefono: body.telefono === '' ? null : body.telefono,
+        sucursalId: body.sucursalId === '' ? null : body.sucursalId,
+      },
+      request,
+    )
+  })
+
+  app.patch('/empresas/:id/administradores/:adminId/toggle-status', async (request) => {
+    const params = request.params as { id: string; adminId: string }
+    return toggleEmpresaAdministradorStatus(params.id, params.adminId, request)
   })
 
   app.put('/empresas/:id', async (request) => {

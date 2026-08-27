@@ -62,6 +62,7 @@ export type EmpresaListItem = {
   razonSocial: string
   nombreComercial: string | null
   numeroDocumento: string
+  hasAdminEmpresa: boolean
   tipoEmpresa: {
     id: string
     codigo: string
@@ -82,6 +83,7 @@ export type EmpresaDetail = {
   nombreComercial: string | null
   tipoDocumento: 'DNI' | 'RUC' | 'CE' | 'PASAPORTE' | 'OTRO'
   numeroDocumento: string
+  hasAdminEmpresa: boolean
   email: string | null
   telefono: string | null
   direccion: string | null
@@ -149,4 +151,56 @@ export type EmpresaOnboardingResult = {
     username: string
     email: string | null
   }
+}
+
+export type EmpresaSucursalListItem = {
+  id: string
+  codigo: string
+  nombre: string
+  activo: boolean
+  esPrincipal: boolean
+}
+
+export type EmpresaAdminListItem = {
+  id: string
+  username: string
+  email: string | null
+  nombres: string
+  apellidos: string
+  telefono: string | null
+  activo: boolean
+  sucursalIds: string[]
+}
+
+export type CreateEmpresaAdminPayload = {
+  username: string
+  email?: string | null
+  password: string
+  nombres: string
+  apellidos: string
+  tipoDocumento?: EmpresaDetail['tipoDocumento']
+  numeroDocumento?: string | null
+  telefono?: string | null
+  activo?: boolean
+  sucursalId?: string | null
+  sucursal?: {
+    codigo: string
+    nombre: string
+    direccion?: string | null
+    telefono?: string | null
+    email?: string | null
+    ubigeo?: string | null
+  } | null
+}
+
+export type UpdateEmpresaAdminPayload = {
+  email?: string | null
+  password?: string | null
+  nombres?: string
+  apellidos?: string
+  tipoDocumento?: EmpresaDetail['tipoDocumento']
+  numeroDocumento?: string | null
+  telefono?: string | null
+  activo?: boolean
+  sucursalId?: string | null
 }

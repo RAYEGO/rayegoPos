@@ -1,14 +1,18 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
+  CreateEmpresaAdminPayload,
   CreateEmpresaPayload,
   CreateEmpresaOnboardingPayload,
   CreateTipoEmpresaPayload,
+  EmpresaAdminListItem,
   EmpresaOnboardingResult,
+  EmpresaSucursalListItem,
   EmpresaDetail,
   EmpresaListItem,
   ModuloCatalogoItem,
   TipoEmpresaDetail,
   TipoEmpresaListItem,
+  UpdateEmpresaAdminPayload,
   UpdateEmpresaPayload,
   UpdateTipoEmpresaModulosPayload,
   UpdateTipoEmpresaPayload,
@@ -352,6 +356,54 @@ export const adminPosService = {
 
   async getEmpresa(accessToken: string, empresaId: string): Promise<EmpresaDetail> {
     return apiRequest<EmpresaDetail>(`/api/admin-pos/empresas/${empresaId}`, { accessToken })
+  },
+
+  async listEmpresaSucursales(accessToken: string, empresaId: string): Promise<EmpresaSucursalListItem[]> {
+    return apiRequest<EmpresaSucursalListItem[]>(`/api/admin-pos/empresas/${empresaId}/sucursales`, {
+      accessToken,
+    })
+  },
+
+  async listEmpresaAdministradores(accessToken: string, empresaId: string): Promise<EmpresaAdminListItem[]> {
+    return apiRequest<EmpresaAdminListItem[]>(`/api/admin-pos/empresas/${empresaId}/administradores`, {
+      accessToken,
+    })
+  },
+
+  async createEmpresaAdministrador(
+    accessToken: string,
+    empresaId: string,
+    payload: CreateEmpresaAdminPayload,
+  ): Promise<EmpresaAdminListItem> {
+    return apiRequest<EmpresaAdminListItem>(`/api/admin-pos/empresas/${empresaId}/administradores`, {
+      method: 'POST',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  async updateEmpresaAdministrador(
+    accessToken: string,
+    empresaId: string,
+    adminId: string,
+    payload: UpdateEmpresaAdminPayload,
+  ): Promise<EmpresaAdminListItem> {
+    return apiRequest<EmpresaAdminListItem>(`/api/admin-pos/empresas/${empresaId}/administradores/${adminId}`, {
+      method: 'PUT',
+      accessToken,
+      body: payload,
+    })
+  },
+
+  async toggleEmpresaAdministrador(
+    accessToken: string,
+    empresaId: string,
+    adminId: string,
+  ): Promise<EmpresaAdminListItem> {
+    return apiRequest<EmpresaAdminListItem>(
+      `/api/admin-pos/empresas/${empresaId}/administradores/${adminId}/toggle-status`,
+      { method: 'PATCH', accessToken },
+    )
   },
 
   async updateEmpresa(accessToken: string, empresaId: string, payload: UpdateEmpresaPayload): Promise<EmpresaDetail> {

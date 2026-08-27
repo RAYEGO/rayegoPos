@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Building2, MoreHorizontal, Plus, RefreshCcw, Search, ToggleLeft, X } from 'lucide-react'
+import { Building2, Loader2, MoreHorizontal, Plus, RefreshCcw, Search, ToggleLeft, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,19 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
-import type { CreateEmpresaPayload, EmpresaDetail, EmpresaListItem, TipoEmpresaListItem, UpdateEmpresaPayload } from '@/types/admin-pos'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import type {
+  CreateEmpresaAdminPayload,
+  EmpresaAdminListItem,
+  EmpresaDetail,
+  EmpresaListItem,
+  EmpresaSucursalListItem,
+  CreateEmpresaPayload,
+  TipoEmpresaListItem,
+  UpdateEmpresaAdminPayload,
+  UpdateEmpresaPayload,
+} from '@/types/admin-pos'
 
 type DrawerMode = 'create' | 'edit' | 'view'
 
@@ -110,6 +122,8 @@ type EmpresaFormValues = {
   adminActivo?: boolean
 }
 
+type AdminDrawerMode = 'create' | 'edit'
+
 function FieldError({ message }: { message?: string }) {
   if (!message) return null
   return <p className="text-xs text-destructive">{message}</p>
@@ -195,6 +209,7 @@ export function EmpresasPage() {
   const accessToken = session?.accessToken ?? ''
 
   const canManage = authorization.can('empresas.manage')
+  const canManageAdmins = authorization.can('administradores.manage')
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -205,6 +220,44 @@ export function EmpresasPage() {
   const [drawerMode, setDrawerMode] = useState<DrawerMode | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const [admins, setAdmins] = useState<EmpresaAdminListItem[]>([])
+  const [branches, setBranches] = useState<EmpresaSucursalListItem[]>([])
+  const [adminDrawerMode, setAdminDrawerMode] = useState<AdminDrawerMode | null>(null)
+  const [adminSelectedId, setAdminSelectedId] = useState<string | null>(null)
+  const [isAdminLoading, setIsAdminLoading] = useState(false)
+  const [isAdminSubmitting, setIsAdminSubmitting] = useState(false)
+  const [adminDialogVersion, setAdminDialogVersion] = useState(0)
+
+  const [adminUsername, setAdminUsername] = useState('')
+  const [adminEmail, setAdminEmail] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [adminNombres, setAdminNombres] = useState('')
+  const [adminApellidos, setAdminApellidos] = useState('')
+  const [adminTelefono, setAdminTelefono] = useState('')
+  const [adminNumeroDocumento, setAdminNumeroDocumento] = useState('')
+  const [adminActivo, setAdminActivo] = useState(true)
+  const [adminBranchId, setAdminBranchId] = useState<string>('')
+
+  const [createBranchInline, setCreateBranchInline] = useState(false)
+  const [newBranchCodigo, setNewBranchCodigo] = useState('PRINCIPAL')
+  const [newBranchNombre, setNewBranchNombre] = useState('Sucursal principal')
+  const [newBranchDireccion, setNewBranchDireccion] = useState('')
+  const [newBranchTelefono, setNewBranchTelefono] = useState('')
+  const [newBranchEmail, setNewBranchEmail] = useState('')
+
+  const adminUsernameRef = useRef<HTMLInputElement | null>(null)
+  const adminEmailRef = useRef<HTMLInputElement | null>(null)
+  const adminPasswordRef = useRef<HTMLInputElement | null>(null)
+  const adminTelefonoRef = useRef<HTMLInputElement | null>(null)
+  const adminNombresRef = useRef<HTMLInputElement | null>(null)
+  const adminApellidosRef = useRef<HTMLInputElement | null>(null)
+  const adminNumeroDocumentoRef = useRef<HTMLInputElement | null>(null)
+  const newBranchCodigoRef = useRef<HTMLInputElement | null>(null)
+  const newBranchNombreRef = useRef<HTMLInputElement | null>(null)
+  const newBranchDireccionRef = useRef<HTMLInputElement | null>(null)
+  const newBranchTelefonoRef = useRef<HTMLInputElement | null>(null)
+  const newBranchEmailRef = useRef<HTMLInputElement | null>(null)
 
   const {
     control,
@@ -245,6 +298,7 @@ export function EmpresasPage() {
   const watchActivo = watch('activo')
   const readOnly = drawerMode === 'view'
   const formKey = `${drawerMode ?? 'closed'}-${selectedId ?? 'new'}`
+  const adminDialogKey = `${adminDrawerMode ?? 'closed'}-${adminSelectedId ?? 'new'}-${adminDialogVersion}`
   const nativeSetValue = (
     name: string,
     value: unknown,
@@ -273,6 +327,30 @@ export function EmpresasPage() {
       .finally(() => setIsLoading(false))
   }, [accessToken, handleUnauthorized])
 
+  const loadAdminsAndBranches = async (empresaId: string) => {
+    if (!accessToken) return
+    setIsAdminLoading(true)
+    try {
+      const [adm, br] = await Promise.all([
+        adminPosService.listEmpresaAdministradores(accessToken, empresaId),
+        adminPosService.listEmpresaSucursales(accessToken, empresaId),
+      ])
+      setAdmins(adm)
+      setBranches(br)
+      if (br.length === 1) {
+        setAdminBranchId(br[0]?.id ?? '')
+      }
+    } catch (err) {
+      const msg = getApiErrorMessage(err)
+      toast.error(msg)
+      if (err instanceof ApiError) {
+        void handleUnauthorized(err.status, err.message, { endpoint: 'loadAdminsAndBranches', page: 'EmpresasPage' })
+      }
+    } finally {
+      setIsAdminLoading(false)
+    }
+  }
+
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return items
@@ -288,9 +366,138 @@ export function EmpresasPage() {
     })
   }, [items, search])
 
+  const openAdminDrawerCreate = () => {
+    setAdminDrawerMode('create')
+    setAdminSelectedId(null)
+    setAdminDialogVersion((v) => v + 1)
+    setAdminUsername('')
+    setAdminEmail('')
+    setAdminPassword('')
+    setAdminNombres('')
+    setAdminApellidos('')
+    setAdminTelefono('')
+    setAdminNumeroDocumento('')
+    setAdminActivo(true)
+    setCreateBranchInline(branches.length === 0)
+    if (branches.length === 1) {
+      setAdminBranchId(branches[0]?.id ?? '')
+    } else {
+      setAdminBranchId('')
+    }
+    setNewBranchCodigo('PRINCIPAL')
+    setNewBranchNombre('Sucursal principal')
+    setNewBranchDireccion('')
+    setNewBranchTelefono('')
+    setNewBranchEmail('')
+  }
+
+  const openAdminDrawerEdit = (admin: EmpresaAdminListItem) => {
+    setAdminDrawerMode('edit')
+    setAdminSelectedId(admin.id)
+    setAdminDialogVersion((v) => v + 1)
+    setAdminUsername(admin.username)
+    setAdminEmail(admin.email ?? '')
+    setAdminPassword('')
+    setAdminNombres(admin.nombres)
+    setAdminApellidos(admin.apellidos)
+    setAdminTelefono(admin.telefono ?? '')
+    setAdminNumeroDocumento('')
+    setAdminActivo(admin.activo)
+    setCreateBranchInline(false)
+    setAdminBranchId(admin.sucursalIds[0] ?? '')
+  }
+
+  const closeAdminDrawer = () => {
+    setAdminDrawerMode(null)
+    setAdminSelectedId(null)
+  }
+
+  const handleSubmitAdmin = async () => {
+    if (!accessToken) return
+    if (!selectedId) return
+    if (!authorization.can('administradores.manage')) return
+
+    setIsAdminSubmitting(true)
+    try {
+      const username = adminUsernameRef.current?.value ?? ''
+      const email = adminEmailRef.current?.value ?? ''
+      const password = adminPasswordRef.current?.value ?? ''
+      const telefono = adminTelefonoRef.current?.value ?? ''
+      const nombres = adminNombresRef.current?.value ?? ''
+      const apellidos = adminApellidosRef.current?.value ?? ''
+      const numeroDocumento = adminNumeroDocumentoRef.current?.value ?? ''
+
+      const branchCodigo = newBranchCodigoRef.current?.value ?? ''
+      const branchNombre = newBranchNombreRef.current?.value ?? ''
+      const branchDireccion = newBranchDireccionRef.current?.value ?? ''
+      const branchTelefono = newBranchTelefonoRef.current?.value ?? ''
+      const branchEmail = newBranchEmailRef.current?.value ?? ''
+
+      if (adminDrawerMode === 'create') {
+        const payload: CreateEmpresaAdminPayload = {
+          username: username.trim(),
+          email: email.trim() ? email.trim() : null,
+          password,
+          nombres,
+          apellidos,
+          telefono: telefono.trim() ? telefono.trim() : null,
+          numeroDocumento: numeroDocumento.trim() ? numeroDocumento.trim() : null,
+          activo: adminActivo,
+          sucursalId: createBranchInline ? null : adminBranchId || null,
+          sucursal: createBranchInline
+            ? {
+                codigo: branchCodigo,
+                nombre: branchNombre,
+                direccion: branchDireccion.trim() ? branchDireccion.trim() : null,
+                telefono: branchTelefono.trim() ? branchTelefono.trim() : null,
+                email: branchEmail.trim() ? branchEmail.trim() : null,
+              }
+            : null,
+        }
+        await adminPosService.createEmpresaAdministrador(accessToken, selectedId, payload)
+        toast.success('Administrador creado.')
+        await loadAdminsAndBranches(selectedId)
+        closeAdminDrawer()
+        return
+      }
+
+      if (adminDrawerMode === 'edit' && adminSelectedId) {
+        const payload: UpdateEmpresaAdminPayload = {
+          email: email.trim() ? email.trim() : null,
+          password: password.trim() ? password.trim() : null,
+          nombres,
+          apellidos,
+          telefono: telefono.trim() ? telefono.trim() : null,
+          numeroDocumento: numeroDocumento.trim() ? numeroDocumento.trim() : null,
+          activo: adminActivo,
+          sucursalId: adminBranchId || null,
+        }
+        await adminPosService.updateEmpresaAdministrador(accessToken, selectedId, adminSelectedId, payload)
+        toast.success('Administrador actualizado.')
+        await loadAdminsAndBranches(selectedId)
+        closeAdminDrawer()
+      }
+    } catch (err) {
+      if (err instanceof ApiError) {
+        void handleUnauthorized(err.status, err.message, { endpoint: 'handleSubmitAdmin', page: 'EmpresasPage' })
+      } else if (err instanceof ApiNetworkError) {
+        void handleUnauthorized(401, err.message, { endpoint: 'handleSubmitAdmin', page: 'EmpresasPage' })
+      } else {
+        void handleUnauthorized()
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsAdminSubmitting(false)
+    }
+  }
+
   function closeDrawer() {
     setDrawerMode(null)
     setSelectedId(null)
+    setAdmins([])
+    setBranches([])
+    setAdminDrawerMode(null)
+    setAdminSelectedId(null)
   }
 
   function openDrawer(mode: DrawerMode, empresa?: EmpresaListItem | EmpresaDetail) {
@@ -323,6 +530,10 @@ export function EmpresasPage() {
         adminNumeroDocumento: null,
         adminActivo: true,
       })
+      setAdmins([])
+      setBranches([])
+      setAdminDrawerMode(null)
+      setAdminSelectedId(null)
       return
     }
 
@@ -358,6 +569,7 @@ export function EmpresasPage() {
           adminNumeroDocumento: null,
           adminActivo: true,
         })
+        void loadAdminsAndBranches(detail.id)
       })
       .catch((err) => {
         if (err instanceof ApiError) {
@@ -570,6 +782,9 @@ export function EmpresasPage() {
                   </Badge>
                   <Badge variant="outline">{empresa.sucursalesCount} sucursales</Badge>
                   <Badge variant="outline">{empresa.usuariosCount} usuarios</Badge>
+                      {!empresa.hasAdminEmpresa ? (
+                        <Badge variant="destructive">Sin administrador</Badge>
+                      ) : null}
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
                   Registro {empresa.createdAt ? new Date(empresa.createdAt).toLocaleDateString('es-PE') : '—'}
@@ -859,6 +1074,81 @@ export function EmpresasPage() {
                   </div>
                 ) : null}
 
+                {drawerMode !== 'create' ? (
+                  <div className="rounded-2xl border p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Administradores de empresa</p>
+                        <p className="text-xs text-muted-foreground">
+                          Crea y gestiona los usuarios con rol ADMIN_EMPRESA para esta empresa.
+                        </p>
+                      </div>
+                      {canManageAdmins ? (
+                        <Button type="button" size="sm" onClick={openAdminDrawerCreate} disabled={!selectedId}>
+                          <Plus className="h-4 w-4" />
+                          Agregar administrador
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      {isAdminLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Cargando administradores...
+                        </div>
+                      ) : admins.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Aún no hay administradores registrados para esta empresa.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {admins.map((admin) => (
+                            <div key={admin.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">
+                                  {admin.apellidos} {admin.nombres}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {admin.username}
+                                  {admin.email ? ` · ${admin.email}` : ''}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant={admin.activo ? 'success' : 'outline'}>
+                                  {admin.activo ? 'Activo' : 'Inactivo'}
+                                </Badge>
+                                {canManageAdmins ? (
+                                  <>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => openAdminDrawerEdit(admin)}>
+                                      Editar
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={async () => {
+                                        if (!selectedId) return
+                                        try {
+                                          await adminPosService.toggleEmpresaAdministrador(accessToken, selectedId, admin.id)
+                                          toast.success(admin.activo ? 'Administrador desactivado.' : 'Administrador activado.')
+                                          await loadAdminsAndBranches(selectedId)
+                                        } catch (err) {
+                                          toast.error(getApiErrorMessage(err))
+                                        }
+                                      }}
+                                    >
+                                      {admin.activo ? 'Desactivar' : 'Activar'}
+                                    </Button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="rounded-2xl border p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -876,6 +1166,127 @@ export function EmpresasPage() {
                 </div>
               </div>
             </ScrollArea>
+
+            <Dialog open={Boolean(adminDrawerMode)} onOpenChange={(open) => !open && closeAdminDrawer()}>
+              <DialogContent key={adminDialogKey} className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>
+                    {adminDrawerMode === 'create' ? 'Nuevo administrador de empresa' : 'Editar administrador'}
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Username <span className="text-destructive">*</span></Label>
+                      <Input
+                        ref={adminUsernameRef}
+                        defaultValue={adminUsername}
+                        disabled={adminDrawerMode !== 'create' || isAdminSubmitting}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Email</Label>
+                      <Input ref={adminEmailRef} defaultValue={adminEmail} disabled={isAdminSubmitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{adminDrawerMode === 'create' ? 'Contraseña *' : 'Nueva contraseña'}</Label>
+                      <Input ref={adminPasswordRef} defaultValue={adminPassword} type="password" disabled={isAdminSubmitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Teléfono</Label>
+                      <Input ref={adminTelefonoRef} defaultValue={adminTelefono} disabled={isAdminSubmitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Nombres <span className="text-destructive">*</span></Label>
+                      <Input ref={adminNombresRef} defaultValue={adminNombres} disabled={isAdminSubmitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Apellidos <span className="text-destructive">*</span></Label>
+                      <Input ref={adminApellidosRef} defaultValue={adminApellidos} disabled={isAdminSubmitting} />
+                    </div>
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label>Documento</Label>
+                      <Input ref={adminNumeroDocumentoRef} defaultValue={adminNumeroDocumento} disabled={isAdminSubmitting} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">Estado</p>
+                        <p className="text-xs text-muted-foreground">{adminActivo ? 'Activo' : 'Inactivo'}</p>
+                      </div>
+                      <Switch checked={adminActivo} onCheckedChange={setAdminActivo} />
+                    </div>
+                  </div>
+
+                  {branches.length === 0 ? (
+                    <div className="rounded-xl border p-3">
+                      <div className="flex items-start gap-3">
+                        <Checkbox checked={createBranchInline} onCheckedChange={(v) => setCreateBranchInline(Boolean(v))} />
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Crear sucursal inicial</p>
+                          <p className="text-xs text-muted-foreground">
+                            Esta empresa no tiene sucursales. Para crear el administrador se requiere una sucursal.
+                          </p>
+                        </div>
+                      </div>
+
+                      {createBranchInline ? (
+                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label>Código <span className="text-destructive">*</span></Label>
+                            <Input ref={newBranchCodigoRef} defaultValue={newBranchCodigo} disabled={isAdminSubmitting} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Nombre <span className="text-destructive">*</span></Label>
+                            <Input ref={newBranchNombreRef} defaultValue={newBranchNombre} disabled={isAdminSubmitting} />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label>Dirección</Label>
+                            <Input ref={newBranchDireccionRef} defaultValue={newBranchDireccion} disabled={isAdminSubmitting} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Teléfono</Label>
+                            <Input ref={newBranchTelefonoRef} defaultValue={newBranchTelefono} disabled={isAdminSubmitting} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Email</Label>
+                            <Input ref={newBranchEmailRef} defaultValue={newBranchEmail} disabled={isAdminSubmitting} />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Label>Sucursal <span className="text-destructive">*</span></Label>
+                      <Select value={adminBranchId} onValueChange={setAdminBranchId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona una sucursal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {branches.map((b) => (
+                            <SelectItem key={b.id} value={b.id} disabled={!b.activo}>
+                              {b.codigo} — {b.nombre}{b.esPrincipal ? ' (Principal)' : ''}{!b.activo ? ' (Inactiva)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={closeAdminDrawer} disabled={isAdminSubmitting}>
+                    Cancelar
+                  </Button>
+                  <Button type="button" onClick={handleSubmitAdmin} disabled={isAdminSubmitting}>
+                    {adminDrawerMode === 'create' ? 'Crear administrador' : 'Guardar cambios'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <footer className="flex shrink-0 items-center justify-end gap-2 border-t bg-background px-6 py-4">
               <Button type="button" variant="outline" onClick={closeDrawer} disabled={isSubmitting}>

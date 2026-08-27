@@ -68,7 +68,7 @@ const usersFormSchema = z
     username: z.string().min(1, 'Ingresa el usuario.').max(60),
     password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.').or(z.literal('')),
     confirmPassword: z.string().min(8, 'Confirma la contraseña.').or(z.literal('')),
-    role: z.enum(['ADMIN_POS', 'ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
+    role: z.enum(['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
     branchIds: z.array(z.string()).min(1, 'Selecciona al menos una sucursal.'),
     isActive: z.boolean(),
     mustChangePassword: z.boolean(),
@@ -228,9 +228,9 @@ export function UsuariosPage() {
     userForm.reset({
       firstName: user.firstName,
       lastName: user.lastName,
-      documentId: user.documentId ?? undefined,
-      phone: user.phone ?? undefined,
-      email: user.email ?? undefined,
+      documentId: user.documentId ?? '',
+      phone: user.phone ?? '',
+      email: user.email ?? '',
       username: user.username,
       password: '',
       confirmPassword: '',
@@ -355,7 +355,7 @@ export function UsuariosPage() {
                   La sucursal activa se define en el login. Este módulo solo administra usuarios.
                 </CardDescription>
               </div>
-              {hasRole('ADMIN') ? (
+              {hasRole('ADMIN') || hasRole('ADMIN_EMPRESA') ? (
                 <Badge variant="outline">Preparado para roles múltiples</Badge>
               ) : null}
             </div>

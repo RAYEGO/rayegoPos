@@ -44,7 +44,14 @@ function createHttpError(statusCode: number, message: string) {
 
 function normalizeRoles(roles: string[] | undefined): AuthRole[] {
   if (!roles || roles.length === 0) return []
-  const valid = new Set<AuthRole>(['ADMIN', 'ADMIN_POS', 'SUPERVISOR', 'CAJERO', 'ALMACEN'])
+  const valid = new Set<AuthRole>([
+    'ADMIN',
+    'ADMIN_EMPRESA',
+    'ADMIN_POS',
+    'SUPERVISOR',
+    'CAJERO',
+    'ALMACEN',
+  ])
   return roles.filter((r): r is AuthRole => valid.has(r as AuthRole))
 }
 

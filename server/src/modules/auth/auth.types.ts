@@ -1,4 +1,10 @@
-export type AuthRole = 'ADMIN' | 'ADMIN_POS' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN'
+export type AuthRole =
+  | 'ADMIN'
+  | 'ADMIN_EMPRESA'
+  | 'ADMIN_POS'
+  | 'SUPERVISOR'
+  | 'CAJERO'
+  | 'ALMACEN'
 
 export type AuthPermission =
   | '*'

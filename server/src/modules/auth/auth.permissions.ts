@@ -2,6 +2,7 @@ import type { AuthPermission, AuthRole } from './auth.types.js'
 
 const roleLabels: Record<AuthRole, string> = {
   ADMIN: 'Administrador',
+  ADMIN_EMPRESA: 'Administrador Empresa',
   ADMIN_POS: 'Administrador POS (Plataforma)',
   SUPERVISOR: 'Supervisor',
   CAJERO: 'Cajero',
@@ -10,6 +11,23 @@ const roleLabels: Record<AuthRole, string> = {
 
 const rolePermissions: Record<AuthRole, AuthPermission[]> = {
   ADMIN: [
+    'dashboard.read',
+    'ventas.read',
+    'productos.read',
+    'compras.read',
+    'inventario.read',
+    'clientes.read',
+    'proveedores.read',
+    'caja.read',
+    'usuarios.read',
+    'usuarios.manage',
+    'sesiones.read',
+    'sesiones.revoke',
+    'auditoria.read',
+    'reportes.read',
+    'configuracion.read',
+  ],
+  ADMIN_EMPRESA: [
     'dashboard.read',
     'ventas.read',
     'productos.read',
@@ -71,7 +89,14 @@ const rolePermissions: Record<AuthRole, AuthPermission[]> = {
   ],
 }
 
-const ALL_ROLE_CODES: AuthRole[] = ['ADMIN', 'ADMIN_POS', 'SUPERVISOR', 'CAJERO', 'ALMACEN']
+const ALL_ROLE_CODES: AuthRole[] = [
+  'ADMIN',
+  'ADMIN_EMPRESA',
+  'ADMIN_POS',
+  'SUPERVISOR',
+  'CAJERO',
+  'ALMACEN',
+]
 
 export function isAuthRole(value: string): value is AuthRole {
   return ALL_ROLE_CODES.includes(value as AuthRole)

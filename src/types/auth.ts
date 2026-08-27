@@ -1,4 +1,10 @@
-export type AuthRole = 'ADMIN_POS' | 'ADMIN' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN'
+export type AuthRole =
+  | 'ADMIN_POS'
+  | 'ADMIN_EMPRESA'
+  | 'ADMIN'
+  | 'SUPERVISOR'
+  | 'CAJERO'
+  | 'ALMACEN'
 
 export type UserStatus = 'ACTIVO' | 'BLOQUEADO' | 'INVITADO'
 
