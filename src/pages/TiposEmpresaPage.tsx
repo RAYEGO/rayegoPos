@@ -546,7 +546,7 @@ export function TiposEmpresaPage() {
       <SidePanel open={Boolean(drawerMode)} onOpenChange={(open) => !open && closeDrawer()}>
         <SidePanelContent className="max-w-2xl">
           <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-5">
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-4">
               <div className="flex items-start gap-3">
                 <div
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
@@ -582,8 +582,8 @@ export function TiposEmpresaPage() {
               </SidePanelClose>
             </header>
 
-            <ScrollArea className="min-h-0 flex-1" viewportClassName="px-6 py-5 pb-32">
-              <div className="space-y-6">
+            <ScrollArea className="min-h-0 flex-1" viewportClassName="px-6 py-4 pb-32">
+              <div className="space-y-5">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="tp-codigo">

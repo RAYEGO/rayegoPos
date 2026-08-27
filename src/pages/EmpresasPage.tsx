@@ -509,7 +509,7 @@ export function EmpresasPage() {
       <SidePanel open={Boolean(drawerMode)} onOpenChange={(open) => !open && closeDrawer()}>
         <SidePanelContent className="max-w-2xl">
           <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-5">
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold tracking-tight">
                   {drawerMode === 'create' ? 'Nueva empresa' : drawerMode === 'edit' ? 'Editar empresa' : 'Detalle de empresa'}
@@ -529,8 +529,8 @@ export function EmpresasPage() {
               </SidePanelClose>
             </header>
 
-            <ScrollArea className="min-h-0 flex-1" viewportClassName="px-6 py-5 pb-32">
-              <div className="space-y-6">
+            <ScrollArea className="min-h-0 flex-1" viewportClassName="px-6 py-4 pb-32">
+              <div className="space-y-5">
                 <div className="space-y-1.5">
                   <Label>Tipo de empresa <span className="text-destructive">*</span></Label>
                   <Controller
