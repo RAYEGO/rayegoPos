@@ -247,6 +247,18 @@ function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBra
       }
     })
 
+  const uniqueMembershipsMap = new Map<string, AuthBranch>()
+  for (const branch of memberships as AuthBranch[]) {
+    uniqueMembershipsMap.set(branch.id, branch)
+  }
+
+  const uniqueMemberships = Array.from(uniqueMembershipsMap.values())
+  uniqueMemberships.sort((a, b) => {
+    const byName = a.name.localeCompare(b.name)
+    if (byName !== 0) return byName
+    return a.code.localeCompare(b.code)
+  })
+
   if (user.sucursal && user.sucursal.activo && user.sucursal.deletedAt === null) {
     companyIds.add(user.sucursal.empresaId)
   }
@@ -262,8 +274,8 @@ function resolveAvailableBranches(user: NonNullable<AuthenticatedUser>): AuthBra
     throw createHttpError(409, 'La empresa del usuario no es válida para sus sucursales.')
   }
 
-  if (memberships.length > 0) {
-    return memberships.filter((branch: any) => branch.companyId === userCompanyId)
+  if (uniqueMemberships.length > 0) {
+    return uniqueMemberships.filter((branch) => branch.companyId === userCompanyId)
   }
 
   if (user.sucursal) {
