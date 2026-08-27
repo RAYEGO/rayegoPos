@@ -30,7 +30,7 @@ export const SidePanelContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean
   }
->(({ className, children, showCloseButton = false, ...props }, ref) => (
+>(({ className, children, showCloseButton = false, onOpenAutoFocus, ...props }, ref) => (
   <SidePanelPortal>
     <SidePanelOverlay />
     <DialogPrimitive.Content
@@ -39,6 +39,25 @@ export const SidePanelContent = React.forwardRef<
         'fixed inset-y-0 right-0 z-50 flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
         className,
       )}
+      onOpenAutoFocus={(event) => {
+        if (onOpenAutoFocus) {
+          onOpenAutoFocus(event)
+          return
+        }
+        event.preventDefault()
+        const root = event.currentTarget as HTMLElement | null
+        if (!root) return
+        window.setTimeout(() => {
+          const candidate = root.querySelector<HTMLElement>(
+            'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])',
+          )
+          if (!candidate) return
+          if (candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement) {
+            if (candidate.readOnly) return
+          }
+          candidate.focus()
+        }, 0)
+      }}
       {...props}
     >
       {children}
@@ -60,4 +79,3 @@ export const SidePanelContent = React.forwardRef<
 ))
 
 SidePanelContent.displayName = 'SidePanelContent'
-
