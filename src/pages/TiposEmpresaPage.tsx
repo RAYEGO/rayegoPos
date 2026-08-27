@@ -594,6 +594,7 @@ export function TiposEmpresaPage() {
                       name="codigo"
                       render={({ field }) => (
                         <Input
+                          {...field}
                           id="tp-codigo"
                           placeholder="BOTICA"
                           value={field.value ?? ''}
@@ -616,6 +617,7 @@ export function TiposEmpresaPage() {
                       name="nombre"
                       render={({ field }) => (
                         <Input
+                          {...field}
                           id="tp-nombre"
                           placeholder="Botica / Farmacia"
                           value={field.value ?? ''}
@@ -635,6 +637,7 @@ export function TiposEmpresaPage() {
                     name="descripcion"
                     render={({ field }) => (
                       <Input
+                        {...field}
                         id="tp-descripcion"
                         placeholder="Ej: Negocio orientado a la venta de medicamentos y atención farmacéutica."
                         value={field.value ?? ''}
@@ -654,6 +657,7 @@ export function TiposEmpresaPage() {
                       name="orden"
                       render={({ field }) => (
                         <Input
+                          {...field}
                           id="tp-orden"
                           type="number"
                           min={0}

@@ -561,7 +561,7 @@ export function EmpresasPage() {
                       control={control}
                       name="razonSocial"
                       render={({ field }) => (
-                        <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                       )}
                     />
                     <FieldError message={errors.razonSocial?.message} />
@@ -573,7 +573,7 @@ export function EmpresasPage() {
                       control={control}
                       name="numeroDocumento"
                       render={({ field }) => (
-                        <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                       )}
                     />
                     <FieldError message={errors.numeroDocumento?.message} />
@@ -585,7 +585,7 @@ export function EmpresasPage() {
                       control={control}
                       name="nombreComercial"
                       render={({ field }) => (
-                        <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                       )}
                     />
                     <FieldError message={errors.nombreComercial?.message} />
@@ -599,7 +599,7 @@ export function EmpresasPage() {
                       control={control}
                       name="email"
                       render={({ field }) => (
-                        <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                       )}
                     />
                     <FieldError message={errors.email?.message} />
@@ -611,7 +611,7 @@ export function EmpresasPage() {
                       control={control}
                       name="telefono"
                       render={({ field }) => (
-                        <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                       )}
                     />
                     <FieldError message={errors.telefono?.message} />
@@ -623,7 +623,7 @@ export function EmpresasPage() {
                       control={control}
                       name="direccion"
                       render={({ field }) => (
-                        <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                       )}
                     />
                     <FieldError message={errors.direccion?.message} />
@@ -645,7 +645,12 @@ export function EmpresasPage() {
                             control={control}
                             name="sucursalCodigo"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value.toUpperCase().replace(/\s+/g, '_'))} disabled={readOnly} />
+                              <Input
+                                {...field}
+                                value={field.value ?? ''}
+                                onChange={(e) => field.onChange(e.target.value.toUpperCase().replace(/\s+/g, '_'))}
+                                disabled={readOnly}
+                              />
                             )}
                           />
                           <FieldError message={errors.sucursalCodigo?.message} />
@@ -657,7 +662,7 @@ export function EmpresasPage() {
                             control={control}
                             name="sucursalNombre"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.sucursalNombre?.message} />
@@ -669,7 +674,7 @@ export function EmpresasPage() {
                             control={control}
                             name="sucursalDireccion"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.sucursalDireccion?.message} />
@@ -681,7 +686,7 @@ export function EmpresasPage() {
                             control={control}
                             name="sucursalTelefono"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.sucursalTelefono?.message} />
@@ -693,7 +698,7 @@ export function EmpresasPage() {
                             control={control}
                             name="sucursalEmail"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.sucursalEmail?.message} />
@@ -718,7 +723,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminUsername"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminUsername?.message} />
@@ -730,7 +735,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminEmail"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminEmail?.message} />
@@ -742,7 +747,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminPassword"
                             render={({ field }) => (
-                              <Input type="password" value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} type="password" value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminPassword?.message} />
@@ -754,7 +759,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminTelefono"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminTelefono?.message} />
@@ -766,7 +771,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminNombres"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminNombres?.message} />
@@ -778,7 +783,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminApellidos"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminApellidos?.message} />
@@ -790,7 +795,7 @@ export function EmpresasPage() {
                             control={control}
                             name="adminNumeroDocumento"
                             render={({ field }) => (
-                              <Input value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
+                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
                             )}
                           />
                           <FieldError message={errors.adminNumeroDocumento?.message} />
