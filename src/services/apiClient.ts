@@ -52,6 +52,23 @@ export type ApiRawResult<T> =
       code?: string
     }
 
+function resolveApiUrl(path: string) {
+  const base = String(API_BASE_URL ?? '').trim()
+  if (!base) return path
+
+  const normalizedBase = base.replace(/\/+$/, '')
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+
+  if (normalizedPath.startsWith('/api/')) {
+    const baseWithoutApi = normalizedBase.replace(/\/api$/i, '')
+    if (baseWithoutApi !== normalizedBase) {
+      return `${baseWithoutApi}${normalizedPath}`
+    }
+  }
+
+  return `${normalizedBase}${normalizedPath}`
+}
+
 function getFirstApiValidationMessage(payload: ApiErrorPayload | null) {
   const formMessage = payload?.issues?.formErrors?.find(
     (entry) => typeof entry === 'string' && entry.trim().length > 0,
@@ -93,7 +110,7 @@ export async function apiRequestRaw<T>(
       headers.Authorization = `Bearer ${authToken}`
     }
 
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(resolveApiUrl(path), {
       method,
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -203,7 +220,7 @@ export async function apiRequestBlob(
 ): Promise<Blob> {
   const authToken = options.skipAuth ? undefined : resolveAccessToken(options.accessToken)
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(resolveApiUrl(path), {
       method: options.method ?? 'GET',
       headers: {
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
