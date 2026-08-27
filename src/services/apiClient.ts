@@ -85,13 +85,18 @@ export async function apiRequestRaw<T>(
 
   let response: Response
   try {
+    const headers: Record<string, string> = {}
+    if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+    }
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`
+    }
+
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
     })
   } catch {
     return {

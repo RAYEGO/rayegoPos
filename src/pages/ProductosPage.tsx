@@ -419,7 +419,7 @@ function getFirstFormErrorMessage(value: unknown): string | null {
 }
 
 export function ProductosPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const authorization = useAuthorization()
   const accessToken = session?.accessToken ?? ''
   const [search, setSearch] = useState('')
@@ -1548,8 +1548,7 @@ export function ProductosPage() {
       await Promise.all([loadProducts(), loadOptions()])
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        toast.error('Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para guardar productos.')
-        await logout()
+        await handleUnauthorizedRef.current(error.status, error.message, 'products.createOrUpdate')
         return
       }
 

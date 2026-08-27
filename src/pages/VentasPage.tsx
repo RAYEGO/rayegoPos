@@ -215,7 +215,7 @@ function getStockVariant(product: any) {
 }
 
 export function VentasPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
   const [dashboard, setDashboard] = useState<SalesDashboardResponse | null>(null)
@@ -696,10 +696,7 @@ export function VentasPage() {
       await loadDashboard()
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar ventas.',
-        )
-        await logout()
+        await handleUnauthorized(nextError.status, nextError.message, 'sales.create')
         return
       }
 

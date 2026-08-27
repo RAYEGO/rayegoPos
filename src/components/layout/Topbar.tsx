@@ -20,7 +20,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const isPlatformAdmin = hasRole('ADMIN_POS')
 
   async function handleLogout() {
-    await logout()
+    await logout('Topbar.handleLogout')
     toast.success('Sesión cerrada correctamente.')
     navigate(paths.login, { replace: true })
   }

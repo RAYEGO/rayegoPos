@@ -64,6 +64,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
 import { useAuth } from '@/hooks/useAuth'
+import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
 import { purchasesService } from '@/services/purchasesService'
@@ -338,10 +339,13 @@ function getReceiptStatusVariant(status: PurchaseReceiptStatus) {
 }
 
 export function ComprasPage() {
-  const { logout, session } = useAuth()
+  const { session } = useAuth()
   const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
   const activeBranchName = session?.user.branchName ?? ''
+  const handleUnauthorized = useHandleUnauthorized('ComprasPage')
+  const handleUnauthorizedRef = useRef(handleUnauthorized)
+  handleUnauthorizedRef.current = handleUnauthorized
   const [search, setSearch] = useState('')
   const [logisticsStatusFilter, setLogisticsStatusFilter] = useState<
     'TODAS' | PurchaseLogisticsStatus
@@ -771,8 +775,7 @@ export function ComprasPage() {
       }
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error('Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar compras.')
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.createOrUpdateOrder')
         return
       }
 
@@ -811,8 +814,7 @@ export function ComprasPage() {
       setIsCreateDialogOpen(true)
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error('Tu sesión venció. Ingresa nuevamente.')
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.getOrderById')
         return
       }
       toast.error(getApiErrorMessage(nextError))
@@ -862,10 +864,7 @@ export function ComprasPage() {
       await loadDashboard()
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para recepcionar compras.',
-        )
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.receiveItem')
         return
       }
 
@@ -928,10 +927,7 @@ export function ComprasPage() {
       await loadDashboard()
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar devoluciones.',
-        )
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.returnItem')
         return
       }
 
@@ -982,10 +978,7 @@ export function ComprasPage() {
       }
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar pagos.',
-        )
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'cashier.getActiveDrawer')
         return
       }
 
@@ -1020,10 +1013,7 @@ export function ComprasPage() {
       await loadDashboard()
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar pagos.',
-        )
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.registerPayment')
         return
       }
 
@@ -1093,10 +1083,7 @@ export function ComprasPage() {
       await handleRegisterPayment(paymentForm.getValues())
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para registrar ingresos.',
-        )
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'cashier.createMovement')
         return
       }
 
@@ -1536,10 +1523,7 @@ export function ComprasPage() {
       )
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
-        toast.error(
-          'Tu sesión venció o cambió con el despliegue. Ingresa nuevamente para cerrar la recepción.',
-        )
-        await logout()
+        await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.closeReception')
         return
       }
 
