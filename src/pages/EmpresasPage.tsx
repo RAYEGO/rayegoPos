@@ -508,7 +508,7 @@ export function EmpresasPage() {
 
       <SidePanel open={Boolean(drawerMode)} onOpenChange={(open) => !open && closeDrawer()}>
         <SidePanelContent className="max-w-2xl">
-          <form onSubmit={handleSubmit(onSubmit)} className="flex h-full flex-col">
+          <form onSubmit={handleSubmit(onSubmit)} className="flex h-full min-h-0 flex-col">
             <header className="flex items-start justify-between gap-4 border-b px-6 py-5">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold tracking-tight">
@@ -529,7 +529,7 @@ export function EmpresasPage() {
               </SidePanelClose>
             </header>
 
-            <ScrollArea className="flex-1" viewportClassName="px-6 py-5 pb-28">
+            <ScrollArea className="min-h-0 flex-1" viewportClassName="px-6 py-5 pb-28">
               <div className="space-y-6">
                 <div className="space-y-1.5">
                   <Label>Tipo de empresa <span className="text-destructive">*</span></Label>
