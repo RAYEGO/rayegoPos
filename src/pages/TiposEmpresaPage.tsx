@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
@@ -119,6 +119,67 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-xs text-destructive">{message}</p>
 }
 
+function NativeSyncInput({
+  name,
+  setValue,
+  id,
+  placeholder,
+  disabled,
+  defaultValue,
+  onNormalize,
+}: {
+  name: string
+  setValue: (name: string, value: unknown, options?: { shouldDirty?: boolean; shouldValidate?: boolean }) => void
+  id?: string
+  placeholder?: string
+  disabled?: boolean
+  defaultValue?: string | null
+  onNormalize?: (value: string) => string
+}) {
+  const ref = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const handler = () => {
+      const raw = el.value
+      const normalized = onNormalize ? onNormalize(raw) : raw
+      if (normalized !== raw) {
+        const pos = el.selectionStart
+        el.value = normalized
+        if (typeof pos === 'number') {
+          const nextPos = Math.min(normalized.length, pos)
+          el.setSelectionRange(nextPos, nextPos)
+        }
+      }
+      setValue(name, normalized, { shouldDirty: true })
+    }
+
+    const blurHandler = () => {
+      setValue(name, ref.current?.value ?? '', { shouldValidate: true })
+    }
+
+    el.addEventListener('input', handler)
+    el.addEventListener('blur', blurHandler)
+    return () => {
+      el.removeEventListener('input', handler)
+      el.removeEventListener('blur', blurHandler)
+    }
+  }, [name, onNormalize, setValue])
+
+  return (
+    <Input
+      ref={ref}
+      id={id}
+      name={name}
+      placeholder={placeholder}
+      disabled={disabled}
+      defaultValue={defaultValue ?? ''}
+    />
+  )
+}
+
 function getApiErrorMessage(error: unknown) {
   if (error instanceof ApiError || error instanceof ApiNetworkError) return error.message
   if (error instanceof Error) return error.message
@@ -159,6 +220,7 @@ export function TiposEmpresaPage() {
     handleSubmit,
     reset,
     setValue,
+    getValues,
     watch,
     formState: { errors },
   } = useForm<TipoEmpresaFormValues>({
@@ -182,6 +244,12 @@ export function TiposEmpresaPage() {
   const watchActivo = watch('activo')
   const watchModulos = (watch('modulosHabilitados') ?? []) as string[]
   const readOnly = drawerMode === 'view'
+  const formKey = `${drawerMode ?? 'closed'}-${selectedId ?? 'new'}`
+  const nativeSetValue = (
+    name: string,
+    value: unknown,
+    options?: { shouldDirty?: boolean; shouldValidate?: boolean },
+  ) => setValue(name as never, value as never, options as never)
 
   const IconCard = useMemo(() => getIconByName(watchIcono), [watchIcono])
 
@@ -545,7 +613,7 @@ export function TiposEmpresaPage() {
 
       <SidePanel open={Boolean(drawerMode)} onOpenChange={(open) => !open && closeDrawer()}>
         <SidePanelContent className="max-w-2xl">
-          <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+          <form key={formKey} onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
             <header className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-4">
               <div className="flex items-start gap-3">
                 <div
@@ -589,19 +657,14 @@ export function TiposEmpresaPage() {
                     <Label htmlFor="tp-codigo">
                       Código <span className="text-destructive">*</span>
                     </Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="codigo"
-                      render={({ field }) => (
-                        <Input
-                          {...field}
-                          id="tp-codigo"
-                          placeholder="BOTICA"
-                          value={field.value ?? ''}
-                          onChange={(e) => field.onChange(normalizeTipoEmpresaCode(e.target.value))}
-                          disabled={readOnly || drawerMode !== 'create'}
-                        />
-                      )}
+                      setValue={nativeSetValue}
+                      id="tp-codigo"
+                      placeholder="BOTICA"
+                      defaultValue={getValues('codigo')}
+                      onNormalize={normalizeTipoEmpresaCode}
+                      disabled={readOnly || drawerMode !== 'create'}
                     />
                     <FieldError message={errors.codigo?.message} />
                     {drawerMode !== 'create' && (
@@ -612,19 +675,13 @@ export function TiposEmpresaPage() {
                     <Label htmlFor="tp-nombre">
                       Nombre <span className="text-destructive">*</span>
                     </Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="nombre"
-                      render={({ field }) => (
-                        <Input
-                          {...field}
-                          id="tp-nombre"
-                          placeholder="Botica / Farmacia"
-                          value={field.value ?? ''}
-                          onChange={field.onChange}
-                          disabled={readOnly}
-                        />
-                      )}
+                      setValue={nativeSetValue}
+                      id="tp-nombre"
+                      placeholder="Botica / Farmacia"
+                      defaultValue={getValues('nombre')}
+                      disabled={readOnly}
                     />
                     <FieldError message={errors.nombre?.message} />
                   </div>
@@ -632,19 +689,13 @@ export function TiposEmpresaPage() {
 
                 <div className="space-y-1.5">
                   <Label htmlFor="tp-descripcion">Descripción</Label>
-                  <Controller
-                    control={control}
+                  <NativeSyncInput
                     name="descripcion"
-                    render={({ field }) => (
-                      <Input
-                        {...field}
-                        id="tp-descripcion"
-                        placeholder="Ej: Negocio orientado a la venta de medicamentos y atención farmacéutica."
-                        value={field.value ?? ''}
-                        onChange={field.onChange}
-                        disabled={readOnly}
-                      />
-                    )}
+                    setValue={nativeSetValue}
+                    id="tp-descripcion"
+                    placeholder="Ej: Negocio orientado a la venta de medicamentos y atención farmacéutica."
+                    defaultValue={getValues('descripcion') ?? ''}
+                    disabled={readOnly}
                   />
                   <FieldError message={errors.descripcion?.message} />
                 </div>

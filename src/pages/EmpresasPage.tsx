@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { Building2, MoreHorizontal, Plus, RefreshCcw, Search, ToggleLeft, X } from 'lucide-react'
@@ -115,6 +115,73 @@ function FieldError({ message }: { message?: string }) {
   return <p className="text-xs text-destructive">{message}</p>
 }
 
+function NativeSyncInput({
+  name,
+  setValue,
+  id,
+  placeholder,
+  disabled,
+  defaultValue,
+  onNormalize,
+  type,
+  inputMode,
+}: {
+  name: string
+  setValue: (name: string, value: unknown, options?: { shouldDirty?: boolean; shouldValidate?: boolean }) => void
+  id?: string
+  placeholder?: string
+  disabled?: boolean
+  defaultValue?: string | null
+  onNormalize?: (value: string) => string
+  type?: string
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
+}) {
+  const ref = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const handler = () => {
+      const raw = el.value
+      const normalized = onNormalize ? onNormalize(raw) : raw
+      if (normalized !== raw) {
+        const pos = el.selectionStart
+        el.value = normalized
+        if (typeof pos === 'number') {
+          const nextPos = Math.min(normalized.length, pos)
+          el.setSelectionRange(nextPos, nextPos)
+        }
+      }
+      setValue(name, normalized, { shouldDirty: true })
+    }
+
+    const blurHandler = () => {
+      setValue(name, ref.current?.value ?? '', { shouldValidate: true })
+    }
+
+    el.addEventListener('input', handler)
+    el.addEventListener('blur', blurHandler)
+    return () => {
+      el.removeEventListener('input', handler)
+      el.removeEventListener('blur', blurHandler)
+    }
+  }, [name, onNormalize, setValue])
+
+  return (
+    <Input
+      ref={ref}
+      id={id}
+      name={name}
+      placeholder={placeholder}
+      disabled={disabled}
+      defaultValue={defaultValue ?? ''}
+      type={type}
+      inputMode={inputMode}
+    />
+  )
+}
+
 function getApiErrorMessage(error: unknown) {
   if (error instanceof ApiError || error instanceof ApiNetworkError) return error.message
   if (error instanceof Error) return error.message
@@ -143,6 +210,7 @@ export function EmpresasPage() {
     control,
     handleSubmit,
     reset,
+    getValues,
     setValue,
     watch,
     formState: { errors },
@@ -176,6 +244,12 @@ export function EmpresasPage() {
 
   const watchActivo = watch('activo')
   const readOnly = drawerMode === 'view'
+  const formKey = `${drawerMode ?? 'closed'}-${selectedId ?? 'new'}`
+  const nativeSetValue = (
+    name: string,
+    value: unknown,
+    options?: { shouldDirty?: boolean; shouldValidate?: boolean },
+  ) => setValue(name as never, value as never, options as never)
 
   useEffect(() => {
     if (!accessToken) return
@@ -508,7 +582,7 @@ export function EmpresasPage() {
 
       <SidePanel open={Boolean(drawerMode)} onOpenChange={(open) => !open && closeDrawer()}>
         <SidePanelContent className="max-w-2xl">
-          <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+          <form key={formKey} onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
             <header className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold tracking-tight">
@@ -557,36 +631,34 @@ export function EmpresasPage() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5 sm:col-span-2">
                     <Label>Razón social <span className="text-destructive">*</span></Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="razonSocial"
-                      render={({ field }) => (
-                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                      )}
+                      setValue={nativeSetValue}
+                      disabled={readOnly}
+                      defaultValue={getValues('razonSocial')}
                     />
                     <FieldError message={errors.razonSocial?.message} />
                   </div>
 
                   <div className="space-y-1.5">
                     <Label>RUC <span className="text-destructive">*</span></Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="numeroDocumento"
-                      render={({ field }) => (
-                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                      )}
+                      setValue={nativeSetValue}
+                      disabled={readOnly}
+                      defaultValue={getValues('numeroDocumento')}
+                      inputMode="numeric"
                     />
                     <FieldError message={errors.numeroDocumento?.message} />
                   </div>
 
                   <div className="space-y-1.5">
                     <Label>Nombre comercial</Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="nombreComercial"
-                      render={({ field }) => (
-                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                      )}
+                      setValue={nativeSetValue}
+                      disabled={readOnly}
+                      defaultValue={getValues('nombreComercial') ?? ''}
                     />
                     <FieldError message={errors.nombreComercial?.message} />
                   </div>
@@ -595,36 +667,33 @@ export function EmpresasPage() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label>Email</Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="email"
-                      render={({ field }) => (
-                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                      )}
+                      setValue={nativeSetValue}
+                      disabled={readOnly}
+                      defaultValue={getValues('email') ?? ''}
                     />
                     <FieldError message={errors.email?.message} />
                   </div>
 
                   <div className="space-y-1.5">
                     <Label>Teléfono</Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="telefono"
-                      render={({ field }) => (
-                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                      )}
+                      setValue={nativeSetValue}
+                      disabled={readOnly}
+                      defaultValue={getValues('telefono') ?? ''}
                     />
                     <FieldError message={errors.telefono?.message} />
                   </div>
 
                   <div className="space-y-1.5 sm:col-span-2">
                     <Label>Dirección</Label>
-                    <Controller
-                      control={control}
+                    <NativeSyncInput
                       name="direccion"
-                      render={({ field }) => (
-                        <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                      )}
+                      setValue={nativeSetValue}
+                      disabled={readOnly}
+                      defaultValue={getValues('direccion') ?? ''}
                     />
                     <FieldError message={errors.direccion?.message} />
                   </div>
@@ -641,65 +710,56 @@ export function EmpresasPage() {
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div className="space-y-1.5">
                           <Label>Código <span className="text-destructive">*</span></Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="sucursalCodigo"
-                            render={({ field }) => (
-                              <Input
-                                {...field}
-                                value={field.value ?? ''}
-                                onChange={(e) => field.onChange(e.target.value.toUpperCase().replace(/\s+/g, '_'))}
-                                disabled={readOnly}
-                              />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('sucursalCodigo') ?? ''}
+                            onNormalize={(value) => value.toUpperCase().replace(/\s+/g, '_')}
                           />
                           <FieldError message={errors.sucursalCodigo?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Nombre <span className="text-destructive">*</span></Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="sucursalNombre"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('sucursalNombre') ?? ''}
                           />
                           <FieldError message={errors.sucursalNombre?.message} />
                         </div>
 
                         <div className="space-y-1.5 sm:col-span-2">
                           <Label>Dirección</Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="sucursalDireccion"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('sucursalDireccion') ?? ''}
                           />
                           <FieldError message={errors.sucursalDireccion?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Teléfono</Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="sucursalTelefono"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('sucursalTelefono') ?? ''}
                           />
                           <FieldError message={errors.sucursalTelefono?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Email</Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="sucursalEmail"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('sucursalEmail') ?? ''}
                           />
                           <FieldError message={errors.sucursalEmail?.message} />
                         </div>
@@ -719,84 +779,78 @@ export function EmpresasPage() {
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div className="space-y-1.5">
                           <Label>Username <span className="text-destructive">*</span></Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminUsername"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminUsername') ?? ''}
                           />
                           <FieldError message={errors.adminUsername?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Email</Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminEmail"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminEmail') ?? ''}
                           />
                           <FieldError message={errors.adminEmail?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Contraseña <span className="text-destructive">*</span></Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminPassword"
-                            render={({ field }) => (
-                              <Input {...field} type="password" value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminPassword') ?? ''}
+                            type="password"
                           />
                           <FieldError message={errors.adminPassword?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Teléfono</Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminTelefono"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminTelefono') ?? ''}
                           />
                           <FieldError message={errors.adminTelefono?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Nombres <span className="text-destructive">*</span></Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminNombres"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminNombres') ?? ''}
                           />
                           <FieldError message={errors.adminNombres?.message} />
                         </div>
 
                         <div className="space-y-1.5">
                           <Label>Apellidos <span className="text-destructive">*</span></Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminApellidos"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminApellidos') ?? ''}
                           />
                           <FieldError message={errors.adminApellidos?.message} />
                         </div>
 
                         <div className="space-y-1.5 sm:col-span-2">
                           <Label>Documento</Label>
-                          <Controller
-                            control={control}
+                          <NativeSyncInput
                             name="adminNumeroDocumento"
-                            render={({ field }) => (
-                              <Input {...field} value={field.value ?? ''} onChange={field.onChange} disabled={readOnly} />
-                            )}
+                            setValue={nativeSetValue}
+                            disabled={readOnly}
+                            defaultValue={getValues('adminNumeroDocumento') ?? ''}
                           />
                           <FieldError message={errors.adminNumeroDocumento?.message} />
                         </div>
