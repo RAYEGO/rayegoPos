@@ -336,11 +336,13 @@ function LotProductAutocomplete({
   value,
   onValueChange,
   onProductSelected,
+  fallbackProducts,
 }: {
   accessToken: string
   value: string
   onValueChange: (value: string) => void
   onProductSelected?: (product: ProductCatalogItem) => void
+  fallbackProducts?: ProductCatalogItem[]
 }) {
   const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
@@ -377,31 +379,16 @@ function LotProductAutocomplete({
       return
     }
 
-    const match = items.find((product) => product.id === value)
+    const match =
+      items.find((product) => product.id === value) ??
+      fallbackProducts?.find((product) => product.id === value) ??
+      null
+
     if (match) {
       setQuery(`${match.name} · ${match.sku}`)
-      return
+      onProductSelected?.(match)
     }
-
-    const handle = window.setTimeout(() => {
-      setIsLoading(true)
-      productsService
-        .get(accessToken, value)
-        .then((response) => {
-          const product = response.item
-          setQuery(`${product.name} · ${product.sku}`)
-          setItems((prev) => {
-            if (prev.some((entry) => entry.id === product.id)) return prev
-            return [product, ...prev].slice(0, 20)
-          })
-          onProductSelected?.(product)
-        })
-        .catch(() => {})
-        .finally(() => setIsLoading(false))
-    }, 120)
-
-    return () => window.clearTimeout(handle)
-  }, [accessToken, items, onProductSelected, value])
+  }, [fallbackProducts, items, onProductSelected, value])
 
   return (
     <div className="relative">
@@ -1323,6 +1310,7 @@ export function InventarioPage() {
                       accessToken={accessToken}
                       value={field.value ?? ''}
                       onValueChange={(value) => field.onChange(value)}
+                      fallbackProducts={dashboard.options.products}
                     />
                   )}
                 />
