@@ -2035,6 +2035,9 @@ export function ProductosPage() {
         <SidePanel
           open={isCreateDialogOpen}
           onOpenChange={(open) => {
+            if (!open && (isPackagingDialogOpen || isPackagingGuideOpen)) {
+              return
+            }
             setIsCreateDialogOpen(open)
             if (!open) {
               setEditingProduct(null)
@@ -2373,6 +2376,7 @@ export function ProductosPage() {
       {isPackagingDialogOpen ? (
         <Dialog
           open={isPackagingDialogOpen}
+          modal={false}
           onOpenChange={(open) => {
             setIsPackagingDialogOpen(open)
             if (!open) {
@@ -2382,7 +2386,10 @@ export function ProductosPage() {
             }
           }}
         >
-        <DialogContent className="bottom-0 left-0 top-auto flex h-[94vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-3 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[86vh] sm:max-h-[86vh] sm:w-[92vw] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-4">
+        <DialogContent
+          onInteractOutside={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          className="bottom-0 left-0 top-auto flex h-[94vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-3 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[86vh] sm:max-h-[86vh] sm:w-[92vw] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-4">
           <DialogHeader className="shrink-0 space-y-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
