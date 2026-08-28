@@ -37,6 +37,20 @@ export type UpdateUserPayload = Omit<CreateUserPayload, 'password'> & {
   password?: string
 }
 
+export type RemoveUserResult =
+  | {
+      kind: 'DELETED'
+      id: string
+      username: string
+      message: string
+    }
+  | {
+      kind: 'DEACTIVATED'
+      id: string
+      username: string
+      message: string
+    }
+
 export const usersService = {
   list(accessToken: string) {
     return apiRequest<UsersModuleUserRecord[]>('/api/users', {
@@ -57,6 +71,13 @@ export const usersService = {
       method: 'PUT',
       accessToken,
       body: payload,
+    })
+  },
+
+  remove(accessToken: string, userId: string) {
+    return apiRequest<RemoveUserResult>(`/api/users/${userId}`, {
+      method: 'DELETE',
+      accessToken,
     })
   },
 }

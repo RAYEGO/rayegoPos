@@ -3,7 +3,11 @@ import { hash } from 'bcryptjs'
 import type { FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
+import {
+  getAuthContext,
+  requireBranchAuthContext,
+  requirePermission,
+} from '../../lib/auth.js'
 import type { AuthRole } from '../auth/auth.types.js'
 
 const SALT_ROUNDS = 12
@@ -16,6 +20,15 @@ function createHttpError(statusCode: number, message: string): HttpError {
   return error
 }
 
+export const AUTH_ROLE_CODES = [
+  'ADMIN_POS',
+  'ADMIN_EMPRESA',
+  'ADMIN',
+  'SUPERVISOR',
+  'CAJERO',
+  'ALMACEN',
+] as const
+
 export const createUserSchema = z.object({
   firstName: z.string().min(1, 'Nombres es obligatorio.').max(120),
   lastName: z.string().min(1, 'Apellidos es obligatorio.').max(120),
@@ -25,8 +38,8 @@ export const createUserSchema = z.object({
   email: z.string().min(1, 'Correo es obligatorio.').email('Correo inválido.').max(150),
   username: z.string().min(1, 'Usuario es obligatorio.').max(50),
   password: z.string().min(8, 'Contraseña debe tener mínimo 8 caracteres.').max(255),
-  role: z.enum(['ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
-  branchIds: z.array(z.string().uuid('Sucursal inválida.')).min(1, 'Asigna al menos una sucursal activa.'),
+  role: z.enum(AUTH_ROLE_CODES),
+  branchIds: z.array(z.string().uuid('Sucursal inválida.')).default([]),
   isActive: z.boolean().default(true),
   mustChangePassword: z.boolean().default(false),
 })
@@ -175,7 +188,7 @@ function toUserRecord(
 ): UsersListUserRecord {
   const roles = raw.usuariosRoles
     .map((ur) => ur.rol.codigo)
-    .filter((c): c is AuthRole => ['ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN'].includes(c))
+    .filter((c): c is AuthRole => AUTH_ROLE_CODES.includes(c as AuthRole))
   const primaryRole: AuthRole = (roles[0] as AuthRole) ?? 'CAJERO'
 
   return {
@@ -259,15 +272,34 @@ export async function createUser(
   payload: CreateUserPayload,
   request: FastifyRequest,
 ): Promise<UsersListUserRecord> {
-  const { companyId, userId: currentUserId } = await requireBranchAuthContext(request)
+  const authCtx = await getAuthContext(request)
   requirePermission(request, 'usuarios.manage')
+
+  const isPlatform = authCtx.isPlatformAdmin
+  const companyId = isPlatform ? undefined : authCtx.companyId
+
+  if (!isPlatform && !companyId) {
+    throw createHttpError(409, 'Esta operación requiere una empresa activa en la sesión.')
+  }
+
+  const requiresBranches = payload.role !== 'ADMIN_POS'
+
+  if (payload.role === 'ADMIN_POS' && !isPlatform) {
+    throw createHttpError(403, 'Solo el administrador de plataforma puede crear ADMIN_POS.')
+  }
 
   const rol = await resolveRoleByCodigo(payload.role)
 
-  const { ids: validatedBranchIds } = await validateBranchOwnershipAndAvailability(
-    payload.branchIds,
-    companyId,
-  )
+  let validatedBranchIds: string[] = []
+  if (requiresBranches) {
+    if (!companyId) {
+      throw createHttpError(400, 'Este rol requiere asignar sucursales a una empresa.')
+    }
+    const validated = await validateBranchOwnershipAndAvailability(payload.branchIds, companyId)
+    validatedBranchIds = validated.ids
+  }
+
+  const currentUserId = authCtx.userId
 
   const existingUsername = await prisma.usuario.findFirst({
     where: { username: payload.username.trim(), deletedAt: null },
@@ -320,17 +352,19 @@ export async function createUser(
       },
     })
 
-    await tx.usuarioSucursal.createMany({
-      data: validatedBranchIds.map((sucursalId) => ({
-        usuarioId: created.id,
-        sucursalId,
-        rolId: rol.id,
-        activo: true,
-        createdById: currentUserId,
-        updatedById: currentUserId,
-      })),
-      skipDuplicates: true,
-    })
+    if (validatedBranchIds.length > 0) {
+      await tx.usuarioSucursal.createMany({
+        data: validatedBranchIds.map((sucursalId) => ({
+          usuarioId: created.id,
+          sucursalId,
+          rolId: rol.id,
+          activo: true,
+          createdById: currentUserId,
+          updatedById: currentUserId,
+        })),
+        skipDuplicates: true,
+      })
+    }
 
     return created
   })
@@ -378,18 +412,34 @@ export async function updateUser(
   payload: UpdateUserPayload,
   request: FastifyRequest,
 ): Promise<UsersListUserRecord> {
-  const { companyId, userId: currentUserId } = await requireBranchAuthContext(request)
+  const authCtx = await getAuthContext(request)
   requirePermission(request, 'usuarios.manage')
 
+  const isPlatform = authCtx.isPlatformAdmin
+  const companyId = isPlatform ? undefined : authCtx.companyId
+
+  if (!isPlatform && !companyId) {
+    throw createHttpError(409, 'Esta operación requiere una empresa activa en la sesión.')
+  }
+
+  const userWhere: { id: string; empresaId?: string; deletedAt: null } = {
+    id: userId,
+    deletedAt: null,
+  }
+  if (companyId) {
+    userWhere.empresaId = companyId
+  }
+
   const existing = await prisma.usuario.findFirst({
-    where: { id: userId, empresaId: companyId, deletedAt: null },
+    where: userWhere,
     select: {
       id: true,
       username: true,
       email: true,
+      empresaId: true,
       usuariosRoles: {
         where: { activo: true, deletedAt: null },
-        select: { id: true, rolId: true },
+        select: { id: true, rolId: true, rol: { select: { codigo: true } } },
       },
       usuarioSucursales: {
         where: { activo: true, deletedAt: null },
@@ -399,18 +449,37 @@ export async function updateUser(
   })
 
   if (!existing) {
-    throw createHttpError(404, 'Usuario no encontrado en la empresa.')
+    throw createHttpError(404, 'Usuario no encontrado.')
   }
+
+  const currentPrimaryRoleCodigo = (existing.usuariosRoles[0]?.rol?.codigo as AuthRole) ?? 'CAJERO'
+
+  if (currentPrimaryRoleCodigo === 'ADMIN_POS' && payload.role !== 'ADMIN_POS' && !isPlatform) {
+    throw createHttpError(403, 'Solo el administrador de plataforma puede cambiar el rol de un ADMIN_POS.')
+  }
+  if (payload.role === 'ADMIN_POS' && !isPlatform) {
+    throw createHttpError(403, 'Solo el administrador de plataforma puede asignar el rol ADMIN_POS.')
+  }
+
+  const requiresBranches = payload.role !== 'ADMIN_POS'
 
   const rol = await resolveRoleByCodigo(payload.role)
 
-  const branchIdsForValidation = Array.isArray(payload.branchIds)
-    ? payload.branchIds
-    : []
-  const { ids: validatedBranchIds } = await validateBranchOwnershipAndAvailability(
-    branchIdsForValidation,
-    companyId,
-  )
+  const branchIdsForValidation = Array.isArray(payload.branchIds) ? payload.branchIds : []
+  let validatedBranchIds: string[] = []
+  if (requiresBranches) {
+    const effectiveCompanyId = companyId ?? existing.empresaId
+    if (!effectiveCompanyId) {
+      throw createHttpError(400, 'Este rol requiere asignar sucursales a una empresa.')
+    }
+    const validated = await validateBranchOwnershipAndAvailability(
+      branchIdsForValidation,
+      effectiveCompanyId,
+    )
+    validatedBranchIds = validated.ids
+  }
+
+  const currentUserId = authCtx.userId
 
   if (payload.username && payload.username.trim() !== existing.username) {
     const collision = await prisma.usuario.findFirst({
@@ -473,49 +542,61 @@ export async function updateUser(
       })
     }
 
-    const previousBranchIds = new Set(existing.usuarioSucursales.map((u) => u.sucursalId))
-    const nextBranchIds = new Set(validatedBranchIds)
+    if (requiresBranches) {
+      const previousBranchIds = new Set(existing.usuarioSucursales.map((u) => u.sucursalId))
+      const nextBranchIds = new Set(validatedBranchIds)
 
-    const toRemove = existing.usuarioSucursales.filter(
-      (u) => !nextBranchIds.has(u.sucursalId),
-    )
-    if (toRemove.length > 0) {
-      await tx.usuarioSucursal.updateMany({
-        where: { id: { in: toRemove.map((u) => u.id) } },
-        data: {
-          activo: false,
-          deletedAt: new Date(),
-          updatedById: currentUserId,
-        },
-      })
-    }
+      const toRemove = existing.usuarioSucursales.filter((u) => !nextBranchIds.has(u.sucursalId))
+      if (toRemove.length > 0) {
+        await tx.usuarioSucursal.updateMany({
+          where: { id: { in: toRemove.map((u) => u.id) } },
+          data: {
+            activo: false,
+            deletedAt: new Date(),
+            updatedById: currentUserId,
+          },
+        })
+      }
 
-    const toAdd = validatedBranchIds.filter((id) => !previousBranchIds.has(id))
-    if (toAdd.length > 0) {
-      await tx.usuarioSucursal.createMany({
-        data: toAdd.map((sucursalId) => ({
-          usuarioId: userId,
-          sucursalId,
-          rolId: rol.id,
-          activo: true,
-          createdById: currentUserId,
-          updatedById: currentUserId,
-        })),
-        skipDuplicates: true,
-      })
-    }
+      const toAdd = validatedBranchIds.filter((id) => !previousBranchIds.has(id))
+      if (toAdd.length > 0) {
+        await tx.usuarioSucursal.createMany({
+          data: toAdd.map((sucursalId) => ({
+            usuarioId: userId,
+            sucursalId,
+            rolId: rol.id,
+            activo: true,
+            createdById: currentUserId,
+            updatedById: currentUserId,
+          })),
+          skipDuplicates: true,
+        })
+      }
 
-    const toUpdateRol = existing.usuarioSucursales.filter(
-      (u) => nextBranchIds.has(u.sucursalId) && u.rolId !== rol.id,
-    )
-    if (toUpdateRol.length > 0) {
-      await tx.usuarioSucursal.updateMany({
-        where: { id: { in: toUpdateRol.map((u) => u.id) } },
-        data: {
-          rolId: rol.id,
-          updatedById: currentUserId,
-        },
-      })
+      const toUpdateRol = existing.usuarioSucursales.filter(
+        (u) => nextBranchIds.has(u.sucursalId) && u.rolId !== rol.id,
+      )
+      if (toUpdateRol.length > 0) {
+        await tx.usuarioSucursal.updateMany({
+          where: { id: { in: toUpdateRol.map((u) => u.id) } },
+          data: {
+            rolId: rol.id,
+            updatedById: currentUserId,
+          },
+        })
+      }
+    } else {
+      // ADMIN_POS: no necesita sucursales; marcamos las existentes como borradas
+      if (existing.usuarioSucursales.length > 0) {
+        await tx.usuarioSucursal.updateMany({
+          where: { id: { in: existing.usuarioSucursales.map((u) => u.id) } },
+          data: {
+            activo: false,
+            deletedAt: new Date(),
+            updatedById: currentUserId,
+          },
+        })
+      }
     }
   })
 
@@ -558,4 +639,167 @@ export async function updateUser(
   })
 
   return toUserRecord(updated)
+}
+
+export type RemoveUserResult =
+  | {
+      kind: 'DELETED'
+      id: string
+      username: string
+      message: string
+    }
+  | {
+      kind: 'DEACTIVATED'
+      id: string
+      username: string
+      message: string
+    }
+
+/**
+ * Elimina o desactiva un usuario según sus dependencias históricas.
+ *
+ * Reglas:
+ * - NO se permite eliminar/desactivar al usuario actual (auto-protección).
+ * - NO se permite tocar ADMIN_POS a menos que el solicitante sea platform admin
+ *   (y nunca puede ser sí mismo).
+ * - Si el usuario tiene registros en ventas, caja, compras, conciliaciones,
+ *   arqueos, auditoría, etc. → se DESACTIVA (activo=false), NO se borra.
+ * - Si el usuario no tiene dependencias históricas → se soft-delete físico
+ *   (deletedAt, no hard DELETE) para preservar trazabilidad.
+ * - Las relaciones UsuarioRol y UsuarioSucursal siempre se marcan deletedAt
+ *   (independientemente del camino), para evitar login/autorización residual.
+ */
+export async function removeOrDeactivateUser(
+  userId: string,
+  request: FastifyRequest,
+): Promise<RemoveUserResult> {
+  const authCtx = await getAuthContext(request)
+  requirePermission(request, 'usuarios.manage')
+
+  if (userId === authCtx.userId) {
+    throw createHttpError(400, 'No puedes eliminar o desactivar tu propia cuenta.')
+  }
+
+  const isPlatform = authCtx.isPlatformAdmin
+  const companyId = isPlatform ? undefined : authCtx.companyId
+
+  const userWhere: { id: string; empresaId?: string; deletedAt: null } = {
+    id: userId,
+    deletedAt: null,
+  }
+  if (companyId) {
+    userWhere.empresaId = companyId
+  }
+
+  const target = await prisma.usuario.findFirst({
+    where: userWhere,
+    select: {
+      id: true,
+      username: true,
+      usuariosRoles: {
+        where: { activo: true, deletedAt: null },
+        select: { rol: { select: { codigo: true } } },
+      },
+    },
+  })
+  if (!target) {
+    throw createHttpError(404, 'Usuario no encontrado.')
+  }
+
+  const targetRoles = target.usuariosRoles.map((r) => r.rol.codigo)
+  const isTargetAdminPos = targetRoles.includes('ADMIN_POS')
+  const isTargetAdminEmpresa = targetRoles.includes('ADMIN_EMPRESA')
+
+  if (isTargetAdminPos && !isPlatform) {
+    throw createHttpError(
+      403,
+      'Solo el administrador de plataforma puede administrar usuarios ADMIN_POS.',
+    )
+  }
+  if (isTargetAdminEmpresa && !isPlatform && target.usuariosRoles[0]?.rol?.codigo !== 'ADMIN_EMPRESA') {
+    // ya está cubierto por el where empresaId = companyId; check defensivo
+  }
+  if (userId === authCtx.userId) {
+    throw createHttpError(400, 'No puedes eliminar o desactivar tu propia cuenta.')
+  }
+
+  const counts = await Promise.all([
+    prisma.venta.count({ where: { usuarioResponsableId: userId } }),
+    prisma.aperturaCaja.count({ where: { usuarioId: userId } }),
+    prisma.cierreCaja.count({ where: { usuarioId: userId } }),
+    prisma.arqueoCaja.count({ where: { usuarioId: userId } }),
+    prisma.conciliacionCaja.count({ where: { usuarioId: userId } }),
+    prisma.compra.count({ where: { usuarioResponsableId: userId } }),
+    prisma.auditoria.count({ where: { usuarioId: userId } }),
+    prisma.usuario.count({ where: { createdById: userId, deletedAt: null } }),
+  ])
+  const hasHistoricalDependencies = counts.some((n) => n > 0)
+
+  const currentUserId = authCtx.userId
+
+  await prisma.$transaction(async (tx) => {
+    // Bloqueamos roles y sucursales siempre (para no poder autenticarse)
+    await tx.usuarioRol.updateMany({
+      where: { usuarioId: userId, deletedAt: null },
+      data: {
+        activo: false,
+        deletedAt: new Date(),
+        updatedById: currentUserId,
+      },
+    })
+    await tx.usuarioSucursal.updateMany({
+      where: { usuarioId: userId, deletedAt: null },
+      data: {
+        activo: false,
+        deletedAt: new Date(),
+        updatedById: currentUserId,
+      },
+    })
+
+    if (hasHistoricalDependencies) {
+      await tx.usuario.update({
+        where: { id: userId },
+        data: {
+          activo: false,
+          updatedById: currentUserId,
+        },
+      })
+    } else {
+      // Soft-delete (deletedAt) — NO hard delete, para preservar FKs nullable.
+      await tx.usuario.update({
+        where: { id: userId },
+        data: {
+          activo: false,
+          deletedAt: new Date(),
+          updatedById: currentUserId,
+        },
+      })
+    }
+  })
+
+  await writeAudit(request, {
+    userId: currentUserId,
+    action: hasHistoricalDependencies ? AccionAuditoria.UPDATE : AccionAuditoria.DELETE,
+    table: 'usuarios',
+    recordId: userId,
+    previousValue: { username: target.username, hasHistoricalDependencies },
+    nextValue: { action: hasHistoricalDependencies ? 'DEACTIVATED' : 'DELETED_SOFT' },
+  })
+
+  if (hasHistoricalDependencies) {
+    return {
+      kind: 'DEACTIVATED',
+      id: target.id,
+      username: target.username,
+      message:
+        'Este usuario tiene registros históricos y fue desactivado en lugar de eliminado. Seguirá apareciendo en reportes históricos.',
+    }
+  }
+  return {
+    kind: 'DELETED',
+    id: target.id,
+    username: target.username,
+    message:
+      'El usuario no tenía dependencias históricas y fue eliminado de forma segura (soft-delete).',
+  }
 }

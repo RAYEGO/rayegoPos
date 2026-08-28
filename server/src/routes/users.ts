@@ -4,6 +4,7 @@ import {
   createUser,
   createUserSchema,
   listUsersForCompany,
+  removeOrDeactivateUser,
   updateUser,
   updateUserSchema,
 } from '../modules/users/users.service.js'
@@ -24,6 +25,11 @@ export const usersRoutes: FastifyPluginAsync = async (app) => {
     const params = userIdParamSchema.parse(request.params)
     const body = updateUserSchema.parse(request.body)
     return updateUser(params.id, body, request)
+  })
+
+  app.delete('/:id', async (request) => {
+    const params = userIdParamSchema.parse(request.params)
+    return removeOrDeactivateUser(params.id, request)
   })
 }
 

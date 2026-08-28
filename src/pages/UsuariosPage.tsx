@@ -2,7 +2,15 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Edit, MoreVertical, Search, UserPlus, Users2, X } from 'lucide-react'
+import { Edit, MoreVertical, Search, Trash2, UserPlus, Users2, X } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { RoleBadge } from '@/components/auth/RoleBadge'
 import { Badge } from '@/components/ui/badge'
@@ -135,6 +143,9 @@ export function UsuariosPage() {
   const [_loadingBranches, setLoadingBranches] = useState(false)
   const [_loadingUsers, setLoadingUsers] = useState(false)
   const [submittingUserForm, setSubmittingUserForm] = useState(false)
+  const [isRemoveConfirmOpen, setIsRemoveConfirmOpen] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<UsersModuleUserRecord | null>(null)
+  const [isRemoving, setIsRemoving] = useState(false)
 
   const loadBranches = useCallback(async () => {
     if (!accessToken) return
@@ -296,6 +307,33 @@ export function UsuariosPage() {
       })
     } finally {
       setSubmittingUserForm(false)
+    }
+  }
+
+  async function onConfirmRemoveUser() {
+    if (!accessToken || !removeTarget) return
+    try {
+      setIsRemoving(true)
+      const result = await usersService.remove(accessToken, removeTarget.id)
+      if (result.kind === 'DELETED') {
+        toast.success(result.message)
+      } else {
+        toast.success(result.message, {
+          description: 'El usuario ha sido desactivado por tener registros históricos.',
+        })
+      }
+      await loadUsers()
+      if (editingUser?.id === removeTarget.id) {
+        closeUserDialog()
+      }
+      setIsRemoveConfirmOpen(false)
+      setRemoveTarget(null)
+    } catch (error) {
+      toast.error('No se pudo procesar la solicitud.', {
+        description: error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+      })
+    } finally {
+      setIsRemoving(false)
     }
   }
 
@@ -590,9 +628,35 @@ export function UsuariosPage() {
                                     </DropdownMenuItem>
                                   }
                                 >
-                                  <DropdownMenuItem onClick={() => openEditUserDialog(user)}>
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      setTimeout(() => openEditUserDialog(user), 0)
+                                    }
+                                  >
                                     <Edit className="h-4 w-4" />
                                     Editar
+                                  </DropdownMenuItem>
+                                </AuthorizationGate>
+                                <AuthorizationGate
+                                  permission="usuarios.manage"
+                                  fallback={
+                                    <DropdownMenuItem disabled>
+                                      <Trash2 className="h-4 w-4" />
+                                      Eliminar usuario
+                                    </DropdownMenuItem>
+                                  }
+                                >
+                                  <DropdownMenuItem
+                                    disabled={
+                                      user.primaryRole === 'ADMIN_POS' && !hasRole('ADMIN_POS')
+                                    }
+                                    onSelect={() => {
+                                      setRemoveTarget(user)
+                                      setIsRemoveConfirmOpen(true)
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    Eliminar usuario
                                   </DropdownMenuItem>
                                 </AuthorizationGate>
                               </DropdownMenuContent>
@@ -915,6 +979,58 @@ export function UsuariosPage() {
           </SidePanelContent>
           </SidePanel>
         ) : null}
+
+        <Dialog
+          open={isRemoveConfirmOpen}
+          onOpenChange={(open) => {
+            if (!isRemoving) {
+              setIsRemoveConfirmOpen(open)
+              if (!open) setRemoveTarget(null)
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>¿Eliminar usuario?</DialogTitle>
+              <DialogDescription>
+                {removeTarget ? (
+                  <>
+                    Esta acción afectará a <strong className="text-foreground">@{removeTarget.username}</strong> ({getUserFullName(removeTarget)}).
+                    <br />
+                    <br />
+                    Si el usuario tiene ventas, movimientos de caja, auditoría u otras operaciones históricas, será <strong className="text-foreground">desactivado</strong> en lugar de eliminado para preservar la integridad de los datos.
+                    <br />
+                    <br />
+                    Esta acción no se puede deshacer.
+                  </>
+                ) : (
+                  'Esta acción no se puede deshacer.'
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isRemoving}
+                onClick={() => {
+                  setIsRemoveConfirmOpen(false)
+                  setRemoveTarget(null)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isRemoving || !can('usuarios.manage')}
+                onClick={() => void onConfirmRemoveUser()}
+              >
+                {isRemoving ? 'Procesando…' : 'Eliminar'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </AuthorizationGate>
     </div>
   )
