@@ -39,7 +39,6 @@ export const SidePanelContent = React.forwardRef<
         'fixed inset-y-0 right-0 z-[50] flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
         className,
       )}
-      trapFocus
       onOpenAutoFocus={(event) => {
         const root = event.currentTarget as HTMLElement | null
         if (!root) return
