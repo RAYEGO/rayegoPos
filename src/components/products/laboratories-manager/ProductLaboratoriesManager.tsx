@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, Clock3, Copy, Download, Edit, MoreVertical, Package, Plus, Power, Search, Trash2, Upload } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
@@ -266,16 +266,22 @@ function LaboratoryForm({
     return selected.description
   }, [selected])
 
-  const [name, setName] = useState(resolvedName)
-  const [description, setDescription] = useState(resolvedDescription)
-  const [active, setActive] = useState(selected?.active ?? true)
+  const resolvedActive = useMemo(() => selected?.active ?? true, [selected?.active])
+
+  const nameRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const [active, setActive] = useState(resolvedActive)
+  const [generatedCode, setGeneratedCode] = useState(() =>
+    resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code),
+  )
+  const openKeyRef = useRef(0)
 
   useEffect(() => {
     if (!open) return
-    setName(resolvedName)
-    setDescription(resolvedDescription)
-    setActive(selected?.active ?? true)
-  }, [open, resolvedDescription, resolvedName, selected?.active])
+    openKeyRef.current += 1
+    setActive(resolvedActive)
+    setGeneratedCode(resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code))
+  }, [open, resolvedActive, resolvedName, existingCodes, selected?.code])
 
   const title =
     mode === 'edit' ? 'Editar laboratorio' : mode === 'duplicate' ? 'Duplicar laboratorio' : 'Nuevo laboratorio'
@@ -285,10 +291,7 @@ function LaboratoryForm({
       ? 'Actualiza la información del laboratorio seleccionado.'
       : 'Crea un laboratorio para el catálogo de productos.'
 
-  const generatedCode = useMemo(
-    () => resolveUniqueCodePreview(name, existingCodes, selected?.code),
-    [existingCodes, name, selected?.code],
-  )
+  const currentOpenKey = openKeyRef.current
 
   return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -301,15 +304,25 @@ function LaboratoryForm({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Nombre *</p>
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
+            <Input
+              key={`name-${currentOpenKey}`}
+              ref={nameRef}
+              defaultValue={resolvedName}
+              onInput={(event) => {
+                setGeneratedCode(
+                  resolveUniqueCodePreview(event.currentTarget.value, existingCodes, selected?.code),
+                )
+              }}
+            />
             <p className="text-xs text-muted-foreground">Código generado: {generatedCode}</p>
           </div>
 
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Descripción</p>
             <Textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              key={`desc-${currentOpenKey}`}
+              ref={descriptionRef}
+              defaultValue={resolvedDescription}
               rows={3}
             />
           </div>
@@ -329,11 +342,13 @@ function LaboratoryForm({
           </Button>
           <Button
             type="button"
-            disabled={!normalizeText(name)}
             onClick={() => {
+              const name = normalizeText(nameRef.current?.value ?? '')
+              const description = normalizeText(descriptionRef.current?.value ?? '')
+              if (!name) return
               onSubmit({
-                name: normalizeText(name),
-                description: normalizeText(description),
+                name,
+                description,
                 active,
               })
             }}

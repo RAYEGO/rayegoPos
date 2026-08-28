@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, Copy, Edit, MoreVertical, Package, Plus, Power, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -106,14 +106,22 @@ function ActivePrincipleFormDialog({
   selected: ActivePrincipleRecord | null
   onSubmit: (payload: UpsertMasterActivePrinciplePayload) => void
 }) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [active, setActive] = useState(true)
+  const nameRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const openKeyRef = useRef(0)
+
+  const resolvedName = useMemo(() => {
+    if (!selected) return ''
+    return mode === 'duplicate' ? `${selected.name} (Copia)` : selected.name
+  }, [mode, selected])
+
+  const resolvedDescription = useMemo(() => selected?.description ?? '', [selected])
+
+  const [active, setActive] = useState(selected?.active ?? true)
 
   useEffect(() => {
     if (!open) return
-    setName(mode === 'duplicate' ? `${selected?.name ?? ''} (Copia)` : selected?.name ?? '')
-    setDescription(selected?.description ?? '')
+    openKeyRef.current += 1
     setActive(selected?.active ?? true)
   }, [mode, open, selected])
 
@@ -136,12 +144,21 @@ function ActivePrincipleFormDialog({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Nombre *</p>
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
+            <Input
+              key={`ap-name-${openKeyRef.current}`}
+              ref={nameRef}
+              defaultValue={resolvedName}
+            />
           </div>
 
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Descripción</p>
-            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+            <Textarea
+              key={`ap-desc-${openKeyRef.current}`}
+              ref={descriptionRef}
+              defaultValue={resolvedDescription}
+              rows={3}
+            />
           </div>
 
           <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
@@ -161,14 +178,15 @@ function ActivePrincipleFormDialog({
           </Button>
           <Button
             type="button"
-            disabled={!name.trim()}
-            onClick={() =>
+            onClick={() => {
+              const rawName = (nameRef.current?.value ?? '').trim()
+              if (!rawName) return
               onSubmit({
-                nombre: name.trim(),
-                descripcion: description.trim() || undefined,
+                nombre: rawName,
+                descripcion: (descriptionRef.current?.value ?? '').trim() || undefined,
                 activo: active,
               })
-            }
+            }}
           >
             Guardar
           </Button>

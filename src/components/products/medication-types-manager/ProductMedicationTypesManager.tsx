@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, Clock3, Copy, Download, Edit, MoreVertical, Package, Plus, Power, Search, Trash2, Upload } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
@@ -248,6 +248,10 @@ function MedicationTypeForm({
   existingCodes: Set<string>
   onSubmit: (payload: MedicationTypeFormSubmitPayload) => void
 }) {
+  const nameRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const openKeyRef = useRef(0)
+
   const resolvedName = useMemo(() => {
     if (!selected) return ''
     return mode === 'duplicate' ? `${selected.name} (Copia)` : selected.name
@@ -255,21 +259,15 @@ function MedicationTypeForm({
 
   const resolvedDescription = useMemo(() => selected?.description ?? '', [selected])
 
-  const [name, setName] = useState(resolvedName)
-  const [description, setDescription] = useState(resolvedDescription)
   const [active, setActive] = useState(selected?.active ?? true)
+  const [codePreview, setCodePreview] = useState(() => resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code))
 
   useEffect(() => {
     if (!open) return
-    setName(resolvedName)
-    setDescription(resolvedDescription)
+    openKeyRef.current += 1
     setActive(selected?.active ?? true)
-  }, [open, resolvedDescription, resolvedName, selected?.active])
-
-  const generatedCode = useMemo(
-    () => resolveUniqueCodePreview(name, existingCodes, selected?.code),
-    [existingCodes, name, selected?.code],
-  )
+    setCodePreview(resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code))
+  }, [open, resolvedDescription, resolvedName, selected?.active, existingCodes, selected?.code])
 
   return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -290,13 +288,23 @@ function MedicationTypeForm({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Nombre *</p>
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
-            <p className="text-xs text-muted-foreground">Código generado: {generatedCode}</p>
+            <Input
+              key={`medtype-name-${openKeyRef.current}`}
+              ref={nameRef}
+              defaultValue={resolvedName}
+              onInput={(e) => setCodePreview(resolveUniqueCodePreview(e.currentTarget.value, existingCodes, selected?.code))}
+            />
+            <p className="text-xs text-muted-foreground">Código generado: {codePreview}</p>
           </div>
 
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Descripción</p>
-            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+            <Textarea
+              key={`medtype-desc-${openKeyRef.current}`}
+              ref={descriptionRef}
+              defaultValue={resolvedDescription}
+              rows={3}
+            />
           </div>
 
           <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
@@ -316,14 +324,15 @@ function MedicationTypeForm({
           </Button>
           <Button
             type="button"
-            disabled={!normalizeText(name)}
-            onClick={() =>
+            onClick={() => {
+              const rawName = normalizeText(nameRef.current?.value ?? '')
+              if (!rawName) return
               onSubmit({
-                name: normalizeText(name),
-                description: normalizeText(description),
+                name: rawName,
+                description: normalizeText(descriptionRef.current?.value ?? ''),
                 active,
               })
-            }
+            }}
           >
             Guardar
           </Button>

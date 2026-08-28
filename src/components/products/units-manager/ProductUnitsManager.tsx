@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, Clock3, Copy, Download, Edit, MoreVertical, Package, Plus, Power, Search, Trash2, Upload } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
@@ -266,6 +266,11 @@ function UnitForm({
   existingSymbols: Set<string>
   onSubmit: (payload: UnitFormSubmitPayload) => void
 }) {
+  const nameRef = useRef<HTMLInputElement>(null)
+  const symbolRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const openKeyRef = useRef(0)
+
   const resolvedName = useMemo(() => {
     if (!selected) return ''
     return mode === 'duplicate' ? `${selected.name} (Copia)` : selected.name
@@ -281,18 +286,17 @@ function UnitForm({
     return selected.symbol
   }, [selected])
 
-  const [name, setName] = useState(resolvedName)
-  const [description, setDescription] = useState(resolvedDescription)
-  const [symbol, setSymbol] = useState(resolvedSymbol)
   const [active, setActive] = useState(selected?.active ?? true)
+  const [codePreview, setCodePreview] = useState(() => resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code))
+  const [symbolPreview, setSymbolPreview] = useState(resolvedSymbol)
 
   useEffect(() => {
     if (!open) return
-    setName(resolvedName)
-    setDescription(resolvedDescription)
-    setSymbol(resolvedSymbol)
+    openKeyRef.current += 1
     setActive(selected?.active ?? true)
-  }, [open, resolvedDescription, resolvedName, resolvedSymbol, selected?.active])
+    setCodePreview(resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code))
+    setSymbolPreview(resolvedSymbol)
+  }, [open, resolvedDescription, resolvedName, resolvedSymbol, selected?.active, existingCodes, selected?.code])
 
   const title =
     mode === 'edit' ? 'Editar unidad de medida' : mode === 'duplicate' ? 'Duplicar unidad de medida' : 'Nueva unidad de medida'
@@ -302,12 +306,7 @@ function UnitForm({
       ? 'Actualiza la información de la unidad seleccionada.'
       : 'Crea una unidad para estandarizar el catálogo de productos.'
 
-  const generatedCode = useMemo(
-    () => resolveUniqueCodePreview(name, existingCodes, selected?.code),
-    [existingCodes, name, selected?.code],
-  )
-
-  const normalizedSymbol = useMemo(() => normalizeUnitSymbol(symbol, 20), [symbol])
+  const normalizedSymbol = useMemo(() => normalizeUnitSymbol(symbolPreview, 20), [symbolPreview])
   const isSymbolTaken = useMemo(() => {
     if (!normalizedSymbol) return false
     if (selected?.symbol && normalizeUnitSymbol(selected.symbol, 20) === normalizedSymbol) {
@@ -327,16 +326,23 @@ function UnitForm({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Nombre *</p>
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
-            <p className="text-xs text-muted-foreground">Código generado: {generatedCode}</p>
+            <Input
+              key={`unit-name-${openKeyRef.current}`}
+              ref={nameRef}
+              defaultValue={resolvedName}
+              onInput={(e) => setCodePreview(resolveUniqueCodePreview(e.currentTarget.value, existingCodes, selected?.code))}
+            />
+            <p className="text-xs text-muted-foreground">Código generado: {codePreview}</p>
           </div>
 
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Abreviatura *</p>
             <Input
-              value={symbol}
-              onChange={(event) => setSymbol(event.target.value)}
+              key={`unit-symbol-${openKeyRef.current}`}
+              ref={symbolRef}
+              defaultValue={resolvedSymbol}
               placeholder="und / ml / g / tab"
+              onInput={(e) => setSymbolPreview(e.currentTarget.value)}
             />
             {isSymbolTaken ? (
               <p className="text-xs text-destructive">La abreviatura ya existe.</p>
@@ -349,7 +355,12 @@ function UnitForm({
 
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Descripción</p>
-            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+            <Textarea
+              key={`unit-desc-${openKeyRef.current}`}
+              ref={descriptionRef}
+              defaultValue={resolvedDescription}
+              rows={3}
+            />
           </div>
 
           <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-3">
@@ -367,12 +378,20 @@ function UnitForm({
           </Button>
           <Button
             type="button"
-            disabled={!normalizeText(name) || !normalizedSymbol || isSymbolTaken}
             onClick={() => {
+              const rawName = normalizeText(nameRef.current?.value ?? '')
+              const rawSymbol = normalizeUnitSymbol(symbolRef.current?.value ?? '', 20)
+              if (!rawName || !rawSymbol) return
+              const finalSymbolTaken = (() => {
+                if (!rawSymbol) return false
+                if (selected?.symbol && normalizeUnitSymbol(selected.symbol, 20) === rawSymbol) return false
+                return existingSymbols.has(rawSymbol)
+              })()
+              if (finalSymbolTaken) return
               onSubmit({
-                name: normalizeText(name),
-                symbol: normalizedSymbol,
-                description: normalizeText(description),
+                name: rawName,
+                symbol: rawSymbol,
+                description: normalizeText(descriptionRef.current?.value ?? ''),
                 active,
               })
             }}

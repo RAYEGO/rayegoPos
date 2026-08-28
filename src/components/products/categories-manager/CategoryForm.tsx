@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -51,16 +51,21 @@ export function CategoryForm({
     return selected.description
   }, [selected])
 
-  const [name, setName] = useState(resolvedName)
-  const [description, setDescription] = useState(resolvedDescription)
-  const [active, setActive] = useState(selected?.active ?? true)
+  const resolvedActive = useMemo(() => selected?.active ?? true, [selected?.active])
+
+  const nameRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const [active, setActive] = useState(resolvedActive)
+  const [codePreview, setCodePreview] = useState(() => generateCategoryCodeFromName(resolvedName))
+  const openKeyRef = useRef(0)
 
   useEffect(() => {
     if (!open) return
-    setName(resolvedName)
-    setDescription(resolvedDescription)
-    setActive(selected?.active ?? true)
-  }, [open, resolvedDescription, resolvedName, selected?.active])
+    openKeyRef.current += 1
+    setActive(resolvedActive)
+    setCodePreview(generateCategoryCodeFromName(resolvedName))
+    // Reset uncontrolled input native values to defaults using key pattern below
+  }, [open, resolvedActive, resolvedName])
 
   const title =
     mode === 'edit'
@@ -74,7 +79,7 @@ export function CategoryForm({
       ? 'Actualiza la información de la categoría seleccionada.'
       : 'Crea una categoría para el catálogo de productos.'
 
-  const generatedCode = useMemo(() => generateCategoryCodeFromName(name), [name])
+  const currentOpenKey = openKeyRef.current
 
   return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -87,15 +92,23 @@ export function CategoryForm({
         <div className="grid gap-4">
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Nombre *</p>
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
-            <p className="text-xs text-muted-foreground">Código generado: {generatedCode}</p>
+            <Input
+              key={`name-${currentOpenKey}`}
+              ref={nameRef}
+              defaultValue={resolvedName}
+              onInput={(event) => {
+                setCodePreview(generateCategoryCodeFromName(event.currentTarget.value))
+              }}
+            />
+            <p className="text-xs text-muted-foreground">Código generado: {codePreview}</p>
           </div>
 
           <div className="grid gap-2">
             <p className="text-xs font-medium text-muted-foreground">Descripción</p>
             <Textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
+              key={`desc-${currentOpenKey}`}
+              ref={descriptionRef}
+              defaultValue={resolvedDescription}
               rows={3}
             />
           </div>
@@ -117,14 +130,11 @@ export function CategoryForm({
           </Button>
           <Button
             type="button"
-            disabled={!normalize(name)}
             onClick={() => {
-              const payload: CategoryFormSubmitPayload = {
-                name: normalize(name),
-                description: normalize(description),
-                active,
-              }
-              onSubmit(payload)
+              const name = normalize(nameRef.current?.value ?? '')
+              const description = normalize(descriptionRef.current?.value ?? '')
+              if (!name) return
+              onSubmit({ name, description, active })
             }}
           >
             Guardar
