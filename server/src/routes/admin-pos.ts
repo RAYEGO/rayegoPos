@@ -9,6 +9,7 @@ import {
   getEmpresaDetail,
   getTipoEmpresaDetail,
   getTipoEmpresaModulos,
+  listAdministradores,
   listEmpresaAdministradores,
   listEmpresaSucursales,
   listEmpresas,
@@ -169,6 +170,8 @@ export async function adminPosRoutes(app: FastifyInstance) {
   })
 
   app.get('/modulos', async (request) => listModulosCatalogo(request))
+
+  app.get('/administradores', async (request) => listAdministradores(request))
 
   app.get('/tipos-empresa/:id/modulos', async (request) => {
     const params = request.params as { id: string }

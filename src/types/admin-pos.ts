@@ -172,6 +172,32 @@ export type EmpresaAdminListItem = {
   sucursalIds: string[]
 }
 
+export type AdministradorListItem = {
+  id: string
+  username: string
+  email: string | null
+  nombres: string
+  apellidos: string
+  telefono: string | null
+  activo: boolean
+  empresa: {
+    id: string
+    razonSocial: string
+    nombreComercial: string | null
+    numeroDocumento: string
+    color: string | null
+    tipoCodigo: string
+    tipoNombre: string
+  }
+  sucursales: {
+    id: string
+    codigo: string
+    nombre: string
+    esPrincipal: boolean
+  }[]
+  asignadoAt: string | null
+}
+
 export type CreateEmpresaAdminPayload = {
   username: string
   email?: string | null

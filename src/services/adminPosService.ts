@@ -1,5 +1,6 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
+  AdministradorListItem,
   CreateEmpresaAdminPayload,
   CreateEmpresaPayload,
   CreateEmpresaOnboardingPayload,
@@ -329,6 +330,10 @@ export const adminPosService = {
         .map((c) => map.get(c))
         .filter((m): m is ModuloCatalogoItem => Boolean(m))
     }
+  },
+
+  async listAdministradores(accessToken: string): Promise<AdministradorListItem[]> {
+    return apiRequest<AdministradorListItem[]>('/api/admin-pos/administradores', { accessToken })
   },
 
   async listEmpresas(accessToken: string): Promise<EmpresaListItem[]> {

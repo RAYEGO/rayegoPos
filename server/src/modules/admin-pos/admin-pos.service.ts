@@ -137,6 +137,32 @@ export type EmpresaAdminListItem = {
   sucursalIds: string[]
 }
 
+export type AdministradorListItem = {
+  id: string
+  username: string
+  email: string | null
+  nombres: string
+  apellidos: string
+  telefono: string | null
+  activo: boolean
+  empresa: {
+    id: string
+    razonSocial: string
+    nombreComercial: string | null
+    numeroDocumento: string
+    color: string | null
+    tipoCodigo: string
+    tipoNombre: string
+  }
+  sucursales: {
+    id: string
+    codigo: string
+    nombre: string
+    esPrincipal: boolean
+  }[]
+  asignadoAt: string | null
+}
+
 export type CreateEmpresaAdminPayload = {
   username: string
   email?: string | null
@@ -1647,6 +1673,106 @@ export async function listEmpresaAdministradores(
     telefono: admin.telefono,
     activo: admin.activo,
     sucursalIds: admin.usuarioSucursales.map((entry) => entry.sucursalId),
+  }))
+}
+
+export async function listAdministradores(
+  request: FastifyRequest,
+): Promise<AdministradorListItem[]> {
+  await requirePlatformAdmin(request)
+  await requirePermission(request, 'administradores.manage')
+  await getPlatformUserId(request)
+
+  const rolAdminEmpresa = await prisma.rol.findFirst({
+    where: { codigo: 'ADMIN_EMPRESA', deletedAt: null, activo: true },
+    select: { id: true },
+  })
+  if (!rolAdminEmpresa) {
+    return []
+  }
+
+  const admins = await prisma.usuario.findMany({
+    where: {
+      deletedAt: null,
+      empresaId: { not: null },
+      usuariosRoles: {
+        some: {
+          rolId: rolAdminEmpresa.id,
+          deletedAt: null,
+          activo: true,
+        },
+      },
+    },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      nombres: true,
+      apellidos: true,
+      telefono: true,
+      activo: true,
+      createdAt: true,
+      empresaId: true,
+      empresa: {
+        select: {
+          id: true,
+          razonSocial: true,
+          nombreComercial: true,
+          numeroDocumento: true,
+          tipoEmpresa: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              color: true,
+            },
+          },
+        },
+      },
+      usuarioSucursales: {
+        where: { deletedAt: null, activo: true },
+        select: {
+          sucursal: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              esPrincipal: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ activo: 'desc' }, { createdAt: 'desc' }, { apellidos: 'asc' }, { nombres: 'asc' }],
+  })
+
+  return admins.map((admin) => ({
+    id: admin.id,
+    username: admin.username,
+    email: admin.email,
+    nombres: admin.nombres,
+    apellidos: admin.apellidos,
+    telefono: admin.telefono,
+    activo: admin.activo,
+    asignadoAt: admin.createdAt ? new Date(admin.createdAt).toISOString() : null,
+    empresa: {
+      id: admin.empresaId as string,
+      razonSocial: admin.empresa?.razonSocial ?? '',
+      nombreComercial: admin.empresa?.nombreComercial ?? null,
+      numeroDocumento: admin.empresa?.numeroDocumento ?? '',
+      color: admin.empresa?.tipoEmpresa?.color ?? null,
+      tipoCodigo: admin.empresa?.tipoEmpresa?.codigo ?? '',
+      tipoNombre: admin.empresa?.tipoEmpresa?.nombre ?? '',
+    },
+    sucursales: admin.usuarioSucursales
+      .map((entry) => entry.sucursal)
+      .filter(Boolean)
+      .map((suc) => ({
+        id: suc.id,
+        codigo: suc.codigo,
+        nombre: suc.nombre,
+        esPrincipal: suc.esPrincipal,
+      })),
   }))
 }
 
