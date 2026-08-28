@@ -4,7 +4,11 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
-export const Dialog = DialogPrimitive.Root
+export type DialogProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
+export function Dialog({ modal = false, ...props }: DialogProps) {
+  return <DialogPrimitive.Root modal={modal} {...props} />
+}
+
 export const DialogTrigger = DialogPrimitive.Trigger
 export const DialogClose = DialogPrimitive.Close
 export const DialogPortal = DialogPrimitive.Portal

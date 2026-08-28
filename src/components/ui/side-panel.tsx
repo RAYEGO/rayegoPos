@@ -4,7 +4,11 @@ import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
-export const SidePanel = DialogPrimitive.Root
+export type SidePanelProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
+export function SidePanel({ modal = false, ...props }: SidePanelProps) {
+  return <DialogPrimitive.Root modal={modal} {...props} />
+}
+
 export const SidePanelTrigger = DialogPrimitive.Trigger
 export const SidePanelClose = DialogPrimitive.Close
 export const SidePanelPortal = DialogPrimitive.Portal
