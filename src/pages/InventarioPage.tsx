@@ -55,7 +55,6 @@ import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { inventoryService } from '@/services/inventoryService'
 import { productsService } from '@/services/productsService'
-import type { ProductCatalogItem } from '@/types/products'
 import type {
   AdjustInventoryLotPayload,
   CreateInventoryLotPayload,
@@ -67,6 +66,29 @@ import type {
   TransferInventoryLotPayload,
 } from '@/types/inventory'
 import { toast } from 'sonner'
+
+type LotProductOptionPresentation = {
+  id: string
+  name: string
+  isBase: boolean
+  allowsPurchase: boolean
+  allowsSale: boolean
+  salePrice: number | null
+  factorToBase: number | null
+}
+
+type LotProductOptionItem = {
+  id: string
+  name: string
+  sku: string
+  unitSymbol: string
+  packaging:
+    | {
+        basePresentationId: string | null
+        presentations: LotProductOptionPresentation[]
+      }
+    | null
+}
 
 const createLotSchema = z
   .object({
@@ -341,13 +363,13 @@ function LotProductAutocomplete({
   accessToken: string
   value: string
   onValueChange: (value: string) => void
-  onProductSelected?: (product: ProductCatalogItem) => void
-  fallbackProducts?: ProductCatalogItem[]
+  onProductSelected?: (product: LotProductOptionItem) => void
+  fallbackProducts?: LotProductOptionItem[]
 }) {
   const [query, setQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [items, setItems] = useState<ProductCatalogItem[]>([])
+  const [items, setItems] = useState<LotProductOptionItem[]>([])
 
   useEffect(() => {
     if (!query.trim() || !accessToken) {
@@ -366,7 +388,29 @@ function LotProductAutocomplete({
           sortBy: 'name',
           sortDir: 'asc',
         })
-        .then((response) => setItems(response.items))
+        .then((response) => {
+          const subset: LotProductOptionItem[] = response.items.map((product) => ({
+            id: product.id,
+            name: product.name,
+            sku: product.sku,
+            unitSymbol: product.unitSymbol,
+            packaging: product.packaging
+              ? {
+                  basePresentationId: product.packaging.basePresentationId,
+                  presentations: product.packaging.presentations.map((entry) => ({
+                    id: entry.id,
+                    name: entry.name,
+                    isBase: entry.isBase,
+                    allowsPurchase: entry.allowsPurchase,
+                    allowsSale: entry.allowsSale,
+                    salePrice: entry.salePrice,
+                    factorToBase: entry.factorToBase,
+                  })),
+                }
+              : null,
+          }))
+          setItems(subset)
+        })
         .catch(() => setItems([]))
         .finally(() => setIsLoading(false))
     }, 250)
