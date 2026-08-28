@@ -180,7 +180,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     access: {
       requiresAuth: true,
       allowedPermissions: ['usuarios.read', 'sesiones.read', 'auditoria.read'],
-      allowedRoles: ['ADMIN', 'SUPERVISOR'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'],
       moduleCode: 'usuarios',
     },
   },
@@ -232,7 +232,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     access: {
       requiresAuth: true,
       allowedPermissions: ['reportes.read'],
-      allowedRoles: ['ADMIN_POS', 'ADMIN', 'SUPERVISOR'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'],
       moduleCode: 'reportes',
     },
   },
@@ -245,7 +245,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     access: {
       requiresAuth: true,
       allowedPermissions: ['configuracion.read'],
-      allowedRoles: ['ADMIN_POS', 'ADMIN'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA'],
       moduleCode: 'configuracion',
     },
   },

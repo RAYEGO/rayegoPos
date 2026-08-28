@@ -69,7 +69,7 @@ const usersFormSchema = z
     password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.').or(z.literal('')),
     confirmPassword: z.string().min(8, 'Confirma la contraseña.').or(z.literal('')),
     role: z.enum(['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
-    branchIds: z.array(z.string()).min(1, 'Selecciona al menos una sucursal.'),
+    branchIds: z.array(z.string()),
     isActive: z.boolean(),
     mustChangePassword: z.boolean(),
     mfaEnabled: z.boolean(),
@@ -78,6 +78,17 @@ const usersFormSchema = z
     path: ['confirmPassword'],
     message: 'Las contraseñas no coinciden.',
   })
+  .refine(
+    (data) => {
+      const requiresBranches = data.role !== 'ADMIN_POS'
+      if (!requiresBranches) return true
+      return Array.isArray(data.branchIds) && data.branchIds.length > 0
+    },
+    {
+      path: ['branchIds'],
+      message: 'Selecciona al menos una sucursal.',
+    },
+  )
 
 type UsersFormValues = z.infer<typeof usersFormSchema>
 
@@ -597,16 +608,17 @@ export function UsuariosPage() {
           </CardContent>
         </Card>
 
-        <SidePanel
-          open={isUserDialogOpen}
-          onOpenChange={(open) => {
-            if (!open) {
-              closeUserDialog()
-            }
-          }}
-        >
-          <SidePanelContent className="p-0">
-            <form className="flex h-full flex-col" onSubmit={userForm.handleSubmit(onSubmitUserForm)}>
+        {isUserDialogOpen ? (
+          <SidePanel
+            open={isUserDialogOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                closeUserDialog()
+              }
+            }}
+          >
+            <SidePanelContent className="p-0">
+              <form className="flex h-full flex-col" onSubmit={userForm.handleSubmit(onSubmitUserForm)}>
               <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
                 <div className="space-y-1">
                   <p className="text-base font-semibold text-foreground">
@@ -901,7 +913,8 @@ export function UsuariosPage() {
               </div>
             </form>
           </SidePanelContent>
-        </SidePanel>
+          </SidePanel>
+        ) : null}
       </AuthorizationGate>
     </div>
   )
