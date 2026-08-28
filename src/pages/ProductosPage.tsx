@@ -2293,6 +2293,7 @@ export function ProductosPage() {
                     setPackagingDraftRows(initialRows)
                     syncPackagingInputValues(initialRows)
                     setPackagingPreviewError(null)
+                    setIsPackagingGuideOpen(!dontShowPackagingGuide && currentRows.length === 0)
                     setIsPackagingDialogOpen(true)
                   }}
                 >
@@ -2396,15 +2397,15 @@ export function ProductosPage() {
                 variant="outline"
                 size="sm"
                 className="h-8 shrink-0 gap-1 px-2.5 text-[12px]"
-                onClick={() => setIsPackagingGuideOpen(true)}
+                onClick={() => setIsPackagingGuideOpen((x) => !x)}
               >
                 <BookOpen className="h-3.5 w-3.5" />
-                Guía
+                {isPackagingGuideOpen ? 'Ocultar guía' : 'Guía'}
               </Button>
             </div>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+          <div className={`grid min-h-0 flex-1 gap-3 overflow-hidden ${isPackagingGuideOpen ? 'lg:grid-cols-[minmax(0,5.5fr)_minmax(0,3fr)_minmax(0,3.2fr)]' : 'lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]'}`}>
             <div className="flex min-h-0 flex-col gap-2.5 overflow-hidden rounded-xl border bg-background/60 p-3">
               <div className="shrink-0 flex items-center justify-between gap-2">
                 <p className="text-[14px] font-semibold text-foreground">Cadena de presentaciones</p>
@@ -2764,6 +2765,127 @@ export function ProductosPage() {
                 ) : null}
               </div>
             </div>
+
+            {isPackagingGuideOpen ? (
+              <aside className="hidden min-h-0 flex-col overflow-hidden rounded-xl border bg-primary/5 p-3 lg:flex">
+                <div className="shrink-0 space-y-1 pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
+                      <BookOpen className="h-4 w-4 text-primary" />
+                      Guía de empaque y conversión
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsPackagingGuideOpen(false)}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Cerrar
+                    </Button>
+                  </div>
+                  <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    Aprende a configurar presentaciones y equivalencias en pocos pasos.
+                  </p>
+                </div>
+
+                <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-0.5">
+                  <div className="rounded-lg border bg-background/70 p-2.5 text-[12px] leading-relaxed">
+                    <p>
+                      Agrega las presentaciones <strong>desde la más grande hasta la unidad base</strong>. La cantidad indica <strong>cuántas unidades de la siguiente presentación</strong> contiene la presentación actual.
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border bg-background/70 p-2.5">
+                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Ejemplo visual</p>
+                    <div className="mt-2 space-y-1 text-[12px]">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-sm">📦</span>
+                        <span className="font-semibold">Caja</span>
+                      </div>
+                      <div className="pl-8 text-[11px] text-muted-foreground">
+                        ↓ contiene <span className="font-semibold text-foreground">10</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-sm">📋</span>
+                        <span className="font-semibold">Blíster</span>
+                      </div>
+                      <div className="pl-8 text-[11px] text-muted-foreground">
+                        ↓ contiene <span className="font-semibold text-foreground">12</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-sm">💊</span>
+                        <span className="font-semibold">Tabletas</span>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[12px]">
+                      Resultado: <span className="font-semibold">1 Caja = 10 Blíster = 120 Tabletas</span>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <div className="rounded-lg border bg-background/70 p-2.5 text-[11px] leading-relaxed">
+                      <p className="font-semibold text-foreground">Medicamento</p>
+                      <p className="mt-0.5 text-muted-foreground">1 Caja → 10 Blíster → 12 Tabletas</p>
+                      <p className="mt-0.5 text-foreground">= 120 Tabletas</p>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-2.5 text-[11px] leading-relaxed">
+                      <p className="font-semibold text-foreground">Pañales</p>
+                      <p className="mt-0.5 text-muted-foreground">1 Paquete → 20 Packs → 3 Unidades</p>
+                      <p className="mt-0.5 text-foreground">= 60 Unidades</p>
+                    </div>
+                    <div className="rounded-lg border bg-background/70 p-2.5 text-[11px] leading-relaxed">
+                      <p className="font-semibold text-foreground">Simple</p>
+                      <p className="mt-0.5 text-muted-foreground">1 Caja → 24 Unidades</p>
+                      <p className="mt-0.5 text-foreground">= 24 Unidades</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border bg-background/70 p-2.5 text-[12px] leading-relaxed">
+                    <p className="font-semibold text-foreground">Regla de orden</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      Siempre agrega las presentaciones desde la más grande hasta la más pequeña. La última será la unidad base.
+                    </p>
+                    <div className="mt-2 grid gap-2 text-[11px]">
+                      <div className="rounded-md border border-success/30 bg-success/5 px-2 py-1.5">
+                        <span className="font-semibold text-success">✓ Correcto</span>
+                        <p className="mt-0.5">Caja → Blíster → Tableta</p>
+                      </div>
+                      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5">
+                        <span className="font-semibold text-destructive">✗ Incorrecto</span>
+                        <p className="mt-0.5">Tableta → Blíster → Caja</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto shrink-0 rounded-lg border border-dashed p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                    Tip: puedes mostrar/ocultar esta guía pulsando <span className="font-semibold text-foreground">Guía</span> en la cabecera.
+                  </div>
+
+                  <label className="flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border bg-background/70 p-2.5 text-[11px] text-muted-foreground">
+                    <Checkbox
+                      checked={dontShowPackagingGuide}
+                      onCheckedChange={(value) => {
+                        const checked = value === true
+                        setDontShowPackagingGuide(checked)
+                        try {
+                          if (typeof window !== 'undefined') {
+                            window.localStorage.setItem(
+                              'no_volver_a_mostrar_empaque_guia',
+                              checked ? '1' : '0',
+                            )
+                          }
+                        } catch {
+                          // ignore storage errors
+                        }
+                      }}
+                    />
+                    <span>No volver a mostrar automáticamente al crear un producto nuevo.</span>
+                  </label>
+                </div>
+              </aside>
+            ) : null}
           </div>
 
           <DialogFooter className="shrink-0">
@@ -2804,137 +2926,6 @@ export function ProductosPage() {
             >
               Aplicar
             </Button>
-          </DialogFooter>
-        </DialogContent>
-        </Dialog>
-      ) : null}
-
-      {isPackagingGuideOpen ? (
-        <Dialog
-          open={isPackagingGuideOpen}
-          onOpenChange={(open) => {
-            setIsPackagingGuideOpen(open)
-          }}
-        >
-        <DialogContent className="max-h-[86vh] overflow-hidden sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[18px] leading-6">
-              <BookOpen className="h-5 w-5 text-primary" />
-              Guía de empaque y conversión
-            </DialogTitle>
-            <DialogDescription className="text-[13px]">
-              Aprende a configurar presentaciones y equivalencias de un producto en pocos pasos.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-            <div className="rounded-lg border bg-muted/25 p-3 text-[13px] leading-relaxed">
-              <p>
-                Agrega las presentaciones <strong>desde la más grande hasta la unidad base</strong>.
-                La cantidad indica <strong>cuántas unidades de la siguiente presentación</strong> contiene la presentación actual.
-              </p>
-            </div>
-
-            <div className="rounded-lg border p-3">
-              <p className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Ejemplo visual</p>
-              <div className="mt-2.5 space-y-1.5 text-[13px]">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">📦</span>
-                  <span className="font-semibold">Caja</span>
-                </div>
-                <div className="pl-9 text-[12px] text-muted-foreground">
-                  ↓ contiene <span className="font-semibold text-foreground">10</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">📋</span>
-                  <span className="font-semibold">Blíster</span>
-                </div>
-                <div className="pl-9 text-[12px] text-muted-foreground">
-                  ↓ contiene <span className="font-semibold text-foreground">12</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">💊</span>
-                  <span className="font-semibold">Tabletas</span>
-                </div>
-              </div>
-              <div className="mt-3 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-[13px]">
-                Resultado: <span className="font-semibold">1 Caja = 10 Blíster = 120 Tabletas</span>
-              </div>
-            </div>
-
-            <div className="grid gap-2.5 sm:grid-cols-3">
-              <div className="rounded-lg border p-2.5 text-[12px] leading-relaxed">
-                <p className="font-semibold text-foreground">Medicamento</p>
-                <p className="mt-1 text-muted-foreground">1 Caja → 10 Blíster → 12 Tabletas</p>
-                <p className="mt-1 text-foreground">= 120 Tabletas</p>
-              </div>
-              <div className="rounded-lg border p-2.5 text-[12px] leading-relaxed">
-                <p className="font-semibold text-foreground">Pañales</p>
-                <p className="mt-1 text-muted-foreground">1 Paquete → 20 Packs → 3 Unidades</p>
-                <p className="mt-1 text-foreground">= 60 Unidades</p>
-              </div>
-              <div className="rounded-lg border p-2.5 text-[12px] leading-relaxed">
-                <p className="font-semibold text-foreground">Simple</p>
-                <p className="mt-1 text-muted-foreground">1 Caja → 24 Unidades</p>
-                <p className="mt-1 text-foreground">= 24 Unidades</p>
-              </div>
-            </div>
-
-            <div className="rounded-lg border p-3 text-[13px] leading-relaxed">
-              <p className="font-semibold text-foreground">Regla de orden</p>
-              <p className="mt-1 text-muted-foreground">
-                Siempre agrega las presentaciones desde la más grande hasta la más pequeña. La última presentación será automáticamente la unidad base.
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2 text-[12px]">
-                <div className="rounded-md border border-success/30 bg-success/5 px-2.5 py-2">
-                  <span className="font-semibold text-success">✓ Correcto</span>
-                  <p className="mt-0.5">Caja → Blíster → Tableta</p>
-                </div>
-                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2">
-                  <span className="font-semibold text-destructive">✗ Incorrecto</span>
-                  <p className="mt-0.5">Tableta → Blíster → Caja</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-dashed p-3 text-[12px] leading-relaxed text-muted-foreground">
-              <p>
-                Tip: Si tienes dudas, puedes pulsar <span className="font-semibold text-foreground">Guía</span> dentro de cualquier configuración de empaque.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="dont-show-packaging-guide"
-                checked={dontShowPackagingGuide}
-                onCheckedChange={(value) => {
-                  const checked = value === true
-                  setDontShowPackagingGuide(checked)
-                  try {
-                    if (typeof window !== 'undefined') {
-                      window.localStorage.setItem('no_volver_a_mostrar_empaque_guia', checked ? '1' : '0')
-                    }
-                  } catch {
-                    // ignore storage errors
-                  }
-                }}
-              />
-              <label htmlFor="dont-show-packaging-guide" className="text-[12px] text-muted-foreground cursor-pointer">
-                No volver a mostrar automáticamente
-              </label>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setIsPackagingGuideOpen(false)}
-              >
-                Entendido, configurar
-              </Button>
-            </div>
           </DialogFooter>
         </DialogContent>
         </Dialog>
