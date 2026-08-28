@@ -359,7 +359,7 @@ export function InventarioPage() {
   const [lotsPage, setLotsPage] = useState(1)
   const lotsPageSize = 8
   const isTransferEnabled = useMemo(() => false, [])
-  const isManualLotEnabled = useMemo(() => false, [])
+  const isManualLotEnabled = useMemo(() => true, [])
 
   const createForm = useForm<CreateLotFormValues>({
     resolver: zodResolver(createLotSchema),

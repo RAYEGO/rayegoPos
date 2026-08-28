@@ -1416,7 +1416,10 @@ export function ProductosPage() {
 
   function openEditDialog(product: ProductCatalogItem) {
     setEditingProduct(product)
-    form.reset(mapProductToFormValues(product))
+    const nextValues = mapProductToFormValues(product)
+    setPackagingDraftRows(nextValues.empaque.length > 0 ? nextValues.empaque : [])
+    syncPackagingInputValues(nextValues.empaque)
+    form.reset(nextValues)
     setIsCreateDialogOpen(true)
   }
 
@@ -1427,6 +1430,8 @@ export function ProductosPage() {
     nextValues.sku = nextSku
     nextValues.codigoBarras = ''
     setEditingProduct(null)
+    setPackagingDraftRows(nextValues.empaque.length > 0 ? nextValues.empaque : [])
+    syncPackagingInputValues(nextValues.empaque)
     form.reset(nextValues)
     setIsCreateDialogOpen(true)
   }
@@ -2376,7 +2381,6 @@ export function ProductosPage() {
             if (!open) {
               setPackagingPreviewError(null)
               setPackagingPreview(null)
-              setPackagingDraftRows([])
               setIsPackagingBreakdownOpen(false)
             }
           }}
