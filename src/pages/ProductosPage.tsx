@@ -488,6 +488,9 @@ export function ProductosPage() {
   const createDialogContentRef = useRef<HTMLDivElement | null>(null)
   const createDialogScrollTopRef = useRef(0)
   const previousPackagingOpenRef = useRef(false)
+  const packagingGracePeriodRef = useRef(false)
+  const packagingGraceTimerRef = useRef<number | null>(null)
+  const isExplicitCreateDialogClosingRef = useRef(false)
 
   const [masterDialogOpen, setMasterDialogOpen] = useState(false)
   const [masterDialogType, setMasterDialogType] = useState<
@@ -549,6 +552,30 @@ export function ProductosPage() {
       }, 0)
     }
   }, [isPackagingDialogOpen])
+
+  useEffect(() => {
+    function stopGraceTimer() {
+      if (packagingGraceTimerRef.current !== null) {
+        window.clearTimeout(packagingGraceTimerRef.current)
+        packagingGraceTimerRef.current = null
+      }
+    }
+
+    const anyChildOpen = isPackagingDialogOpen || isPackagingGuideOpen
+
+    if (anyChildOpen) {
+      stopGraceTimer()
+      packagingGracePeriodRef.current = true
+      return
+    }
+
+    packagingGraceTimerRef.current = window.setTimeout(() => {
+      packagingGracePeriodRef.current = false
+      packagingGraceTimerRef.current = null
+    }, 600)
+
+    return stopGraceTimer
+  }, [isPackagingDialogOpen, isPackagingGuideOpen])
 
   const categoryForm = useForm<MasterCategoryFormValues>({
     resolver: zodResolver(masterCategorySchema),
@@ -1547,6 +1574,7 @@ export function ProductosPage() {
         await productsService.create(accessToken, payload)
         toast.success('Producto registrado correctamente.')
       }
+      isExplicitCreateDialogClosingRef.current = true
       setIsCreateDialogOpen(false)
       setEditingProduct(null)
       form.reset(defaultFormValues)
@@ -2035,9 +2063,10 @@ export function ProductosPage() {
         <SidePanel
           open={isCreateDialogOpen}
           onOpenChange={(open) => {
-            if (!open && (isPackagingDialogOpen || isPackagingGuideOpen)) {
+            if (!open && packagingGracePeriodRef.current && !isExplicitCreateDialogClosingRef.current) {
               return
             }
+            isExplicitCreateDialogClosingRef.current = false
             setIsCreateDialogOpen(open)
             if (!open) {
               setEditingProduct(null)
@@ -2056,12 +2085,21 @@ export function ProductosPage() {
                     {editingProduct ? 'Actualiza el maestro farmacéutico' : 'Alta inicial del maestro farmacéutico'}
                   </p>
                 </div>
-                <SidePanelClose asChild>
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Cerrar</span>
-                  </Button>
-                </SidePanelClose>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={() => {
+                    isExplicitCreateDialogClosingRef.current = true
+                    setIsCreateDialogOpen(false)
+                    setEditingProduct(null)
+                    form.reset(defaultFormValues)
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Cerrar</span>
+                </Button>
               </div>
 
             <div
@@ -2348,6 +2386,7 @@ export function ProductosPage() {
                   type="button"
                   variant="outline"
                   onClick={() => {
+                    isExplicitCreateDialogClosingRef.current = true
                     setIsCreateDialogOpen(false)
                     setEditingProduct(null)
                     form.reset(defaultFormValues)
