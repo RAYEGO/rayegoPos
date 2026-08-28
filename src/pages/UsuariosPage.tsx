@@ -1022,7 +1022,7 @@ export function UsuariosPage() {
               </Button>
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 disabled={isRemoving || !can('usuarios.manage')}
                 onClick={() => void onConfirmRemoveUser()}
               >
