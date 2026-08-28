@@ -2294,9 +2294,6 @@ export function ProductosPage() {
                     syncPackagingInputValues(initialRows)
                     setPackagingPreviewError(null)
                     setIsPackagingDialogOpen(true)
-                    if (!dontShowPackagingGuide && currentRows.length === 0) {
-                      setTimeout(() => setIsPackagingGuideOpen(true), 60)
-                    }
                   }}
                 >
                   <span className="flex items-center gap-2">
