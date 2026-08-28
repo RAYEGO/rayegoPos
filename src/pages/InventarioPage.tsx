@@ -372,6 +372,37 @@ function LotProductAutocomplete({
     return () => window.clearTimeout(handle)
   }, [accessToken, query])
 
+  useEffect(() => {
+    if (!value) {
+      return
+    }
+
+    const match = items.find((product) => product.id === value)
+    if (match) {
+      setQuery(`${match.name} · ${match.sku}`)
+      return
+    }
+
+    const handle = window.setTimeout(() => {
+      setIsLoading(true)
+      productsService
+        .get(accessToken, value)
+        .then((response) => {
+          const product = response.item
+          setQuery(`${product.name} · ${product.sku}`)
+          setItems((prev) => {
+            if (prev.some((entry) => entry.id === product.id)) return prev
+            return [product, ...prev].slice(0, 20)
+          })
+          onProductSelected?.(product)
+        })
+        .catch(() => {})
+        .finally(() => setIsLoading(false))
+    }, 120)
+
+    return () => window.clearTimeout(handle)
+  }, [accessToken, items, onProductSelected, value])
+
   return (
     <div className="relative">
       <Input
