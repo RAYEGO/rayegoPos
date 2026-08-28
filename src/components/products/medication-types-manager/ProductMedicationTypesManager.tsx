@@ -271,7 +271,7 @@ function MedicationTypeForm({
     [existingCodes, name, selected?.code],
   )
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -330,7 +330,7 @@ function MedicationTypeForm({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 function MedicationTypeImportDialog({
@@ -479,7 +479,7 @@ function MedicationTypeImportDialog({
     }
   }
 
-  return (
+  return open ? (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -576,7 +576,7 @@ function MedicationTypeImportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 export function ProductMedicationTypesManager({

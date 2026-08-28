@@ -299,7 +299,7 @@ export function CategoryImportDialog({
     }
   }
 
-  return (
+  return open ? (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -412,5 +412,5 @@ export function CategoryImportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }

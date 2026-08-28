@@ -28,37 +28,39 @@ DialogOverlay.displayName = 'DialogOverlay'
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => {
-  const context = React.useContext(DialogPrimitive.DialogContext)
-  const open = context?.open ?? true
-  if (!open) return null
-  return (
-    <DialogPortal>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        ref={ref}
-        className={cn(
-          'fixed left-1/2 top-1/2 z-[60] grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-popover p-6 text-popover-foreground shadow-soft animate-in fade-in-0 zoom-in-95',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        <DialogPrimitive.Close asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute right-3 top-3 h-9 w-9"
-          >
-            <X />
-            <span className="sr-only">Cerrar</span>
-          </Button>
-        </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
-    </DialogPortal>
-  )
-})
+>(({ className, children, ...props }, ref) => (
+  <DialogPortal>
+    <DialogOverlay />
+    <DialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        'fixed left-1/2 top-1/2 z-[60] grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-popover p-6 text-popover-foreground shadow-soft animate-in fade-in-0 zoom-in-95',
+        className,
+      )}
+      trapFocus
+      onPointerDownOutside={(event) => {
+        const target = event.target as HTMLElement | null
+        if (target && target.closest('[data-radix-popper-content-wrapper]')) {
+          event.preventDefault()
+        }
+      }}
+      {...props}
+    >
+      {children}
+      <DialogPrimitive.Close asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute right-3 top-3 h-9 w-9"
+        >
+          <X />
+          <span className="sr-only">Cerrar</span>
+        </Button>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPortal>
+))
 
 DialogContent.displayName = 'DialogContent'
 

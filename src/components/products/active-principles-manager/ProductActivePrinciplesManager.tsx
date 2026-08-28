@@ -117,7 +117,7 @@ function ActivePrincipleFormDialog({
     setActive(selected?.active ?? true)
   }, [mode, open, selected])
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
@@ -175,7 +175,7 @@ function ActivePrincipleFormDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 export function ProductActivePrinciplesManager({

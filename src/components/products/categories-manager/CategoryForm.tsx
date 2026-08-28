@@ -76,7 +76,7 @@ export function CategoryForm({
 
   const generatedCode = useMemo(() => generateCategoryCodeFromName(name), [name])
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -132,5 +132,5 @@ export function CategoryForm({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }

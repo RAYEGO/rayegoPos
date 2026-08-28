@@ -290,7 +290,7 @@ function LaboratoryForm({
     [existingCodes, name, selected?.code],
   )
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -343,7 +343,7 @@ function LaboratoryForm({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 function LaboratoryImportDialog({
@@ -493,7 +493,7 @@ function LaboratoryImportDialog({
     }
   }
 
-  return (
+  return open ? (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -598,7 +598,7 @@ function LaboratoryImportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 export function ProductLaboratoriesManager({ accessToken, canManage }: ProductLaboratoriesManagerProps) {

@@ -247,7 +247,7 @@ export function ReceiptDialog({
     setIsFullscreen((current) => !current)
   }, [])
 
-  return (
+  return open ? (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -313,6 +313,6 @@ export function ReceiptDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 

@@ -316,7 +316,7 @@ function UnitForm({
     return existingSymbols.has(normalizedSymbol)
   }, [existingSymbols, normalizedSymbol, selected?.symbol])
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -382,7 +382,7 @@ function UnitForm({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 function UnitImportDialog({
@@ -581,7 +581,7 @@ function UnitImportDialog({
     }
   }
 
-  return (
+  return open ? (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -688,7 +688,7 @@ function UnitImportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 export function ProductUnitsManager({ accessToken, canManage }: ProductUnitsManagerProps) {

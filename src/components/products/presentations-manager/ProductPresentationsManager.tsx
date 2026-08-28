@@ -290,7 +290,7 @@ function PresentationForm({
     [existingCodes, name, selected?.code],
   )
 
-  return (
+  return open ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -339,7 +339,7 @@ function PresentationForm({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 function PresentationImportDialog({
@@ -489,7 +489,7 @@ function PresentationImportDialog({
     }
   }
 
-  return (
+  return open ? (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -594,7 +594,7 @@ function PresentationImportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  ) : null
 }
 
 export function ProductPresentationsManager({ accessToken, canManage }: ProductPresentationsManagerProps) {
