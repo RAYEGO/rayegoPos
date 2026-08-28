@@ -51,7 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
+import { SidePanel, SidePanelContent } from '@/components/ui/side-panel'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
