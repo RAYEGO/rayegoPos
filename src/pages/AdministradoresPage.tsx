@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { useToast } from '@/hooks/useToast'
+import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { adminPosService } from '@/services/adminPosService'
 import type { AdministradorListItem, EmpresaListItem, EmpresaSucursalListItem } from '@/types/admin-pos'
@@ -84,7 +84,6 @@ type CreateAdminForm = z.infer<typeof createAdminSchema>
 
 export function AdministradoresPage() {
   const { session } = useAuth()
-  const { toast } = useToast()
   const accessToken = session?.accessToken ?? ''
 
   const [isPanelOpen, setIsPanelOpen] = useState(false)
@@ -145,9 +144,7 @@ export function AdministradoresPage() {
       const rows = await adminPosService.listAdministradores(accessToken)
       setAdministradores(rows)
     } catch (err) {
-      toast({
-        title: 'No se pudo cargar administradores',
-        variant: 'destructive',
+      toast.error('No se pudo cargar administradores', {
         description: err instanceof Error ? err.message : 'Error de red.',
       })
     } finally {
@@ -161,9 +158,7 @@ export function AdministradoresPage() {
       const rows = await adminPosService.listEmpresas(accessToken)
       setEmpresas(rows.filter((e) => e.activo))
     } catch (err) {
-      toast({
-        title: 'No se pudo cargar empresas',
-        variant: 'destructive',
+      toast.error('No se pudo cargar empresas', {
         description: err instanceof Error ? err.message : 'Error de red.',
       })
     }
@@ -177,9 +172,7 @@ export function AdministradoresPage() {
       const rows = await adminPosService.listEmpresaSucursales(accessToken, empresaId)
       setSucursalesByEmpresa((prev) => ({ ...prev, [empresaId]: rows.filter((s) => s.activo) }))
     } catch (err) {
-      toast({
-        title: 'No se pudieron cargar sucursales',
-        variant: 'destructive',
+      toast.error('No se pudieron cargar sucursales', {
         description: err instanceof Error ? err.message : 'Error de red.',
       })
     } finally {
@@ -265,18 +258,14 @@ export function AdministradoresPage() {
         activo: data.activo ?? true,
         sucursalId,
       })
-      toast({
-        title: 'Administrador asignado',
+      toast.success('Administrador asignado', {
         description: `${created.nombres} ${created.apellidos} · ${created.username}`,
-        variant: 'default',
       })
       await loadAdministradores()
       await loadEmpresas()
       closePanel()
     } catch (err) {
-      toast({
-        title: 'No se pudo asignar administrador',
-        variant: 'destructive',
+      toast.error('No se pudo asignar administrador', {
         description: err instanceof Error ? err.message : 'Error de red.',
       })
     } finally {
