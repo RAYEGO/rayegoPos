@@ -54,6 +54,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { inventoryService } from '@/services/inventoryService'
+import { productsService } from '@/services/productsService'
+import type { ProductCatalogItem } from '@/types/products'
 import type {
   AdjustInventoryLotPayload,
   CreateInventoryLotPayload,
@@ -327,6 +329,99 @@ function FieldError({ message }: { message?: string }) {
   }
 
   return <p className="text-xs text-destructive">{message}</p>
+}
+
+function LotProductAutocomplete({
+  accessToken,
+  value,
+  onValueChange,
+  onProductSelected,
+}: {
+  accessToken: string
+  value: string
+  onValueChange: (value: string) => void
+  onProductSelected?: (product: ProductCatalogItem) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [isOpen, setIsOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [items, setItems] = useState<ProductCatalogItem[]>([])
+
+  useEffect(() => {
+    if (!query.trim() || !accessToken) {
+      setItems([])
+      return
+    }
+
+    const handle = window.setTimeout(() => {
+      setIsLoading(true)
+      productsService
+        .list(accessToken, {
+          search: query.trim(),
+          status: 'ACTIVO',
+          page: 1,
+          pageSize: 12,
+          sortBy: 'name',
+          sortDir: 'asc',
+        })
+        .then((response) => setItems(response.items))
+        .catch(() => setItems([]))
+        .finally(() => setIsLoading(false))
+    }, 250)
+
+    return () => window.clearTimeout(handle)
+  }, [accessToken, query])
+
+  return (
+    <div className="relative">
+      <Input
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value)
+          setIsOpen(true)
+        }}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        placeholder="Buscar producto por nombre, código o SKU"
+      />
+      {isOpen ? (
+        <Card className="absolute z-50 mt-1 w-full overflow-hidden p-1 shadow-lg">
+          <div className="max-h-72 overflow-y-auto">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader className="h-6 w-6" />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
+            ) : (
+              items.map((product) => (
+                <button
+                  key={product.id}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted/60"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onValueChange(product.id)
+                    onProductSelected?.(product)
+                    setQuery(`${product.name} · ${product.sku}`)
+                    setIsOpen(false)
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate text-foreground">
+                    {product.name}
+                    <span className="text-muted-foreground"> · {product.sku}</span>
+                  </span>
+                  <Badge variant={product.status === 'ACTIVO' ? 'success' : 'outline'}>
+                    {product.status}
+                  </Badge>
+                </button>
+              ))
+            )}
+          </div>
+        </Card>
+      ) : null}
+    </div>
+  )
 }
 
 export function InventarioPage() {
@@ -1193,18 +1288,11 @@ export function InventarioPage() {
                   control={createForm.control}
                   name="productoId"
                   render={({ field }) => (
-                    <Select value={field.value || undefined} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona producto" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {dashboard.options.products.map((product) => (
-                          <SelectItem key={product.id} value={product.id}>
-                            {product.name} ({product.sku})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <LotProductAutocomplete
+                      accessToken={accessToken}
+                      value={field.value ?? ''}
+                      onValueChange={(value) => field.onChange(value)}
+                    />
                   )}
                 />
                 <FieldError message={createForm.formState.errors.productoId?.message} />
@@ -1245,6 +1333,7 @@ export function InventarioPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Fecha de fabricación</label>
                 <Input type="date" {...createForm.register('fechaFabricacion')} />
+                <p className="text-xs text-muted-foreground">Opcional. Úsala solo si el producto la reporta.</p>
                 <FieldError message={createForm.formState.errors.fechaFabricacion?.message} />
               </div>
 
@@ -1255,12 +1344,15 @@ export function InventarioPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Costo unitario</label>
+                <label className="text-sm font-medium">Costo de adquisición</label>
                 <Input
                   type="number"
                   step="0.000001"
                   {...createForm.register('costoUnitario', { valueAsNumber: true })}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Costo real de compra por unidad base. Se conserva por lote para valorización de inventario, costo de ventas y margen. No modifica los precios de venta del producto.
+                </p>
                 <FieldError message={createForm.formState.errors.costoUnitario?.message} />
               </div>
 
@@ -1299,8 +1391,12 @@ export function InventarioPage() {
                 <Input
                   type="number"
                   step="1"
+                  disabled
                   {...createForm.register('stockReservado', { valueAsNumber: true })}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Se inicializa en 0 al crear el lote. Los movimientos posteriores (ventas/reservas) lo actualizarán.
+                </p>
                 <FieldError message={createForm.formState.errors.stockReservado?.message} />
               </div>
 
@@ -1309,8 +1405,12 @@ export function InventarioPage() {
                 <Input
                   type="number"
                   step="1"
+                  disabled
                   {...createForm.register('stockBloqueado', { valueAsNumber: true })}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Se inicializa en 0 al crear el lote. Bloqueos operativos se registran desde el ajuste de stock.
+                </p>
                 <FieldError message={createForm.formState.errors.stockBloqueado?.message} />
               </div>
 
