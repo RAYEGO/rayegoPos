@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { useSearchParams } from 'react-router-dom'
@@ -361,29 +361,37 @@ function LotProductAutocomplete({
   onValueChange,
   onProductSelected,
   fallbackProducts,
+  inputKeySuffix,
 }: {
   accessToken: string
   value: string
   onValueChange: (value: string) => void
   onProductSelected?: (product: LotProductOptionItem) => void
   fallbackProducts?: LotProductOptionItem[]
+  inputKeySuffix?: string
 }) {
-  const [query, setQuery] = useState('')
+  const queryTextRef = useRef('')
+  const queryInputRef = useRef<HTMLInputElement>(null)
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [items, setItems] = useState<LotProductOptionItem[]>([])
+  const triggerSearchRef = useRef<() => void>(() => {})
 
   useEffect(() => {
-    if (!query.trim() || !accessToken) {
-      setItems([])
-      return
-    }
+    let handle: number | null = null
+    let cancelled = false
 
-    const handle = window.setTimeout(() => {
+    const run = () => {
+      const search = queryTextRef.current.trim()
+      if (!search || !accessToken) {
+        setItems([])
+        return
+      }
+
       setIsLoading(true)
       productsService
         .list(accessToken, {
-          search: query.trim(),
+          search,
           status: 'ACTIVO',
           page: 1,
           pageSize: 12,
@@ -391,6 +399,7 @@ function LotProductAutocomplete({
           sortDir: 'asc',
         })
         .then((response) => {
+          if (cancelled) return
           const subset: LotProductOptionItem[] = response.items.map((product) => ({
             id: product.id,
             name: product.name,
@@ -414,12 +423,27 @@ function LotProductAutocomplete({
           }))
           setItems(subset)
         })
-        .catch(() => setItems([]))
-        .finally(() => setIsLoading(false))
-    }, 250)
+        .catch(() => {
+          if (!cancelled) setItems([])
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoading(false)
+        })
+    }
 
-    return () => window.clearTimeout(handle)
-  }, [accessToken, query])
+    triggerSearchRef.current = () => {
+      setIsOpen(true)
+      if (handle) window.clearTimeout(handle)
+      handle = window.setTimeout(() => {
+        if (!cancelled) run()
+      }, 250)
+    }
+
+    return () => {
+      cancelled = true
+      if (handle) window.clearTimeout(handle)
+    }
+  }, [accessToken])
 
   useEffect(() => {
     if (!value) {
@@ -432,7 +456,9 @@ function LotProductAutocomplete({
       null
 
     if (match) {
-      setQuery(`${match.name} · ${match.sku}`)
+      const display = `${match.name} · ${match.sku}`
+      queryTextRef.current = display
+      if (queryInputRef.current) queryInputRef.current.value = display
       onProductSelected?.(match)
     }
   }, [fallbackProducts, items, onProductSelected, value])
@@ -440,13 +466,15 @@ function LotProductAutocomplete({
   return (
     <div className="relative">
       <Input
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value)
-          setIsOpen(true)
+        key={`lot-product-search-${inputKeySuffix ?? 'v1'}`}
+        ref={queryInputRef}
+        defaultValue={queryTextRef.current}
+        onInput={(event) => {
+          queryTextRef.current = event.currentTarget.value
+          triggerSearchRef.current()
         }}
         onFocus={() => setIsOpen(true)}
-        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 160)}
         placeholder="Buscar producto por nombre, código o SKU"
       />
       {isOpen ? (
@@ -468,7 +496,9 @@ function LotProductAutocomplete({
                   onClick={() => {
                     onValueChange(product.id)
                     onProductSelected?.(product)
-                    setQuery(`${product.name} · ${product.sku}`)
+                    const display = `${product.name} · ${product.sku}`
+                    queryTextRef.current = display
+                    if (queryInputRef.current) queryInputRef.current.value = display
                     setIsOpen(false)
                   }}
                 >
@@ -501,6 +531,8 @@ export function InventarioPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | InventoryLotStatus>('TODOS')
   const [productFilter, setProductFilter] = useState(() => initialProductId ?? 'TODOS')
+  const lotCreateInputKeyRef = useRef(0)
+  const isCreateDialogPrev = useRef(false)
   const [activeTab, setActiveTab] = useState<'lotes' | 'movimientos' | 'alertas'>(() => {
     if (initialTab === 'movimientos' || initialTab === 'alertas' || initialTab === 'lotes') {
       return initialTab
@@ -678,6 +710,13 @@ export function InventarioPage() {
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
+
+  useEffect(() => {
+    if (isCreateDialogOpen && !isCreateDialogPrev.current) {
+      lotCreateInputKeyRef.current += 1
+    }
+    isCreateDialogPrev.current = isCreateDialogOpen
+  }, [isCreateDialogOpen])
 
   useEffect(() => {
     setLotsPage(1)
@@ -1358,6 +1397,7 @@ export function InventarioPage() {
                       value={field.value ?? ''}
                       onValueChange={(value) => field.onChange(value)}
                       fallbackProducts={dashboard.options.products}
+                      inputKeySuffix={`create-${lotCreateInputKeyRef.current}`}
                     />
                   )}
                 />
