@@ -15,7 +15,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { getAuthContext, requireBranchAuthContext } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
   buildPackagingSnapshot,
@@ -1134,10 +1134,42 @@ export async function getPurchaseDashboard(
   request: FastifyRequest,
 ) {
   const search = filters.search?.trim().toLowerCase()
-  const { branchId, companyId } = await requireBranchAuthContext(request)
-  const staticOptions = await getPurchaseDashboardStaticOptions(companyId)
+  const authCtx = await getAuthContext(request)
+  const isPlatform = authCtx.isPlatformAdmin
+  const companyId = authCtx.companyId ?? null
+  const branchId = authCtx.branchId ?? null
 
-  if (filters.branchId && filters.branchId !== branchId) {
+  if (!isPlatform && (!companyId || !branchId)) {
+    throw createHttpError(409, 'Esta operación requiere una empresa y sucursal activas en la sesión.')
+  }
+
+  const dashboardCompanyId = isPlatform
+    ? filters.branchId
+      ? (
+          await prisma.sucursal.findFirst({
+            where: { id: filters.branchId, deletedAt: null, activo: true },
+            select: { empresaId: true },
+          })
+        )?.empresaId ?? null
+      : null
+    : companyId
+
+  const staticOptionsCompanyId = isPlatform
+    ? filters.branchId
+      ? dashboardCompanyId
+      : null
+    : companyId
+
+  const staticOptions = staticOptionsCompanyId
+    ? await getPurchaseDashboardStaticOptions(staticOptionsCompanyId)
+    : {
+        branches: [] as PurchaseDashboardStaticOptions['branches'],
+        suppliers: [] as PurchaseDashboardStaticOptions['suppliers'],
+        paymentMethods: [] as PurchaseDashboardStaticOptions['paymentMethods'],
+        products: [] as PurchaseDashboardStaticOptions['products'],
+      }
+
+  if (filters.branchId && !isPlatform && filters.branchId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para acceder a otra sucursal.')
   }
 
@@ -1146,8 +1178,17 @@ export async function getPurchaseDashboard(
     ...(filters.status ? { estado: filters.status } : {}),
     ...(filters.logisticsStatus ? { estadoLogistico: filters.logisticsStatus } : {}),
     ...(filters.financialStatus ? { estadoFinanciero: filters.financialStatus } : {}),
-    sucursalId: branchId,
+    ...(isPlatform
+      ? filters.branchId
+        ? { sucursalId: filters.branchId }
+        : {}
+      : { sucursalId: branchId as string }),
     ...(filters.supplierId ? { proveedorId: filters.supplierId } : {}),
+    ...(isPlatform && dashboardCompanyId
+      ? { sucursal: { empresaId: dashboardCompanyId } }
+      : !isPlatform && companyId
+        ? { sucursal: { empresaId: companyId } }
+        : {}),
   }
 
   const [codeMap, purchases] = await Promise.all([

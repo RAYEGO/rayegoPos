@@ -492,7 +492,23 @@ export function ComprasPage() {
 
       setDashboard(response)
     } catch (nextError) {
-      setError(getApiErrorMessage(nextError))
+      const message = getApiErrorMessage(nextError)
+      setError(message)
+      if (nextError instanceof ApiError) {
+        if (nextError.status === 401) {
+          await handleUnauthorizedRef.current(nextError.status, nextError.message, 'purchases.loadDashboard')
+          return
+        }
+        if (nextError.status === 409) {
+          toast.error('No se pudo cargar el módulo de compras', {
+            description: message,
+          })
+        } else {
+          toast.error(message)
+        }
+      } else {
+        toast.error(message)
+      }
     } finally {
       setIsLoading(false)
     }
