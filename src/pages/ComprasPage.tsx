@@ -636,10 +636,7 @@ export function ComprasPage() {
     products: dashboard?.options?.products ?? [],
   }
 
-  const canCreateOrders =
-    options.branches.length > 0 &&
-    options.suppliers.length > 0 &&
-    options.products.length > 0
+  const canCreateOrders = options.branches.length > 0 && options.suppliers.length > 0
 
   const receiveAvailableUnits = Math.max(
     0,

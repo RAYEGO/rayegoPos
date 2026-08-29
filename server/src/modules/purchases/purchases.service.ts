@@ -795,34 +795,38 @@ async function getPurchaseDashboardStaticOptions(
         requiresReference: method.requiereReferencia,
       }
     }),
-    products: products.map((product) => ({
-      packaging: buildPackagingSnapshot({
-        presentations: product.presentacionesEmpaque ?? [],
-        conversions: product.conversionesEmpaque ?? [],
-        purchasePresentationId: product.compraPresentacionId,
-      }),
-      id: product.id,
-      name: product.nombre,
-      sku: product.sku,
-      unitSymbol: product.unidadMedida.simbolo,
-      lastPurchaseCost: (() => {
-        const latestPurchaseDetail = product.detalleCompras[0]
-        if (!latestPurchaseDetail) {
-          return 0
-        }
+    products: products
+      .filter((product) =>
+        (product.presentacionesEmpaque ?? []).some((entry) => entry.permiteCompra),
+      )
+      .map((product) => ({
+        packaging: buildPackagingSnapshot({
+          presentations: product.presentacionesEmpaque ?? [],
+          conversions: product.conversionesEmpaque ?? [],
+          purchasePresentationId: product.compraPresentacionId,
+        }),
+        id: product.id,
+        name: product.nombre,
+        sku: product.sku,
+        unitSymbol: product.unidadMedida.simbolo,
+        lastPurchaseCost: (() => {
+          const latestPurchaseDetail = product.detalleCompras[0]
+          if (!latestPurchaseDetail) {
+            return 0
+          }
 
-        const factor =
-          latestPurchaseDetail.factorPresentacion ??
-          latestPurchaseDetail.factorEmpaque ??
-          1
+          const factor =
+            latestPurchaseDetail.factorPresentacion ??
+            latestPurchaseDetail.factorEmpaque ??
+            1
 
-        return Number(
-          (
-            decimalToNumber(latestPurchaseDetail.costoUnitario) * Math.max(1, factor)
-          ).toFixed(6),
-        )
-      })(),
-    })),
+          return Number(
+            (
+              decimalToNumber(latestPurchaseDetail.costoUnitario) * Math.max(1, factor)
+            ).toFixed(6),
+          )
+        })(),
+      })),
   }
 
   purchaseDashboardOptionsCache.set(companyId, {
