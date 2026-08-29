@@ -1290,7 +1290,10 @@ export function ProductosPage() {
           const created = await productsService.createMasterPresentation(accessToken, payload)
           toast.success('Presentación creada.')
           if (masterDialogTargetField === 'presentacionId') {
-            form.setValue('presentacionId', created.id, { shouldValidate: true })
+            const rows = form.getValues('empaque').map((entry, idx) =>
+              idx === 0 ? { ...entry, presentacionId: created.id } : entry,
+            )
+            form.setValue('empaque', rows as any, { shouldValidate: true })
           }
         }
 

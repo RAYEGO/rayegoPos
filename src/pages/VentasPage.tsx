@@ -284,7 +284,7 @@ export function VentasPage() {
 
     try {
       const response = await salesService.getDashboard(accessToken, {
-        search,
+        search: searchDebounced,
         categoryId: categoryFilter === 'TODAS' ? undefined : categoryFilter,
         availability: availabilityFilter,
         commercialTypeId: medicationTypeFilter === 'TODOS' ? undefined : medicationTypeFilter,
