@@ -2836,151 +2836,153 @@ export function ConfiguracionPage() {
         }}
       >
         <SidePanelContent>
-          <div className="space-y-6">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">
-                  {selectedBranch ? 'Editar sucursal' : 'Nueva sucursal'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {selectedBranch
-                    ? 'Actualiza los datos operativos y el estado de la sucursal.'
-                    : 'Crea una nueva sucursal para operar en la empresa actual.'}
-                </p>
-              </div>
-              <SidePanelClose asChild>
-                <Button variant="ghost" size="icon">
-                  <X className="h-4 w-4" />
-                </Button>
-              </SidePanelClose>
-            </div>
-
-            <form
-              className="space-y-4"
-              onSubmit={branchForm.handleSubmit(handleBranchSubmit)}
-            >
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  Nombre <span className="text-rose-600">*</span>
-                </label>
-                <Input
-                  placeholder="Ej. Sucursal Pichanaki"
-                  {...branchForm.register('nombre')}
-                  disabled={isBranchPanelSubmitting}
-                />
-                <FieldError message={branchForm.formState.errors.nombre?.message} />
-              </div>
-
-              {selectedBranch ? (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Código</label>
-                  <Input
-                    value={selectedBranch.codigo}
-                    disabled
-                    className="cursor-not-allowed bg-muted/60"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    El código no puede modificarse después de la creación.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    Código <span className="text-rose-600">*</span>
-                  </label>
-                  <Input
-                    placeholder="Ej. PICH"
-                    {...branchForm.register('codigo')}
-                    disabled={isBranchPanelSubmitting}
-                  />
-                  <FieldError message={branchForm.formState.errors.codigo?.message} />
-                  <p className="text-xs text-muted-foreground">
-                    Máximo 20 caracteres (letras, números, guion bajo o guion). Debe ser único
-                    dentro de la empresa.
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Dirección</label>
-                <Input
-                  placeholder="Av. principal 123"
-                  {...branchForm.register('direccion')}
-                  disabled={isBranchPanelSubmitting}
-                />
-                <FieldError message={branchForm.formState.errors.direccion?.message} />
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Teléfono</label>
-                  <Input
-                    placeholder="+51 900 000 000"
-                    {...branchForm.register('telefono')}
-                    disabled={isBranchPanelSubmitting}
-                  />
-                  <FieldError message={branchForm.formState.errors.telefono?.message} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Correo</label>
-                  <Input
-                    type="email"
-                    placeholder="sucursal@botica.pe"
-                    {...branchForm.register('email')}
-                    disabled={isBranchPanelSubmitting}
-                  />
-                  <FieldError message={branchForm.formState.errors.email?.message} />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4">
-                <div className="space-y-0.5">
-                  <p className="text-sm font-semibold text-foreground">Estado</p>
-                  <p className="text-xs text-muted-foreground">
-                    Una sucursal inactiva no aparecerá como opción para nuevas operaciones ni
-                    al iniciar sesión, pero conserva su historial.
-                  </p>
-                </div>
-                <Controller
-                  control={branchForm.control}
-                  name="activo"
-                  render={({ field }) => (
-                    <Switch
-                      checked={Boolean(field.value)}
-                      onCheckedChange={(checked) => field.onChange(checked === true)}
-                      disabled={isBranchPanelSubmitting}
-                    />
-                  )}
-                />
-              </div>
-
-              <div className="sticky bottom-0 -mx-6 mt-6 border-t bg-card px-6 pt-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <form
+            className="flex h-full flex-col"
+            onSubmit={branchForm.handleSubmit(handleBranchSubmit)}
+          >
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+              <div className="space-y-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="text-base font-semibold text-foreground">
+                      {selectedBranch ? 'Editar sucursal' : 'Nueva sucursal'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedBranch
+                        ? 'Actualiza los datos operativos y el estado de la sucursal.'
+                        : 'Crea una nueva sucursal para operar en la empresa actual.'}
+                    </p>
+                  </div>
                   <SidePanelClose asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={isBranchPanelSubmitting}
-                    >
-                      Cancelar
+                    <Button variant="ghost" size="icon">
+                      <X className="h-4 w-4" />
                     </Button>
                   </SidePanelClose>
-                  <Button type="submit" disabled={isBranchPanelSubmitting}>
-                    {isBranchPanelSubmitting ? (
-                      <>
-                        <Loader className="mr-2 h-4 w-4" />
-                        Guardando
-                      </>
-                    ) : selectedBranch ? (
-                      'Guardar cambios'
-                    ) : (
-                      'Crear sucursal'
-                    )}
-                  </Button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Nombre <span className="text-rose-600">*</span>
+                    </label>
+                    <Input
+                      placeholder="Ej. Sucursal Pichanaki"
+                      {...branchForm.register('nombre')}
+                      disabled={isBranchPanelSubmitting}
+                    />
+                    <FieldError message={branchForm.formState.errors.nombre?.message} />
+                  </div>
+
+                  {selectedBranch ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Código</label>
+                      <Input
+                        value={selectedBranch.codigo}
+                        disabled
+                        className="cursor-not-allowed bg-muted/60"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        El código no puede modificarse después de la creación.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">
+                        Código <span className="text-rose-600">*</span>
+                      </label>
+                      <Input
+                        placeholder="Ej. PICH"
+                        {...branchForm.register('codigo')}
+                        disabled={isBranchPanelSubmitting}
+                      />
+                      <FieldError message={branchForm.formState.errors.codigo?.message} />
+                      <p className="text-xs text-muted-foreground">
+                        Máximo 20 caracteres (letras, números, guion bajo o guion). Debe ser
+                        único dentro de la empresa.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Dirección</label>
+                    <Input
+                      placeholder="Av. principal 123"
+                      {...branchForm.register('direccion')}
+                      disabled={isBranchPanelSubmitting}
+                    />
+                    <FieldError message={branchForm.formState.errors.direccion?.message} />
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Teléfono</label>
+                      <Input
+                        placeholder="+51 900 000 000"
+                        {...branchForm.register('telefono')}
+                        disabled={isBranchPanelSubmitting}
+                      />
+                      <FieldError
+                        message={branchForm.formState.errors.telefono?.message}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Correo</label>
+                      <Input
+                        type="email"
+                        placeholder="sucursal@botica.pe"
+                        {...branchForm.register('email')}
+                        disabled={isBranchPanelSubmitting}
+                      />
+                      <FieldError message={branchForm.formState.errors.email?.message} />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-semibold text-foreground">Estado</p>
+                      <p className="text-xs text-muted-foreground">
+                        Una sucursal inactiva no aparecerá como opción para nuevas operaciones
+                        ni al iniciar sesión, pero conserva su historial.
+                      </p>
+                    </div>
+                    <Controller
+                      control={branchForm.control}
+                      name="activo"
+                      render={({ field }) => (
+                        <Switch
+                          checked={Boolean(field.value)}
+                          onCheckedChange={(checked) => field.onChange(checked === true)}
+                          disabled={isBranchPanelSubmitting}
+                        />
+                      )}
+                    />
+                  </div>
                 </div>
               </div>
-            </form>
-          </div>
+            </div>
+
+            <div className="border-t bg-card p-4 sm:p-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <SidePanelClose asChild>
+                  <Button type="button" variant="outline" disabled={isBranchPanelSubmitting}>
+                    Cancelar
+                  </Button>
+                </SidePanelClose>
+                <Button type="submit" disabled={isBranchPanelSubmitting}>
+                  {isBranchPanelSubmitting ? (
+                    <>
+                      <Loader className="mr-2 h-4 w-4" />
+                      Guardando
+                    </>
+                  ) : selectedBranch ? (
+                    'Guardar cambios'
+                  ) : (
+                    'Crear sucursal'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </form>
         </SidePanelContent>
       </SidePanel>
     </div>

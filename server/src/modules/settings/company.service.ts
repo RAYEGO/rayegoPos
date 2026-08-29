@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { requireBranchAuthContext } from '../../lib/auth.js'
@@ -254,18 +255,61 @@ type UploadCompanyLogoPayload = {
   base64: string
 }
 
-function getSupabaseConfig() {
-  const url = process.env.SUPABASE_URL?.trim()
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+type R2Config = {
+  endpoint: string
+  accessKeyId: string
+  secretAccessKey: string
+  bucket: string
+  publicBaseUrl: string
+  region: string
+}
 
-  if (!url || !serviceKey) {
+function normalizeBaseUrl(url: string) {
+  return url.trim().replace(/\/+$/, '')
+}
+
+function getR2Config(): R2Config {
+  const endpoint = process.env.R2_ENDPOINT?.trim()
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim()
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim()
+  const bucket = process.env.R2_BUCKET_COMPANY_ASSETS?.trim()
+  const publicBaseUrl = process.env.R2_PUBLIC_BASE_URL?.trim()
+  const region = process.env.R2_REGION?.trim() || 'auto'
+
+  if (!endpoint || !accessKeyId || !secretAccessKey || !bucket || !publicBaseUrl) {
     throw createHttpError(
       500,
-      'Supabase Storage no está configurado. Defina SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.',
+      [
+        'Cloudflare R2 no está configurado.',
+        'Defina R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_COMPANY_ASSETS y R2_PUBLIC_BASE_URL.',
+      ].join(' '),
     )
   }
 
-  return { url, serviceKey }
+  return {
+    endpoint,
+    accessKeyId,
+    secretAccessKey,
+    bucket,
+    publicBaseUrl: normalizeBaseUrl(publicBaseUrl),
+    region,
+  }
+}
+
+let r2Client: S3Client | null = null
+
+function getR2Client(config: R2Config) {
+  if (r2Client) return r2Client
+  r2Client = new S3Client({
+    region: config.region,
+    endpoint: config.endpoint,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    forcePathStyle: true,
+  })
+  return r2Client
 }
 
 function normalizeImageExtension(mimeType: string) {
@@ -277,61 +321,24 @@ function normalizeImageExtension(mimeType: string) {
   return null
 }
 
-function extractStorageObjectPath(logoUrl: string, bucket: string) {
-  const marker = `/storage/v1/object/public/${bucket}/`
-  const index = logoUrl.indexOf(marker)
-  if (index === -1) return null
-  return logoUrl.slice(index + marker.length)
-}
+function extractR2ObjectKey(logoUrl: string, publicBaseUrl: string) {
+  const base = normalizeBaseUrl(publicBaseUrl)
+  const normalizedLogoUrl = logoUrl.trim()
 
-async function supabaseStorageRequest({
-  url,
-  serviceKey,
-  method,
-  bucket,
-  path,
-  contentType,
-  body,
-}: {
-  url: string
-  serviceKey: string
-  method: 'PUT' | 'DELETE'
-  bucket: string
-  path: string
-  contentType?: string
-  body?: Uint8Array
-}) {
-  const endpoint = `${url.replace(/\/$/, '')}/storage/v1/object/${bucket}/${encodeURI(path)}`
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${serviceKey}`,
+  if (!normalizedLogoUrl.startsWith(`${base}/`)) {
+    return null
   }
 
-  if (method === 'PUT') {
-    headers['x-upsert'] = 'true'
-    if (contentType) {
-      headers['Content-Type'] = contentType
-    }
-  }
-
-  const response = await fetch(endpoint, {
-    method,
-    headers,
-    body: body ? Buffer.from(body) : undefined,
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '')
-    throw createHttpError(
-      502,
-      `No se pudo sincronizar el logo en Supabase Storage. ${errorText || response.statusText}`.trim(),
-    )
-  }
+  const key = normalizedLogoUrl.slice(base.length + 1)
+  if (!key) return null
+  return decodeURIComponent(key)
 }
 
 export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, request: FastifyRequest) {
   assertAdmin(request)
   const { companyId, userId } = await requireBranchAuthContext(request)
-  const { url, serviceKey } = getSupabaseConfig()
+  const r2Config = getR2Config()
+  const client = getR2Client(r2Config)
 
   const extension = normalizeImageExtension(payload.mimeType)
   if (!extension) {
@@ -355,10 +362,6 @@ export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, reque
     throw createHttpError(400, 'El archivo excede el tamaño máximo permitido (2 MB).')
   }
 
-  const bucket = 'company-logos'
-  const objectPath = `${companyId}/logo.${extension}`
-  const publicUrl = `${url.replace(/\/$/, '')}/storage/v1/object/public/${bucket}/${objectPath}`
-
   const existing = await prisma.empresa.findFirst({
     where: {
       id: companyId,
@@ -374,55 +377,100 @@ export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, reque
     throw createHttpError(404, 'La empresa no está disponible.')
   }
 
-  const previousPath = existing.logoUrl
-    ? extractStorageObjectPath(existing.logoUrl, bucket)
-    : null
+  const bucket = r2Config.bucket
+  const objectKey = `empresas/${companyId}/logo/logo-${Date.now()}.${extension}`
+  const publicUrl = `${r2Config.publicBaseUrl}/${objectKey}`
 
-  if (previousPath && previousPath !== objectPath) {
-    await supabaseStorageRequest({
-      url,
-      serviceKey,
-      method: 'DELETE',
-      bucket,
-      path: previousPath,
-    })
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: objectKey,
+        Body: Buffer.from(bytes),
+        ContentType: payload.mimeType,
+      }),
+    )
+  } catch (error) {
+    throw createHttpError(
+      502,
+      `No se pudo subir el logo a Cloudflare R2. ${error instanceof Error ? error.message : ''}`.trim(),
+    )
   }
 
-  await supabaseStorageRequest({
-    url,
-    serviceKey,
-    method: 'PUT',
-    bucket,
-    path: objectPath,
-    contentType: payload.mimeType,
-    body: bytes,
-  })
+  let updated:
+    | {
+        id: string
+        logoUrl: string | null
+        modoOperacion: 'IMPLEMENTACION' | 'PRODUCCION'
+        razonSocial: string
+        nombreComercial: string | null
+        numeroDocumento: string
+        direccion: string | null
+        telefono: string | null
+        email: string | null
+        monedaBase: string
+        igvPorDefecto: Prisma.Decimal | number
+        activo: boolean
+        createdAt: Date
+        updatedAt: Date
+      }
+    | null = null
 
-  const updated = await prisma.empresa.update({
-    where: {
-      id: companyId,
-    },
-    data: {
-      logoUrl: publicUrl,
-      updatedById: userId,
-    },
-    select: {
-      id: true,
-      logoUrl: true,
-      modoOperacion: true,
-      razonSocial: true,
-      nombreComercial: true,
-      numeroDocumento: true,
-      direccion: true,
-      telefono: true,
-      email: true,
-      monedaBase: true,
-      igvPorDefecto: true,
-      activo: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  })
+  try {
+    updated = await prisma.empresa.update({
+      where: {
+        id: companyId,
+      },
+      data: {
+        logoUrl: publicUrl,
+        updatedById: userId,
+      },
+      select: {
+        id: true,
+        logoUrl: true,
+        modoOperacion: true,
+        razonSocial: true,
+        nombreComercial: true,
+        numeroDocumento: true,
+        direccion: true,
+        telefono: true,
+        email: true,
+        monedaBase: true,
+        igvPorDefecto: true,
+        activo: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+  } catch (error) {
+    try {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: objectKey,
+        }),
+      )
+    } catch {
+    }
+
+    throw error
+  }
+
+  const previousKey = existing.logoUrl
+    ? extractR2ObjectKey(existing.logoUrl, r2Config.publicBaseUrl)
+    : null
+
+  if (previousKey && previousKey !== objectKey) {
+    try {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: previousKey,
+        }),
+      )
+    } catch {
+    }
+  }
 
   return { company: mapCompany(updated) }
 }
@@ -430,9 +478,9 @@ export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, reque
 export async function deleteCompanyLogo(request: FastifyRequest) {
   assertAdmin(request)
   const { companyId, userId } = await requireBranchAuthContext(request)
-  const { url, serviceKey } = getSupabaseConfig()
+  const r2Config = getR2Config()
+  const client = getR2Client(r2Config)
 
-  const bucket = 'company-logos'
   const existing = await prisma.empresa.findFirst({
     where: {
       id: companyId,
@@ -446,19 +494,6 @@ export async function deleteCompanyLogo(request: FastifyRequest) {
 
   if (!existing) {
     throw createHttpError(404, 'La empresa no está disponible.')
-  }
-
-  if (existing.logoUrl) {
-    const objectPath = extractStorageObjectPath(existing.logoUrl, bucket)
-    if (objectPath) {
-      await supabaseStorageRequest({
-        url,
-        serviceKey,
-        method: 'DELETE',
-        bucket,
-        path: objectPath,
-      })
-    }
   }
 
   const updated = await prisma.empresa.update({
@@ -486,6 +521,22 @@ export async function deleteCompanyLogo(request: FastifyRequest) {
       updatedAt: true,
     },
   })
+
+  const previousKey = existing.logoUrl
+    ? extractR2ObjectKey(existing.logoUrl, r2Config.publicBaseUrl)
+    : null
+
+  if (previousKey) {
+    try {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: r2Config.bucket,
+          Key: previousKey,
+        }),
+      )
+    } catch {
+    }
+  }
 
   return { company: mapCompany(updated) }
 }

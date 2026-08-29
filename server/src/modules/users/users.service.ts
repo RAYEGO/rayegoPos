@@ -223,10 +223,23 @@ export async function listUsersForCompany(
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'usuarios.read')
 
+  const now = new Date()
   const users = await prisma.usuario.findMany({
     where: {
       empresaId: companyId,
       deletedAt: null,
+      NOT: {
+        usuariosRoles: {
+          some: {
+            activo: true,
+            deletedAt: null,
+            rol: {
+              codigo: 'ADMIN_POS',
+            },
+            OR: [{ fechaFin: null }, { fechaFin: { gte: now } }],
+          },
+        },
+      },
     },
     select: {
       id: true,
@@ -242,7 +255,7 @@ export async function listUsersForCompany(
         where: {
           activo: true,
           deletedAt: null,
-          OR: [{ fechaFin: null }, { fechaFin: { gte: new Date() } }],
+          OR: [{ fechaFin: null }, { fechaFin: { gte: now } }],
         },
         select: {
           rol: { select: { codigo: true } },

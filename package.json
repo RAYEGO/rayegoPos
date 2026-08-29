@@ -43,6 +43,7 @@
     "prisma:seed:prod-local": "node scripts/run-with-project-env.mjs --env production -- tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1121.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/jwt": "^10.2.0",
     "@fontsource/inter": "^5.2.8",

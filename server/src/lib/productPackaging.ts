@@ -432,7 +432,7 @@ export function resolvePresentationEntry(
     }
   }
 
-  if (operation === 'PURCHASE' || operation === 'INVENTORY_IN') {
+  if (operation === 'PURCHASE') {
     if (!selected.permiteCompra) {
       return {
         ok: false as const,

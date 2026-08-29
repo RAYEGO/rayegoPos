@@ -130,6 +130,7 @@ export function UsuariosPage() {
   const { can, hasRole } = useAuthorization()
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const canSeePlatformUsers = hasRole('ADMIN_POS')
   const [filters, setFilters] = useState<UsersFilters>({
     search: '',
     role: 'TODOS',
@@ -193,6 +194,18 @@ export function UsuariosPage() {
     () => branches.filter((branch) => branch.activo),
     [branches],
   )
+
+  const visibleRoleDefinitions = useMemo(() => {
+    if (canSeePlatformUsers) return roleDefinitions
+    return roleDefinitions.filter((role) => role.key !== 'ADMIN_POS')
+  }, [canSeePlatformUsers])
+
+  useEffect(() => {
+    if (canSeePlatformUsers) return
+    if (filters.role === 'ADMIN_POS') {
+      setFilters((current) => ({ ...current, role: 'TODOS' }))
+    }
+  }, [canSeePlatformUsers, filters.role])
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = filters.search.trim().toLowerCase()
@@ -274,6 +287,10 @@ export function UsuariosPage() {
   async function onSubmitUserForm(values: UsersFormValues) {
     if (!accessToken) return
     try {
+      if (!canSeePlatformUsers && values.role === 'ADMIN_POS') {
+        toast.error('No puedes asignar el rol Administrador POS.')
+        return
+      }
       setSubmittingUserForm(true)
       const payload = {
         firstName: values.firstName,
@@ -433,7 +450,7 @@ export function UsuariosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="TODOS">Todos los roles</SelectItem>
-                  {roleDefinitions.map((role) => (
+                  {visibleRoleDefinitions.map((role) => (
                     <SelectItem key={role.key} value={role.key}>
                       {role.label}
                     </SelectItem>
@@ -843,7 +860,7 @@ export function UsuariosPage() {
                               <SelectValue placeholder="Selecciona un rol" />
                             </SelectTrigger>
                             <SelectContent>
-                              {roleDefinitions.map((role) => (
+                              {visibleRoleDefinitions.map((role) => (
                                 <SelectItem key={role.key} value={role.key}>
                                   {role.label}
                                 </SelectItem>
