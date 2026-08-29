@@ -400,6 +400,11 @@ export function ComprasPage() {
   const triggerProductoSearchRefreshRef = useRef(0)
   const [, setProductoSearchTick] = useState(0)
 
+  const form = useForm<CreatePurchaseFormValues>({
+    resolver: zodResolver(createPurchaseSchema),
+    defaultValues: defaultFormValues,
+  })
+
   const receiveForm = useForm<ReceivePurchaseFormValues>({
     resolver: zodResolver(receivePurchaseSchema),
     defaultValues: defaultReceiveFormValues,
