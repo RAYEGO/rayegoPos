@@ -213,6 +213,7 @@ function ProductAutocomplete({
 const initialInventoryItemSchema = z
   .object({
     productoId: z.string().uuid({ message: 'Selecciona un producto.' }),
+    presentacionId: z.string().uuid({ message: 'Selecciona una presentación.' }),
     numeroLote: z.string().min(2, 'Ingresa un lote.').max(80, 'Máximo 80 caracteres.'),
     fechaVencimiento: z.string().min(1, 'Ingresa una fecha de vencimiento.'),
     costoUnitario: z.number().min(0, 'El costo debe ser mayor o igual a 0.'),
@@ -318,6 +319,7 @@ export function ConfiguracionPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const [isDownloadingInitialInventoryTemplate, setIsDownloadingInitialInventoryTemplate] = useState(false)
   const [isCatalogDrawerOpen, setIsCatalogDrawerOpen] = useState(false)
   const [isCatalogImporting, setIsCatalogImporting] = useState(false)
   const [catalogImportSummary, setCatalogImportSummary] = useState<{
@@ -356,6 +358,7 @@ export function ConfiguracionPage() {
       items: [
         {
           productoId: '',
+          presentacionId: '',
           numeroLote: '',
           fechaVencimiento: '',
           costoUnitario: 0,
@@ -586,7 +589,7 @@ export function ConfiguracionPage() {
     }
   }, [initialInventoryForm])
 
-  const isImplementationMode = company?.operationMode !== 'PRODUCCION'
+  const isImplementationMode = company?.operationMode === 'IMPLEMENTACION'
 
   async function handlePurgeTestData() {
     if (!accessToken) return
@@ -650,26 +653,104 @@ export function ConfiguracionPage() {
     }
   }
 
-  function buildInitialInventoryCsvTemplate() {
-    return [
-      'sku,numeroLote,fechaVencimiento,costoUnitario,cantidad',
-      'PARA-500-CAJA,LOTE-001,2027-12-31,1.80,10',
-      'PARA-500-CAJA,LOTE-002,2027-12-31,1.80,5',
-      '',
-    ].join('\n')
+  function escapeCsv(value: string) {
+    const normalized = value ?? ''
+    if (/[",\n\r]/.test(normalized)) {
+      return `"${normalized.replace(/"/g, '""')}"`
+    }
+    return normalized
   }
 
-  function downloadCsvTemplate() {
-    const content = buildInitialInventoryCsvTemplate()
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'rayego-carga-inicial-template.csv'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+  async function buildInitialInventoryCsvTemplate() {
+    const headers = [
+      'sku',
+      'producto',
+      'presentacion',
+      'factorABase',
+      'cantidad',
+      'numeroLote',
+      'fechaVencimiento',
+      'costoAdquisicion',
+    ]
+
+    const lines: string[] = [headers.join(',')]
+    const skipped: Array<{ sku: string; name: string }> = []
+
+    let page = 1
+    let totalPages = 1
+
+    while (page <= totalPages) {
+      const response = await productsService.list(accessToken, {
+        search: '',
+        status: 'ACTIVO',
+        page,
+        pageSize: 200,
+        sortBy: 'name',
+        sortDir: 'asc',
+      })
+
+      totalPages = response.pagination.totalPages
+
+      for (const product of response.items) {
+        const presentations = product.packaging.presentations.filter(
+          (entry) => entry.factorToBase && entry.factorToBase > 0,
+        )
+
+        if (!presentations.length) {
+          skipped.push({ sku: product.sku, name: product.name })
+          continue
+        }
+
+        for (const presentation of presentations) {
+          lines.push(
+            [
+              escapeCsv(product.sku),
+              escapeCsv(product.name),
+              escapeCsv(presentation.name),
+              String(presentation.factorToBase),
+              '',
+              '',
+              '',
+              '',
+            ].join(','),
+          )
+        }
+      }
+
+      page += 1
+    }
+
+    return {
+      content: `${lines.join('\n')}\n`,
+      skipped,
+    }
+  }
+
+  async function downloadCsvTemplate() {
+    if (!accessToken) return
+    setIsDownloadingInitialInventoryTemplate(true)
+    try {
+      const { content, skipped } = await buildInitialInventoryCsvTemplate()
+      const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'rayego-carga-inicial-inventario.csv'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+
+      if (skipped.length) {
+        toast.warning(
+          `Se omitieron ${skipped.length} productos sin equivalencias válidas. Configura presentaciones/conversiones en Productos para incluirlos.`,
+        )
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsDownloadingInitialInventoryTemplate(false)
+    }
   }
 
   function parseCsv(content: string) {
@@ -689,7 +770,18 @@ export function ConfiguracionPage() {
 
     const delimiter = lines[0]?.includes(';') ? ';' : ','
     const headers = lines[0].split(delimiter).map((header) => header.trim())
-    const expectedHeaders = [
+    const expectedHeadersNew = [
+      'sku',
+      'producto',
+      'presentacion',
+      'factorabase',
+      'cantidad',
+      'numerolote',
+      'fechavencimiento',
+      'costoadquisicion',
+    ]
+
+    const expectedHeadersOld = [
       'sku',
       'numerolote',
       'fechavencimiento',
@@ -698,12 +790,16 @@ export function ConfiguracionPage() {
     ]
 
     const normalizedHeaders = headers.map((header) => header.toLowerCase())
-    const missing = expectedHeaders.filter((header) => !normalizedHeaders.includes(header))
-    if (missing.length) {
+    const hasNewFormat = expectedHeadersNew.every((header) => normalizedHeaders.includes(header))
+    const hasOldFormat = expectedHeadersOld.every((header) => normalizedHeaders.includes(header))
+
+    if (!hasNewFormat && !hasOldFormat) {
+      const missingNew = expectedHeadersNew.filter((header) => !normalizedHeaders.includes(header))
+      const missingOld = expectedHeadersOld.filter((header) => !normalizedHeaders.includes(header))
       throw new Error(
         formatImplementationMessage(
           'INVALID_FILE',
-          `Faltan columnas en el CSV: ${missing.join(', ')}`,
+          `Faltan columnas en el CSV. Nuevo formato: ${missingNew.join(', ')}. Formato anterior: ${missingOld.join(', ')}.`,
         ),
       )
     }
@@ -715,13 +811,29 @@ export function ConfiguracionPage() {
     return lines.slice(1).map((line, rowIndex) => {
       const columns = line.split(delimiter).map((col) => col.trim())
       const get = (key: string) => columns[headerIndex[key]] ?? ''
+      if (hasNewFormat) {
+        return {
+          row: rowIndex + 2,
+          format: 'new' as const,
+          sku: get('sku'),
+          producto: get('producto'),
+          presentacion: get('presentacion'),
+          factorABase: get('factorabase'),
+          cantidad: get('cantidad'),
+          numeroLote: get('numerolote'),
+          fechaVencimiento: get('fechavencimiento'),
+          costoAdquisicion: get('costoadquisicion'),
+        }
+      }
+
       return {
         row: rowIndex + 2,
+        format: 'old' as const,
         sku: get('sku'),
+        cantidad: get('cantidad'),
         numeroLote: get('numerolote'),
         fechaVencimiento: get('fechavencimiento'),
-        costoUnitario: get('costounitario'),
-        cantidad: get('cantidad'),
+        costoAdquisicion: get('costounitario'),
       }
     })
   }
@@ -779,8 +891,50 @@ export function ConfiguracionPage() {
           const message = err instanceof Error ? err.message : 'Producto no encontrado.'
           throw new Error(`Fila ${row.row}: ${message}`)
         }
+
+        let presentationId = product.packaging.purchasePresentationId ?? product.packaging.basePresentationId ?? ''
+
+        if (row.format === 'new') {
+          const expectedName = product.name.trim().toLowerCase()
+          const providedName = row.producto.trim().toLowerCase()
+          if (expectedName !== providedName) {
+            throw new Error(`Fila ${row.row}: El nombre del producto no coincide con el catálogo.`)
+          }
+
+          const presentationName = row.presentacion.trim()
+          if (!presentationName) {
+            throw new Error(`Fila ${row.row}: La presentación es obligatoria.`)
+          }
+
+          const presentation =
+            product.packaging.presentations.find(
+              (entry) => entry.name.trim().toLowerCase() === presentationName.toLowerCase(),
+            ) ?? null
+
+          if (!presentation) {
+            throw new Error(`Fila ${row.row}: La presentación no pertenece al producto.`)
+          }
+
+          if (!presentation.factorToBase || presentation.factorToBase <= 0) {
+            throw new Error(`Fila ${row.row}: La presentación no tiene un factor válido.`)
+          }
+
+          const providedFactor = Number(row.factorABase)
+          if (
+            !Number.isFinite(providedFactor) ||
+            Math.floor(providedFactor) !== Math.floor(presentation.factorToBase)
+          ) {
+            throw new Error(`Fila ${row.row}: El factor a base no coincide con el maestro del producto.`)
+          }
+
+          presentationId = presentation.id
+        }
+
+        if (!presentationId) {
+          throw new Error(`Fila ${row.row}: No se pudo resolver una presentación válida para el producto.`)
+        }
         const quantity = Number(row.cantidad)
-        const unitCost = Number(row.costoUnitario)
+        const unitCost = Number(row.costoAdquisicion)
         if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) {
           throw new Error(`Fila ${row.row}: La cantidad debe ser un entero mayor a 0.`)
         }
@@ -790,6 +944,7 @@ export function ConfiguracionPage() {
 
         items.push({
           productoId: product.id,
+          presentacionId: presentationId,
           numeroLote: row.numeroLote,
           fechaVencimiento: row.fechaVencimiento,
           costoUnitario: unitCost,
@@ -2420,7 +2575,8 @@ export function ConfiguracionPage() {
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={() => downloadCsvTemplate()}
+                          disabled={isDownloadingInitialInventoryTemplate}
+                          onClick={() => void downloadCsvTemplate()}
                         >
                           <Download className="mr-2 h-4 w-4" />
                           Descargar plantilla CSV
@@ -2452,24 +2608,27 @@ export function ConfiguracionPage() {
                         const itemError = initialInventoryForm.formState.errors.items?.[index]
                         const productId = initialInventoryForm.watch(`items.${index}.productoId`)
                         const selectedProduct = productId ? productCache[productId] ?? null : null
-                        const purchasePresentationId =
-                          selectedProduct?.packaging?.purchasePresentationId ?? null
-                        const purchasePresentation =
-                          purchasePresentationId && selectedProduct?.packaging?.presentations?.length
-                            ? selectedProduct.packaging.presentations.find(
-                                (entry) => entry.id === purchasePresentationId,
-                              ) ?? null
-                            : null
-                        const purchaseFactor =
-                          purchasePresentation?.factorToBase && purchasePresentation.factorToBase > 0
-                            ? purchasePresentation.factorToBase
+                        const selectedPresentationId = initialInventoryForm.watch(
+                          `items.${index}.presentacionId`,
+                        ) as string
+                        const presentationOptions = selectedProduct?.packaging?.presentations?.length
+                          ? selectedProduct.packaging.presentations.filter(
+                              (entry) => entry.factorToBase && entry.factorToBase > 0,
+                            )
+                          : []
+                        const selectedPresentation = selectedPresentationId
+                          ? presentationOptions.find((entry) => entry.id === selectedPresentationId) ?? null
+                          : null
+                        const selectedFactor =
+                          selectedPresentation?.factorToBase && selectedPresentation.factorToBase > 0
+                            ? selectedPresentation.factorToBase
                             : null
                         const selectedQuantity = initialInventoryForm.watch(
                           `items.${index}.cantidad`,
                         ) as number
                         const baseUnits =
-                          purchaseFactor && Number.isFinite(selectedQuantity)
-                            ? Math.floor(Number(selectedQuantity)) * purchaseFactor
+                          selectedFactor && Number.isFinite(selectedQuantity)
+                            ? Math.floor(Number(selectedQuantity)) * selectedFactor
                             : null
                         return (
                           <div key={field.id} className="rounded-xl border p-4">
@@ -2492,18 +2651,77 @@ export function ConfiguracionPage() {
                                 <ProductAutocomplete
                                   accessToken={accessToken}
                                   value={productId}
-                                  onValueChange={(value) =>
+                                  onValueChange={(value) => {
                                     initialInventoryForm.setValue(`items.${index}.productoId`, value, {
                                       shouldValidate: true,
                                       shouldDirty: true,
                                     })
-                                  }
+                                    initialInventoryForm.setValue(`items.${index}.presentacionId`, '', {
+                                      shouldValidate: true,
+                                      shouldDirty: true,
+                                    })
+                                  }}
                                   onProductSelected={(product) => {
                                     setProductCache((prev) => ({ ...prev, [product.id]: product }))
+                                    const options = product.packaging.presentations.filter(
+                                      (entry) => entry.factorToBase && entry.factorToBase > 0,
+                                    )
+                                    const desired =
+                                      (product.packaging.purchasePresentationId &&
+                                        options.some(
+                                          (entry) => entry.id === product.packaging.purchasePresentationId,
+                                        ) &&
+                                        product.packaging.purchasePresentationId) ||
+                                      (product.packaging.basePresentationId &&
+                                        options.some(
+                                          (entry) => entry.id === product.packaging.basePresentationId,
+                                        ) &&
+                                        product.packaging.basePresentationId) ||
+                                      options[0]?.id ||
+                                      ''
+                                    initialInventoryForm.setValue(`items.${index}.presentacionId`, desired, {
+                                      shouldValidate: true,
+                                      shouldDirty: true,
+                                    })
                                   }}
                                   placeholder="Buscar por nombre o SKU"
                                 />
                                 <FieldError message={itemError?.productoId?.message} />
+                              </div>
+
+                              <div className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  Presentación de ingreso
+                                </p>
+                                <Controller
+                                  control={initialInventoryForm.control}
+                                  name={`items.${index}.presentacionId` as const}
+                                  render={({ field }) => (
+                                    <Select value={field.value} onValueChange={field.onChange}>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Selecciona presentación" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {presentationOptions.map((entry) => (
+                                          <SelectItem key={entry.id} value={entry.id}>
+                                            {entry.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                />
+                                <FieldError message={itemError?.presentacionId?.message} />
+                                {selectedPresentation && selectedFactor ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    1 {selectedPresentation.name} = {selectedFactor} unidades base
+                                  </p>
+                                ) : null}
+                                {baseUnits ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    Stock que se registrará: {baseUnits} unidades base
+                                  </p>
+                                ) : null}
                               </div>
 
                               <div className="space-y-2">
@@ -2516,12 +2734,6 @@ export function ConfiguracionPage() {
                                   })}
                                 />
                                 <FieldError message={itemError?.cantidad?.message} />
-                                {baseUnits ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    Se registrarán {baseUnits} unidades base.
-                                    {purchasePresentation ? ` (${purchasePresentation.name})` : ''}
-                                  </p>
-                                ) : null}
                               </div>
 
                               <div className="space-y-2">
@@ -2542,7 +2754,9 @@ export function ConfiguracionPage() {
                               </div>
 
                               <div className="space-y-2">
-                                <p className="text-xs font-medium text-muted-foreground">Costo inicial</p>
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  Costo de adquisición
+                                </p>
                                 <Input
                                   type="number"
                                   step="0.01"
@@ -2564,6 +2778,7 @@ export function ConfiguracionPage() {
                         onClick={() =>
                           appendItem({
                             productoId: '',
+                            presentacionId: '',
                             numeroLote: '',
                             fechaVencimiento: '',
                             costoUnitario: 0,

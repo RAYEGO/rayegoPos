@@ -11,6 +11,7 @@ const createInitialInventoryLoadSchema = z.object({
     .array(
       z.object({
         productoId: z.string().uuid(),
+        presentacionId: z.string().uuid().optional(),
         numeroLote: z.string().min(2).max(80),
         fechaVencimiento: z.string().min(1),
         costoUnitario: z.number().nonnegative(),

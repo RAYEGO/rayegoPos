@@ -60,7 +60,7 @@ function resolveLotStatus({
 
 function assertAdmin(request: FastifyRequest) {
   const roles = request.auth?.roles ?? []
-  if (!roles.includes('ADMIN')) {
+  if (!roles.includes('ADMIN') && !roles.includes('ADMIN_EMPRESA')) {
     throw createHttpError(403, 'No tienes permisos para acceder a esta sección.')
   }
 }
@@ -91,8 +91,35 @@ async function assertCompanyInImplementationMode(companyId: string) {
   }
 }
 
+async function assertCompanyAllowsInitialInventoryMode(companyId: string) {
+  const company = await prisma.empresa.findFirst({
+    where: {
+      id: companyId,
+      deletedAt: null,
+    },
+    select: {
+      modoOperacion: true,
+    },
+  })
+
+  if (!company) {
+    throw createHttpError(404, 'La empresa no está disponible.')
+  }
+
+  if (company.modoOperacion !== 'IMPLEMENTACION' && company.modoOperacion !== 'PRODUCCION') {
+    throw createHttpError(
+      409,
+      [
+        'Esta herramienta solo está disponible mientras la empresa se encuentre en modo IMPLEMENTACIÓN o PRODUCCIÓN.',
+        `Modo actual: ${company.modoOperacion}.`,
+      ].join('\n\n'),
+    )
+  }
+}
+
 type ImplementationInventoryLoadItemInput = {
   productoId: string
+  presentacionId?: string
   numeroLote: string
   fechaVencimiento: string
   costoUnitario: number
@@ -214,7 +241,7 @@ export async function createInitialInventoryLoad(
 ) {
   const { userId, branchId, companyId } = await requireBranchAuthContext(request)
   assertAdmin(request)
-  await assertCompanyInImplementationMode(companyId)
+  await assertCompanyAllowsInitialInventoryMode(companyId)
 
   if (!payload.items.length) {
     throw createHttpError(400, 'Registra al menos un lote para cargar inventario.')
@@ -237,6 +264,7 @@ export async function createInitialInventoryLoad(
       requestedUnitCost,
       lotCode: normalizeLotCode(item.numeroLote),
       expiryDate: parseExpiryDate(item.fechaVencimiento),
+      presentationId: item.presentacionId?.trim() ? item.presentacionId.trim() : null,
     }
   })
 
@@ -297,7 +325,7 @@ export async function createInitialInventoryLoad(
 
       const payloadLots = new Set<string>()
       for (const item of normalizedItems) {
-        const key = `${item.productoId}:${item.lotCode}`
+        const key = `${item.productoId}:${item.lotCode}:${item.presentationId ?? ''}`
         if (payloadLots.has(key)) {
           throw createHttpError(409, lotAlreadyExistsMessage())
         }
@@ -320,11 +348,29 @@ export async function createInitialInventoryLoad(
         existingLots.map((lot) => `${lot.productoId}:${normalizeLotCode(lot.numeroLote)}`),
       )
 
+      const lotGroups = new Map<
+        string,
+        Array<
+          (typeof normalizedItems)[number] & {
+            product: (typeof products)[number]
+          }
+        >
+      >()
+
       for (const item of normalizedItems) {
         const key = `${item.productoId}:${item.lotCode}`
         if (existingLotKeys.has(key)) {
           throw createHttpError(409, lotAlreadyExistsMessage())
         }
+
+        const product = productById.get(item.productoId) ?? null
+        if (!product) {
+          throw createHttpError(404, IMPLEMENTATION_MESSAGES.PRODUCT_NOT_FOUND)
+        }
+
+        const entries = lotGroups.get(key) ?? []
+        entries.push({ ...item, product })
+        lotGroups.set(key, entries)
       }
 
       const reason = await ensureMovementReason(tx, userId, {
@@ -339,7 +385,7 @@ export async function createInitialInventoryLoad(
           sucursalId: branchId,
           estado: 'COMPLETADA',
           productosCargados: uniqueProducts.size,
-          lotesCreados: normalizedItems.length,
+          lotesCreados: lotGroups.size,
           createdById: userId,
           updatedById: userId,
         },
@@ -358,61 +404,88 @@ export async function createInitialInventoryLoad(
         },
       })
 
-      for (const item of normalizedItems) {
-        const product = productById.get(item.productoId) ?? null
-        if (!product) {
-          throw createHttpError(404, IMPLEMENTATION_MESSAGES.PRODUCT_NOT_FOUND)
-        }
+      for (const entries of lotGroups.values()) {
+        const first = entries[0]
+        if (!first) continue
 
-        if (product.estado !== EstadoProducto.ACTIVO) {
+        if (first.product.estado !== EstadoProducto.ACTIVO) {
           throw createHttpError(400, IMPLEMENTATION_MESSAGES.PRODUCT_INACTIVE)
         }
 
-        const purchasePresentationId =
-          product.compraPresentacionId ??
-          product.presentacionesEmpaque.find((entry) => entry.esBase)?.presentacion.id ??
-          ''
-
-        const packagingContext = resolvePackagingOperationContext({
-          operation: 'INVENTORY_IN',
-          presentationId: purchasePresentationId,
-          presentations: product.presentacionesEmpaque ?? [],
-          conversions: product.conversionesEmpaque ?? [],
-          unresolvedFactorMessage:
-            'No fue posible resolver la equivalencia para la presentación principal de compra.',
-        })
-
-        if (!packagingContext.ok) {
-          throw createHttpError(400, packagingContext.error)
+        const expiryKey = first.expiryDate.toISOString()
+        for (const entry of entries) {
+          if (entry.expiryDate.toISOString() !== expiryKey) {
+            throw createHttpError(400, 'El vencimiento debe ser el mismo para un mismo lote.')
+          }
         }
 
-        const quantity = convertQuantityToBaseUnits({
-          quantity: item.requestedQuantity,
-          factorToBase: packagingContext.factorToBase,
-        })
-        if (quantity === null) {
-          throw createHttpError(400, 'La cantidad convertida no es válida.')
+        let totalBaseUnits = 0
+        let totalCostInBaseUnits = 0
+
+        for (const entry of entries) {
+          const defaultPresentationId =
+            entry.product.compraPresentacionId ??
+            entry.product.presentacionesEmpaque.find((item) => item.esBase)?.presentacion.id ??
+            ''
+
+          const selectedPresentationId = entry.presentationId ?? defaultPresentationId
+          if (!selectedPresentationId) {
+            throw createHttpError(400, 'Selecciona una presentación válida para registrar el inventario.')
+          }
+
+          const packagingContext = resolvePackagingOperationContext({
+            operation: 'INVENTORY_IN',
+            presentationId: selectedPresentationId,
+            presentations: entry.product.presentacionesEmpaque ?? [],
+            conversions: entry.product.conversionesEmpaque ?? [],
+            unresolvedFactorMessage:
+              'No fue posible resolver la equivalencia hacia la unidad base del producto.',
+          })
+
+          if (!packagingContext.ok) {
+            throw createHttpError(400, packagingContext.error)
+          }
+
+          const quantityInBaseUnits = convertQuantityToBaseUnits({
+            quantity: entry.requestedQuantity,
+            factorToBase: packagingContext.factorToBase,
+          })
+          if (quantityInBaseUnits === null) {
+            throw createHttpError(400, 'La cantidad convertida no es válida.')
+          }
+
+          const unitCostInBaseUnits = convertAmountToBaseUnit({
+            amount: entry.requestedUnitCost,
+            factorToBase: packagingContext.factorToBase,
+          })
+          if (unitCostInBaseUnits === null) {
+            throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
+          }
+
+          totalBaseUnits += quantityInBaseUnits
+          totalCostInBaseUnits += quantityInBaseUnits * unitCostInBaseUnits
         }
 
-        const costoUnitario = convertAmountToBaseUnit({
-          amount: item.requestedUnitCost,
-          factorToBase: packagingContext.factorToBase,
-        })
-        if (costoUnitario === null) {
-          throw createHttpError(400, 'No fue posible calcular el costo unitario en unidad base.')
+        if (!Number.isFinite(totalBaseUnits) || totalBaseUnits <= 0) {
+          throw createHttpError(400, 'La cantidad total no es válida.')
+        }
+
+        const avgUnitCostInBaseUnits = totalCostInBaseUnits / totalBaseUnits
+        if (!Number.isFinite(avgUnitCostInBaseUnits) || avgUnitCostInBaseUnits < 0) {
+          throw createHttpError(400, 'No fue posible calcular el costo unitario promedio en unidad base.')
         }
 
         await tx.inventario.upsert({
           where: {
             sucursalId_productoId: {
               sucursalId: branchId,
-              productoId: item.productoId,
+              productoId: first.productoId,
             },
           },
           update: {},
           create: {
             sucursalId: branchId,
-            productoId: item.productoId,
+            productoId: first.productoId,
             ubicacion: null,
             createdById: userId,
             updatedById: userId,
@@ -422,20 +495,20 @@ export async function createInitialInventoryLoad(
         const lot = await tx.lote.create({
           data: {
             sucursalId: branchId,
-            productoId: item.productoId,
+            productoId: first.productoId,
             proveedorId: null,
             detalleCompraId: null,
-            numeroLote: item.lotCode,
+            numeroLote: first.lotCode,
             fechaFabricacion: null,
-            fechaVencimiento: item.expiryDate,
-            costoUnitario: toDecimal(costoUnitario, 6),
-            stockInicial: quantity,
-            stockDisponible: quantity,
+            fechaVencimiento: first.expiryDate,
+            costoUnitario: toDecimal(avgUnitCostInBaseUnits, 6),
+            stockInicial: totalBaseUnits,
+            stockDisponible: totalBaseUnits,
             stockReservado: 0,
             stockBloqueado: 0,
             estado: resolveLotStatus({
-              expiryDate: item.expiryDate,
-              availableUnits: quantity,
+              expiryDate: first.expiryDate,
+              availableUnits: totalBaseUnits,
               reservedUnits: 0,
               blockedUnits: 0,
             }),
@@ -448,15 +521,15 @@ export async function createInitialInventoryLoad(
         await tx.movimientoInventario.create({
           data: {
             sucursalId: branchId,
-            productoId: item.productoId,
+            productoId: first.productoId,
             loteId: lot.id,
             motivoId: reason.id,
             tipo: TipoMovimientoInventario.ENTRADA,
             origen: OrigenMovimientoInventario.INVENTARIO_INICIAL,
             fechaMovimiento: new Date(),
-            cantidad: quantity,
-            costoUnitario: toDecimal(costoUnitario, 6),
-            stockResultante: quantity,
+            cantidad: totalBaseUnits,
+            costoUnitario: toDecimal(avgUnitCostInBaseUnits, 6),
+            stockResultante: totalBaseUnits,
             referencia: `Carga inicial ${load.id}`,
             observaciones: 'Carga inicial de inventario',
             createdById: userId,
@@ -468,12 +541,12 @@ export async function createInitialInventoryLoad(
           data: {
             cargaId: load.id,
             sucursalId: branchId,
-            productoId: item.productoId,
+            productoId: first.productoId,
             loteId: lot.id,
-            numeroLote: item.lotCode,
-            fechaVencimiento: item.expiryDate,
-            costoUnitario: toDecimal(costoUnitario, 6),
-            cantidad: quantity,
+            numeroLote: first.lotCode,
+            fechaVencimiento: first.expiryDate,
+            costoUnitario: toDecimal(avgUnitCostInBaseUnits, 6),
+            cantidad: totalBaseUnits,
             createdById: userId,
             updatedById: userId,
           },

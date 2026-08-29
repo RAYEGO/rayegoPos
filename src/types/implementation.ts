@@ -15,6 +15,7 @@ export type ListInitialInventoryLoadsResponse = {
 export type CreateInitialInventoryLoadPayload = {
   items: Array<{
     productoId: string
+    presentacionId?: string
     numeroLote: string
     fechaVencimiento: string
     costoUnitario: number
