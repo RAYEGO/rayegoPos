@@ -23,6 +23,7 @@ function GlobalDialogSanitizer() {
     document.addEventListener('focusout', onAnyFocusChange, true)
 
     const onKeyDownCapture = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return
       const target = event.target as HTMLElement | null
       if (!target) return
       const tag = target.tagName
@@ -30,10 +31,14 @@ function GlobalDialogSanitizer() {
         const asEl = target as HTMLInputElement | HTMLTextAreaElement
         if (!asEl.disabled && !(asEl as any).readOnly) {
           if (document.activeElement !== target) {
-            try {
-              target.focus({ preventScroll: true })
-            } catch {
-            }
+            window.requestAnimationFrame(() => {
+              try {
+                if (document.activeElement !== target && !asEl.disabled && !(asEl as any).readOnly) {
+                  target.focus({ preventScroll: true })
+                }
+              } catch {
+              }
+            })
           }
         }
       }
