@@ -397,11 +397,8 @@ export function ComprasPage() {
   const [productoSearchKeySuffix, setProductoSearchKeySuffix] = useState(0)
   const [globalProductoSearchOpen, setGlobalProductoSearchOpen] = useState<boolean>(false)
   const [createLineaPresentacionId, setCreateLineaPresentacionId] = useState<Record<number, string>>({})
-
-  const form = useForm<CreatePurchaseFormValues>({
-    resolver: zodResolver(createPurchaseSchema),
-    defaultValues: defaultFormValues,
-  })
+  const triggerProductoSearchRefreshRef = useRef(0)
+  const [, setProductoSearchTick] = useState(0)
 
   const receiveForm = useForm<ReceivePurchaseFormValues>({
     resolver: zodResolver(receivePurchaseSchema),
@@ -2375,9 +2372,10 @@ export function ComprasPage() {
                       ref={globalProductoSearchInputRef}
                       key={`compras-productos-search-${productoSearchKeySuffix}`}
                       defaultValue=""
-                      onChange={(event) => {
-                        globalProductoSearchTextRef.current = event.target.value
-                        setProductoSearchKeySuffix((x) => x + 1)
+                      onInput={(event) => {
+                        globalProductoSearchTextRef.current = event.currentTarget.value
+                        triggerProductoSearchRefreshRef.current++
+                        setProductoSearchTick((x) => x + 1)
                         setGlobalProductoSearchOpen(true)
                       }}
                       onFocus={() => setGlobalProductoSearchOpen(true)}

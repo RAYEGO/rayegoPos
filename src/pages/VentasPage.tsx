@@ -223,6 +223,7 @@ export function VentasPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [searchKeySuffix, setSearchKeySuffix] = useState(0)
   const [searchDebounced, setSearchDebounced] = useState('')
+  const triggerSearchRef = useRef<() => void>(() => {})
   const [categoryFilter, setCategoryFilter] = useState<string>('TODAS')
   const [availabilityFilter, setAvailabilityFilter] = useState<'TODOS' | 'CON_STOCK' | 'SIN_STOCK'>('TODOS')
   const [medicationTypeFilter, _setMedicationTypeFilter] = useState<string>('TODOS')
@@ -238,11 +239,16 @@ export function VentasPage() {
   const handleUnauthorized = useHandleUnauthorized('VentasPage')
 
   useEffect(() => {
-    const handle = window.setTimeout(() => {
-      setSearchDebounced(searchTextRef.current)
-    }, 220)
-    return () => window.clearTimeout(handle)
-  }, [searchKeySuffix])
+    let handle: number | null = null
+    const run = () => setSearchDebounced(searchTextRef.current)
+    triggerSearchRef.current = () => {
+      if (handle) window.clearTimeout(handle)
+      handle = window.setTimeout(run, 220)
+    }
+    return () => {
+      if (handle) window.clearTimeout(handle)
+    }
+  }, [])
 
   useEffect(() => {
     setSearchKeySuffix((x) => x + 1)
@@ -750,9 +756,9 @@ export function VentasPage() {
                   ref={searchInputRef}
                   key={`ventas-search-${searchKeySuffix}`}
                   defaultValue=""
-                  onChange={(event) => {
-                    searchTextRef.current = event.target.value
-                    setSearchKeySuffix((x) => x + 1)
+                  onInput={(event) => {
+                    searchTextRef.current = event.currentTarget.value
+                    triggerSearchRef.current()
                   }}
                   placeholder="Buscar por nombre, código de barras o principio activo"
                   className="pl-9"
