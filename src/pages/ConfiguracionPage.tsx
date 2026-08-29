@@ -105,6 +105,7 @@ function ProductAutocomplete({
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [items, setItems] = useState<ProductCatalogItem[]>([])
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!query.trim() || !accessToken) {
@@ -132,6 +133,28 @@ function ProductAutocomplete({
   }, [accessToken, query])
 
   useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+
+    const handleFocus = () => setIsOpen(true)
+    const handleBlur = () => window.setTimeout(() => setIsOpen(false), 120)
+    const handleInput = () => {
+      setQuery(el.value)
+      setIsOpen(true)
+    }
+
+    el.addEventListener('focus', handleFocus)
+    el.addEventListener('blur', handleBlur)
+    el.addEventListener('input', handleInput)
+
+    return () => {
+      el.removeEventListener('focus', handleFocus)
+      el.removeEventListener('blur', handleBlur)
+      el.removeEventListener('input', handleInput)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!value) {
       return
     }
@@ -140,13 +163,7 @@ function ProductAutocomplete({
   return (
     <div className="relative">
       <Input
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value)
-          setIsOpen(true)
-        }}
-        onFocus={() => setIsOpen(true)}
-        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        ref={inputRef}
         placeholder={placeholder}
       />
       {isOpen ? (
@@ -168,7 +185,11 @@ function ProductAutocomplete({
                   onClick={() => {
                     onValueChange(product.id)
                     onProductSelected?.(product)
-                    setQuery(`${product.name} · ${product.sku}`)
+                    if (inputRef.current) {
+                      inputRef.current.value = `${product.name} · ${product.sku}`
+                    }
+                    setQuery('')
+                    setItems([])
                     setIsOpen(false)
                   }}
                 >
