@@ -55,6 +55,7 @@ import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { inventoryService } from '@/services/inventoryService'
 import { productsService } from '@/services/productsService'
+import type { ProductStatus } from '@/types/products'
 import type {
   AdjustInventoryLotPayload,
   CreateInventoryLotPayload,
@@ -82,6 +83,7 @@ type LotProductOptionItem = {
   name: string
   sku: string
   unitSymbol: string
+  status?: ProductStatus
   packaging:
     | {
         basePresentationId: string | null
@@ -394,6 +396,7 @@ function LotProductAutocomplete({
             name: product.name,
             sku: product.sku,
             unitSymbol: product.unitSymbol,
+            status: product.status,
             packaging: product.packaging
               ? {
                   basePresentationId: product.packaging.basePresentationId,
@@ -473,8 +476,8 @@ function LotProductAutocomplete({
                     {product.name}
                     <span className="text-muted-foreground"> · {product.sku}</span>
                   </span>
-                  <Badge variant={product.status === 'ACTIVO' ? 'success' : 'outline'}>
-                    {product.status}
+                  <Badge variant={(product.status ?? 'ACTIVO') === 'ACTIVO' ? 'success' : 'outline'}>
+                    {product.status ?? 'ACTIVO'}
                   </Badge>
                 </button>
               ))
