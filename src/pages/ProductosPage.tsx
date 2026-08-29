@@ -1821,33 +1821,33 @@ export function ProductosPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openDetailDialog(product)}>
+                            <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openDetailDialog(product), 0))}>
                               <Eye className="h-4 w-4 mr-2" />
                               Ver detalle
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openEditDialog(product)}>
+                            <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openEditDialog(product), 0))}>
                               <Edit className="h-4 w-4 mr-2" />
                               Editar
                             </DropdownMenuItem>
                             {product.status === 'ACTIVO' ? (
                               <>
-                                <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openDuplicateDialog(product), 0))}>
                                   <Copy className="h-4 w-4 mr-2" />
                                   Duplicar
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => requestConfirm('deactivate', product)}>
+                                <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => requestConfirm('deactivate', product), 0))}>
                                   <Power className="h-4 w-4 mr-2" />
                                   Desactivar
                                 </DropdownMenuItem>
                               </>
                             ) : (
                               <>
-                                <DropdownMenuItem onClick={() => requestConfirm('activate', product)}>
+                                <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => requestConfirm('activate', product), 0))}>
                                   <Power className="h-4 w-4 mr-2" />
                                   Activar
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openDuplicateDialog(product), 0))}>
                                   <Copy className="h-4 w-4 mr-2" />
                                   Duplicar
                                 </DropdownMenuItem>
@@ -1857,7 +1857,7 @@ export function ProductosPage() {
                                     <DropdownMenuItem
                                       className="text-destructive"
                                       disabled={!product.canDelete}
-                                      onClick={() => requestConfirm('delete', product)}
+                                      onSelect={() => queueMicrotask(() => setTimeout(() => requestConfirm('delete', product), 0))}
                                     >
                                       <Trash2 className="h-4 w-4 mr-2" />
                                       Eliminar
@@ -1967,33 +1967,33 @@ export function ProductosPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => openDetailDialog(product)}>
+                                <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openDetailDialog(product), 0))}>
                                   <Eye className="h-4 w-4 mr-2" />
                                   Ver detalle
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => openEditDialog(product)}>
+                                <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openEditDialog(product), 0))}>
                                   <Edit className="h-4 w-4 mr-2" />
                                   Editar
                                 </DropdownMenuItem>
                                 {product.status === 'ACTIVO' ? (
                                   <>
-                                    <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                    <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openDuplicateDialog(product), 0))}>
                                       <Copy className="h-4 w-4 mr-2" />
                                       Duplicar
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem onClick={() => requestConfirm('deactivate', product)}>
+                                    <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => requestConfirm('deactivate', product), 0))}>
                                       <Power className="h-4 w-4 mr-2" />
                                       Desactivar
                                     </DropdownMenuItem>
                                   </>
                                 ) : (
                                   <>
-                                    <DropdownMenuItem onClick={() => requestConfirm('activate', product)}>
+                                    <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => requestConfirm('activate', product), 0))}>
                                       <Power className="h-4 w-4 mr-2" />
                                       Activar
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => openDuplicateDialog(product)}>
+                                    <DropdownMenuItem onSelect={() => queueMicrotask(() => setTimeout(() => openDuplicateDialog(product), 0))}>
                                       <Copy className="h-4 w-4 mr-2" />
                                       Duplicar
                                     </DropdownMenuItem>
@@ -2003,7 +2003,7 @@ export function ProductosPage() {
                                         <DropdownMenuItem
                                           className="text-destructive"
                                           disabled={!product.canDelete}
-                                          onClick={() => requestConfirm('delete', product)}
+                                          onSelect={() => queueMicrotask(() => setTimeout(() => requestConfirm('delete', product), 0))}
                                         >
                                           <Trash2 className="h-4 w-4 mr-2" />
                                           Eliminar

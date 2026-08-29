@@ -647,7 +647,7 @@ export function UsuariosPage() {
                                 >
                                   <DropdownMenuItem
                                     onSelect={() =>
-                                      setTimeout(() => openEditUserDialog(user), 0)
+                                      queueMicrotask(() => setTimeout(() => openEditUserDialog(user), 0))
                                     }
                                   >
                                     <Edit className="h-4 w-4" />
@@ -668,8 +668,12 @@ export function UsuariosPage() {
                                       user.primaryRole === 'ADMIN_POS' && !hasRole('ADMIN_POS')
                                     }
                                     onSelect={() => {
-                                      setRemoveTarget(user)
-                                      setIsRemoveConfirmOpen(true)
+                                      queueMicrotask(() => {
+                                        setTimeout(() => {
+                                          setRemoveTarget(user)
+                                          setIsRemoveConfirmOpen(true)
+                                        }, 0)
+                                      })
                                     }}
                                   >
                                     <Trash2 className="h-4 w-4" />
