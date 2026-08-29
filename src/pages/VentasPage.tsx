@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import {
@@ -219,7 +219,10 @@ export function VentasPage() {
   const accessToken = session?.accessToken ?? ''
 
   const [dashboard, setDashboard] = useState<SalesDashboardResponse | null>(null)
-  const [search, setSearch] = useState('')
+  const searchTextRef = useRef('')
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const [searchKeySuffix, setSearchKeySuffix] = useState(0)
+  const [searchDebounced, setSearchDebounced] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('TODAS')
   const [availabilityFilter, setAvailabilityFilter] = useState<'TODOS' | 'CON_STOCK' | 'SIN_STOCK'>('TODOS')
   const [medicationTypeFilter, _setMedicationTypeFilter] = useState<string>('TODOS')
@@ -233,6 +236,17 @@ export function VentasPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleUnauthorized = useHandleUnauthorized('VentasPage')
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setSearchDebounced(searchTextRef.current)
+    }, 220)
+    return () => window.clearTimeout(handle)
+  }, [searchKeySuffix])
+
+  useEffect(() => {
+    setSearchKeySuffix((x) => x + 1)
+  }, [accessToken])
 
   const checkoutForm = useForm<SaleCheckoutFormValues>({
     resolver: zodResolver(saleCheckoutSchema),
@@ -282,7 +296,7 @@ export function VentasPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [accessToken, categoryFilter, availabilityFilter, medicationTypeFilter, search])
+  }, [accessToken, categoryFilter, availabilityFilter, medicationTypeFilter, searchDebounced])
 
   useEffect(() => {
     void loadDashboard()
@@ -733,8 +747,13 @@ export function VentasPage() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  ref={searchInputRef}
+                  key={`ventas-search-${searchKeySuffix}`}
+                  defaultValue=""
+                  onChange={(event) => {
+                    searchTextRef.current = event.target.value
+                    setSearchKeySuffix((x) => x + 1)
+                  }}
                   placeholder="Buscar por nombre, código de barras o principio activo"
                   className="pl-9"
                 />

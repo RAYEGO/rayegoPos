@@ -488,8 +488,8 @@ export function ProductosPage() {
   const createDialogContentRef = useRef<HTMLDivElement | null>(null)
   const createDialogScrollTopRef = useRef(0)
   const previousPackagingOpenRef = useRef(false)
-  const packagingGracePeriodRef = useRef(false)
-  const packagingGraceTimerRef = useRef<number | null>(null)
+  const anyChildGracePeriodRef = useRef(false)
+  const anyChildGraceTimerRef = useRef<number | null>(null)
   const isExplicitCreateDialogClosingRef = useRef(false)
 
   const [masterDialogOpen, setMasterDialogOpen] = useState(false)
@@ -555,9 +555,9 @@ export function ProductosPage() {
 
   useEffect(() => {
     function stopGraceTimer() {
-      if (packagingGraceTimerRef.current !== null) {
-        window.clearTimeout(packagingGraceTimerRef.current)
-        packagingGraceTimerRef.current = null
+      if (anyChildGraceTimerRef.current !== null) {
+        window.clearTimeout(anyChildGraceTimerRef.current)
+        anyChildGraceTimerRef.current = null
       }
     }
 
@@ -565,13 +565,13 @@ export function ProductosPage() {
 
     if (anyChildOpen) {
       stopGraceTimer()
-      packagingGracePeriodRef.current = true
+      anyChildGracePeriodRef.current = true
       return
     }
 
-    packagingGraceTimerRef.current = window.setTimeout(() => {
-      packagingGracePeriodRef.current = false
-      packagingGraceTimerRef.current = null
+    anyChildGraceTimerRef.current = window.setTimeout(() => {
+      anyChildGracePeriodRef.current = false
+      anyChildGraceTimerRef.current = null
     }, 600)
 
     return stopGraceTimer
@@ -1186,7 +1186,7 @@ export function ProductosPage() {
           const created = await productsService.createMasterLaboratory(accessToken, payload)
           toast.success('Laboratorio creado.')
           if (masterDialogTargetField === 'laboratorioId') {
-            form.setValue('laboratorioId', created.id)
+            form.setValue('laboratorioId', created.id, { shouldValidate: true })
           }
         }
 
@@ -1287,8 +1287,11 @@ export function ProductosPage() {
           await productsService.updateMasterPresentation(accessToken, editingPresentation.id, payload)
           toast.success('Presentación actualizada.')
         } else {
-          await productsService.createMasterPresentation(accessToken, payload)
+          const created = await productsService.createMasterPresentation(accessToken, payload)
           toast.success('Presentación creada.')
+          if (masterDialogTargetField === 'presentacionId') {
+            form.setValue('presentacionId', created.id, { shouldValidate: true })
+          }
         }
 
         resetMasterDialogState()
@@ -2063,7 +2066,7 @@ export function ProductosPage() {
         <SidePanel
           open={isCreateDialogOpen}
           onOpenChange={(open) => {
-            if (!open && packagingGracePeriodRef.current && !isExplicitCreateDialogClosingRef.current) {
+            if (!open && anyChildGracePeriodRef.current && !isExplicitCreateDialogClosingRef.current) {
               return
             }
             isExplicitCreateDialogClosingRef.current = false

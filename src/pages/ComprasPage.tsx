@@ -392,7 +392,9 @@ export function ComprasPage() {
   const [isCashIncomeDialogOpen, setIsCashIncomeDialogOpen] = useState(false)
   const [isRegisteringCashIncome, setIsRegisteringCashIncome] = useState(false)
   const [isMissingCashDrawerDialogOpen, setIsMissingCashDrawerDialogOpen] = useState(false)
-  const [globalProductoSearchQuery, setGlobalProductoSearchQuery] = useState<string>('')
+  const globalProductoSearchTextRef = useRef('')
+  const globalProductoSearchInputRef = useRef<HTMLInputElement | null>(null)
+  const [productoSearchKeySuffix, setProductoSearchKeySuffix] = useState(0)
   const [globalProductoSearchOpen, setGlobalProductoSearchOpen] = useState<boolean>(false)
   const [createLineaPresentacionId, setCreateLineaPresentacionId] = useState<Record<number, string>>({})
 
@@ -2242,8 +2244,13 @@ export function ComprasPage() {
         open={isCreateDialogOpen}
         onOpenChange={(open) => {
           setIsCreateDialogOpen(open)
+          if (open) {
+            globalProductoSearchTextRef.current = ''
+            setProductoSearchKeySuffix((x) => x + 1)
+          }
           if (!open) {
             setEditingPurchaseOrderId(null)
+            globalProductoSearchTextRef.current = ''
             form.reset({
               ...defaultFormValues,
               fechaEmision: new Date().toISOString().slice(0, 10),
@@ -2365,13 +2372,13 @@ export function ComprasPage() {
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      value={globalProductoSearchQuery}
+                      ref={globalProductoSearchInputRef}
+                      key={`compras-productos-search-${productoSearchKeySuffix}`}
+                      defaultValue=""
                       onChange={(event) => {
-                        const next = event.target.value
-                        setGlobalProductoSearchQuery(next)
-                        if (next.trim().length >= 0) {
-                          setGlobalProductoSearchOpen(true)
-                        }
+                        globalProductoSearchTextRef.current = event.target.value
+                        setProductoSearchKeySuffix((x) => x + 1)
+                        setGlobalProductoSearchOpen(true)
                       }}
                       onFocus={() => setGlobalProductoSearchOpen(true)}
                       onBlur={() =>
@@ -2385,7 +2392,7 @@ export function ComprasPage() {
                     {globalProductoSearchOpen ? (
                       <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 max-h-96 overflow-y-auto rounded-xl border bg-popover p-2 shadow-xl">
                         {((): typeof options.products => {
-                          const q = globalProductoSearchQuery.trim().toLowerCase()
+                          const q = globalProductoSearchTextRef.current.trim().toLowerCase()
                           if (!q) return options.products.slice(0, 60)
                           return options.products
                             .filter((entry) => {
@@ -2409,7 +2416,7 @@ export function ComprasPage() {
                         ) : (
                           <div className="space-y-1">
                             {((): typeof options.products => {
-                              const q = globalProductoSearchQuery.trim().toLowerCase()
+                              const q = globalProductoSearchTextRef.current.trim().toLowerCase()
                               if (!q) return options.products.slice(0, 60)
                               return options.products
                                 .filter((entry) => {
@@ -2502,7 +2509,10 @@ export function ComprasPage() {
                                           }))
                                         }
                                         setGlobalProductoSearchOpen(false)
-                                        setGlobalProductoSearchQuery('')
+                                        globalProductoSearchTextRef.current = ''
+                                        if (globalProductoSearchInputRef.current) {
+                                          globalProductoSearchInputRef.current.value = ''
+                                        }
                                       }}
                                     >
                                       <Plus className="h-4 w-4" />
