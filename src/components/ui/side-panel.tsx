@@ -88,11 +88,12 @@ export const SidePanelContent = React.forwardRef<
             pick('button:not([disabled])') ??
             pick('[tabindex]:not([tabindex="-1"])')
 
-          if (!candidate) return
-          candidate.focus({ preventScroll: true })
-          if (candidate instanceof HTMLInputElement || candidate instanceof HTMLTextAreaElement) {
-            candidate.select?.()
+          if (!candidate) {
+            event.preventDefault()
+            return
           }
+          candidate.focus({ preventScroll: true })
+          event.preventDefault()
         })
       }}
       {...props}

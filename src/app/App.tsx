@@ -7,8 +7,16 @@ import { AppRoutes } from '@/routes/AppRoutes'
 
 function GlobalDialogSanitizer() {
   useEffect(() => {
+    const hasActiveRadixOverlay = () =>
+      Boolean(
+        document.querySelector(
+          '[data-state="open"][role="dialog"], [data-state="open"][data-radix-focus-scope-root], [data-state="open"][role="alertdialog"]',
+        ),
+      )
+
     const sanitize = () => {
       try {
+        if (hasActiveRadixOverlay()) return
         document.querySelectorAll('[inert]').forEach((node) => {
           node.removeAttribute('inert')
         })
@@ -16,9 +24,12 @@ function GlobalDialogSanitizer() {
       }
     }
     sanitize()
-    const timer = window.setInterval(sanitize, 200)
+    const timer = window.setInterval(sanitize, 400)
 
-    const onAnyFocusChange = () => sanitize()
+    const onAnyFocusChange = () => {
+      if (hasActiveRadixOverlay()) return
+      sanitize()
+    }
     document.addEventListener('focusin', onAnyFocusChange, true)
     document.addEventListener('focusout', onAnyFocusChange, true)
 
@@ -54,7 +65,14 @@ function GlobalDialogSanitizer() {
         )
         if (editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
           if (document.activeElement !== editable) {
-            editable.focus({ preventScroll: true })
+            window.requestAnimationFrame(() => {
+              if (document.activeElement !== editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
+                try {
+                  editable.focus({ preventScroll: true })
+                } catch {
+                }
+              }
+            })
           }
         }
       } catch {
@@ -67,9 +85,9 @@ function GlobalDialogSanitizer() {
       window.clearInterval(timer)
       document.removeEventListener('focusin', onAnyFocusChange, true)
       document.removeEventListener('focusout', onAnyFocusChange, true)
-      window.removeEventListener('keydown', onKeyDownCapture, true)
-      window.removeEventListener('pointerdown', forceFocusIfEditableOnPointer, true)
-      window.removeEventListener('mousedown', forceFocusIfEditableOnPointer, true)
+      document.removeEventListener('keydown', onKeyDownCapture, true)
+      document.removeEventListener('pointerdown', forceFocusIfEditableOnPointer, true)
+      document.removeEventListener('mousedown', forceFocusIfEditableOnPointer, true)
     }
   }, [])
 
