@@ -90,7 +90,7 @@ function getLoadStatusVariant(status: string) {
 
 function ProductAutocomplete({
   accessToken,
-  value,
+  value: _value,
   onValueChange,
   onProductSelected,
   placeholder,
