@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   Boxes,
+  Calendar,
   ShoppingCart,
   SlidersHorizontal,
   Users,
@@ -47,12 +48,59 @@ type ReportPayload =
   | CashierReportResponse
   | PlaceholderReportResponse
 
+type SalesPeriodPreset = 'TODAY' | 'YESTERDAY' | 'LAST_7_DAYS' | 'THIS_MONTH' | 'CUSTOM'
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-PE', {
     style: 'currency',
     currency: 'PEN',
     minimumFractionDigits: 2,
   }).format(value)
+}
+
+function pad2(value: number) {
+  return value < 10 ? `0${value}` : `${value}`
+}
+
+function toDateInput(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function startOfDay(date: Date): Date {
+  const next = new Date(date)
+  next.setHours(0, 0, 0, 0)
+  return next
+}
+
+function fmtDate(iso: string): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    if (iso.length >= 10) {
+      const [y, m, d] = iso.slice(0, 10).split('-')
+      return `${d}/${m}/${y}`
+    }
+    return iso
+  }
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`
+}
+
+function fmtTime(iso: string): string {
+  if (!iso) return '—'
+  if (iso.length >= 16 && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso.slice(0, 16))) {
+    return iso.slice(11, 16)
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function titleCaseMethod(value: string): string {
+  if (!value) return '—'
+  const v = value.trim()
+  if (!v) return '—'
+  if (v.length <= 4) return v.toUpperCase()
+  return v.charAt(0).toUpperCase() + v.slice(1).toLowerCase()
 }
 
 function getApiErrorMessage(error: unknown) {
@@ -90,6 +138,8 @@ export function ReportesPage() {
   const [from, setFrom] = useState<string>('')
   const [to, setTo] = useState<string>('')
   const [showFilters, setShowFilters] = useState(false)
+  const [salesPeriodPreset, setSalesPeriodPreset] = useState<SalesPeriodPreset>('TODAY')
+  const salesPeriodPresetRef = useRef<SalesPeriodPreset>('TODAY')
 
   const [report, setReport] = useState<ReportPayload | null>(null)
   const [branches, setBranches] = useState<Array<{ id: string; nombre: string; codigo: string }>>(
@@ -99,6 +149,49 @@ export function ReportesPage() {
   const [error, setError] = useState<string | null>(null)
 
   const handleUnauthorized = useHandleUnauthorized('ReportesPage')
+
+  useEffect(() => {
+    const today = startOfDay(new Date())
+    const preset: SalesPeriodPreset = 'TODAY'
+    salesPeriodPresetRef.current = preset
+    setSalesPeriodPreset(preset)
+    setFrom(toDateInput(today))
+    setTo(toDateInput(today))
+  }, [])
+
+  const applySalesPeriodPreset = useCallback((next: SalesPeriodPreset) => {
+    const today = startOfDay(new Date())
+    if (next === 'CUSTOM') {
+      salesPeriodPresetRef.current = next
+      setSalesPeriodPreset(next)
+      setShowFilters(true)
+      return
+    }
+    let fromDate = today
+    let toDate = today
+    if (next === 'TODAY') {
+      fromDate = today
+      toDate = today
+    } else if (next === 'YESTERDAY') {
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      fromDate = yesterday
+      toDate = yesterday
+    } else if (next === 'LAST_7_DAYS') {
+      const past = new Date(today)
+      past.setDate(past.getDate() - 6)
+      fromDate = past
+      toDate = today
+    } else if (next === 'THIS_MONTH') {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1)
+      fromDate = first
+      toDate = today
+    }
+    salesPeriodPresetRef.current = next
+    setSalesPeriodPreset(next)
+    setFrom(toDateInput(fromDate))
+    setTo(toDateInput(toDate))
+  }, [])
 
   const loadReport = useCallback(async () => {
     if (!accessToken) {
@@ -152,6 +245,46 @@ export function ReportesPage() {
   }, [accessToken, branchId, category, from, handleUnauthorized, to])
 
   useEffect(() => {
+    if (category !== 'VENTAS') return
+    if (salesPeriodPresetRef.current === 'CUSTOM') return
+    const preset = salesPeriodPresetRef.current
+    const today = startOfDay(new Date())
+    let fromDate = today
+    let toDate = today
+    if (preset === 'TODAY') {
+      fromDate = today
+      toDate = today
+    } else if (preset === 'YESTERDAY') {
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      fromDate = yesterday
+      toDate = yesterday
+    } else if (preset === 'LAST_7_DAYS') {
+      const past = new Date(today)
+      past.setDate(past.getDate() - 6)
+      fromDate = past
+      toDate = today
+    } else if (preset === 'THIS_MONTH') {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1)
+      fromDate = first
+      toDate = today
+    }
+    const nextFrom = toDateInput(fromDate)
+    const nextTo = toDateInput(toDate)
+    if (nextFrom !== from || nextTo !== to) {
+      setFrom(nextFrom)
+      setTo(nextTo)
+    }
+  }, [category, from, to])
+
+  useEffect(() => {
+    if (category !== 'VENTAS') return
+    if (salesPeriodPresetRef.current === 'CUSTOM') return
+    setSalesPeriodPreset('CUSTOM')
+    salesPeriodPresetRef.current = 'CUSTOM'
+  }, [category, from, to])
+
+  useEffect(() => {
     void loadReport()
   }, [loadReport])
 
@@ -171,40 +304,140 @@ export function ReportesPage() {
     return null
   }, [report])
 
+  const salesPeriodDisplayLabel = useMemo(() => {
+    const fallbackFrom = from ? fmtDate(from) : null
+    const fallbackTo = to ? fmtDate(to) : null
+    const periodInResponse =
+      report && 'period' in report && report.period
+        ? { from: fmtDate(report.period.from), to: fmtDate(report.period.to) }
+        : null
+    const labelFrom = periodInResponse?.from ?? fallbackFrom
+    const labelTo = periodInResponse?.to ?? fallbackTo
+    if (!labelFrom && !labelTo) return 'Período actual'
+    if (labelFrom === labelTo) return labelFrom ?? 'Período actual'
+    return `${labelFrom} — ${labelTo}`
+  }, [from, report, to])
+
+  const salesMetrics = useMemo(() => {
+    if (!report || !('summary' in report) || !('recent' in report) || category !== 'VENTAS') {
+      return null
+    }
+    const summary = (report as SalesReportResponse).summary
+    const recent = (report as SalesReportResponse).recent
+    const unitsSold = recent.reduce((acc, s) => acc + (s.itemCount ?? 0), 0)
+    return {
+      salesTotal: summary.salesTotal,
+      salesCount: summary.salesCount,
+      averageTicket: summary.averageTicket,
+      unitsSold,
+      methods: (report as SalesReportResponse).charts?.byPaymentMethod ?? [],
+    }
+  }, [category, report])
+
   return (
     <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold text-foreground">Reportes</h1>
-          <p className="text-xs text-muted-foreground">{selectedCategoryLabel}</p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="md:hidden">
-            <Select value={category} onValueChange={(value) => setCategory(value as ReportsCategory)}>
-              <SelectTrigger className="h-9 w-[200px]">
-                <SelectValue placeholder="Categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((item) => (
-                  <SelectItem key={item.key} value={item.key}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {category === 'VENTAS' ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5 text-primary" aria-hidden />
+                <h1 className="text-2xl font-bold text-foreground tracking-tight">
+                  Reporte de ventas
+                </h1>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Resumen de las ventas realizadas en el período seleccionado.
+              </p>
+              <p className="mt-2 inline-flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1 text-xs font-medium text-foreground">
+                <Calendar className="h-3.5 w-3.5 text-primary" aria-hidden />
+                Período: <span className="text-primary">{salesPeriodDisplayLabel}</span>
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="md:hidden">
+                <Select value={category} onValueChange={(value) => setCategory(value as ReportsCategory)}>
+                  <SelectTrigger className="h-9 w-[200px]">
+                    <SelectValue placeholder="Categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowFilters((current) => !current)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Filtros
+              </Button>
+            </div>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilters((current) => !current)}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            Filtros
-          </Button>
+          <div className="flex flex-wrap items-stretch gap-2">
+            {([
+              ['TODAY', 'Hoy'],
+              ['YESTERDAY', 'Ayer'],
+              ['LAST_7_DAYS', 'Últimos 7 días'],
+              ['THIS_MONTH', 'Este mes'],
+              ['CUSTOM', 'Personalizado'],
+            ] as Array<[SalesPeriodPreset, string]>).map(([preset, label]) => {
+              const isActive = salesPeriodPreset === preset
+              return (
+                <Button
+                  key={preset}
+                  type="button"
+                  variant={isActive ? 'primary' : 'outline'}
+                  size="sm"
+                  onClick={() => applySalesPeriodPreset(preset)}
+                >
+                  {label}
+                </Button>
+              )
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-foreground">Reportes</h1>
+            <p className="text-xs text-muted-foreground">{selectedCategoryLabel}</p>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="md:hidden">
+              <Select value={category} onValueChange={(value) => setCategory(value as ReportsCategory)}>
+                <SelectTrigger className="h-9 w-[200px]">
+                  <SelectValue placeholder="Categoría" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowFilters((current) => !current)}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filtros
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
         <div className="hidden md:block">
@@ -283,33 +516,79 @@ export function ReportesPage() {
 
           {report ? (
             <>
-              {category === 'VENTAS' && 'summary' in report && 'charts' in report ? (
+              {category === 'VENTAS' && salesMetrics ? (
                 <>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Ventas</p>
+                      <p className="text-xs text-muted-foreground">Total vendido</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as SalesReportResponse).summary.salesTotal)}
+                        {formatCurrency(salesMetrics.salesTotal)}
                       </p>
                     </Card>
                     <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Operaciones</p>
+                      <p className="text-xs text-muted-foreground">N.º de ventas</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as SalesReportResponse).summary.salesCount}
+                        {salesMetrics.salesCount}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Ticket promedio</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as SalesReportResponse).summary.averageTicket)}
+                        {formatCurrency(salesMetrics.averageTicket)}
+                      </p>
+                    </Card>
+                    <Card className="p-4">
+                      <p className="text-xs text-muted-foreground">Unidades vendidas</p>
+                      <p className="mt-2 text-xl font-bold text-foreground">
+                        {salesMetrics.unitsSold}
                       </p>
                     </Card>
                   </div>
 
                   <Card>
                     <CardHeader>
-                      <CardTitle>Ventas recientes</CardTitle>
-                      <CardDescription>Últimas operaciones del periodo.</CardDescription>
+                      <CardTitle>Métodos de pago</CardTitle>
+                      <CardDescription>
+                        Distribución de ingresos en el período seleccionado.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {salesMetrics.methods.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Sin datos de métodos de pago para el período seleccionado.
+                        </p>
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {salesMetrics.methods.map((row) => (
+                            <div
+                              key={row.method}
+                              className="rounded-xl border p-4"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  {titleCaseMethod(row.method)}
+                                </p>
+                                <Badge variant="outline">{row.operations}</Badge>
+                              </div>
+                              <p className="mt-3 text-lg font-bold text-foreground">
+                                {formatCurrency(row.amount)}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                operación{row.operations === 1 ? '' : 'es'}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Ventas del período</CardTitle>
+                      <CardDescription>
+                        Detalle de las ventas realizadas durante el período seleccionado.
+                      </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <div className="md:hidden space-y-3">
@@ -321,10 +600,13 @@ export function ReportesPage() {
                                   {sale.document ?? 'Venta'}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                  {sale.customerName ?? 'Mostrador'} · {sale.issuedAt.slice(0, 10)}
+                                  {sale.customerName ?? 'Mostrador'} · {fmtDate(sale.issuedAt)}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Hora: {fmtTime(sale.issuedAt)}
                                 </p>
                                 <p className="mt-2 text-xs text-muted-foreground">
-                                  {sale.itemCount} items · {sale.receiptType}
+                                  {sale.itemCount} ítems · {sale.receiptType}
                                 </p>
                               </div>
                               <p className="font-medium text-foreground">
@@ -342,7 +624,8 @@ export function ReportesPage() {
                               <TableHead>Comprobante</TableHead>
                               <TableHead>Cliente</TableHead>
                               <TableHead>Fecha</TableHead>
-                              <TableHead>Items</TableHead>
+                              <TableHead>Hora</TableHead>
+                              <TableHead>Ítems</TableHead>
                               <TableHead className="text-right">Total</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -356,7 +639,10 @@ export function ReportesPage() {
                                   {sale.customerName ?? 'Mostrador'}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
-                                  {sale.issuedAt.slice(0, 10)}
+                                  {fmtDate(sale.issuedAt)}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {fmtTime(sale.issuedAt)}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">
                                   {sale.itemCount}
@@ -559,77 +845,149 @@ export function ReportesPage() {
 
               {category === 'CAJA' && 'rows' in report && 'period' in report ? (
                 <>
-                  <div className="grid gap-3 sm:grid-cols-5">
-                    <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Ingreso</p>
-                      <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as CashierReportResponse).summary.inflows)}
-                      </p>
-                    </Card>
-                    <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Egreso</p>
-                      <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as CashierReportResponse).summary.outflows)}
-                      </p>
-                    </Card>
-                    <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Neto</p>
-                      <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as CashierReportResponse).summary.net)}
-                      </p>
-                    </Card>
-                    <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Turnos</p>
-                      <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as CashierReportResponse).summary.openingsCount}
-                      </p>
-                    </Card>
-                    <Card className="p-4">
-                      <p className="text-xs text-muted-foreground">Arqueos</p>
-                      <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as CashierReportResponse).summary.cashCountsCount}
-                      </p>
-                    </Card>
-                  </div>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Resumen del turno</CardTitle>
+                      <CardDescription>
+                        Dinero físico de caja. El vuelto no se cuenta como ingreso ni egreso manual.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+                        <div className="rounded-2xl border p-4">
+                          <p className="text-xs text-muted-foreground">Apertura</p>
+                          <p className="mt-2 text-xl font-bold text-foreground">
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.openingCash,
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border p-4">
+                          <p className="text-xs text-muted-foreground">Ventas en efectivo</p>
+                          <p className="mt-2 text-xl font-bold text-emerald-600 dark:text-emerald-500">
+                            +{' '}
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.salesCashNet,
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border p-4">
+                          <p className="text-xs text-muted-foreground">Ingresos adicionales</p>
+                          <p className="mt-2 text-xl font-bold text-sky-600 dark:text-sky-500">
+                            +{' '}
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.manualIncomes,
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border p-4">
+                          <p className="text-xs text-muted-foreground">Egresos / retiros</p>
+                          <p className="mt-2 text-xl font-bold text-rose-600 dark:text-rose-500">
+                            −{' '}
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.manualExpenses,
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border p-4 bg-muted/40">
+                          <p className="text-xs text-muted-foreground">Efectivo esperado</p>
+                          <p className="mt-2 text-xl font-bold text-foreground">
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.expectedCash,
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border p-4 bg-muted/40">
+                          <p className="text-xs text-muted-foreground">Efectivo contado</p>
+                          <p className="mt-2 text-xl font-bold text-foreground">
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.countedCash,
+                            )}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border p-4">
+                          <p className="text-xs text-muted-foreground">Diferencia</p>
+                          <p className="mt-2">
+                            <Badge
+                              variant={
+                                (report as CashierReportResponse).summary.turnover.difference ===
+                                0
+                                  ? 'success'
+                                  : 'warning'
+                              }
+                              className="text-base px-3 py-1 rounded-xl"
+                            >
+                              {formatCurrency(
+                                (report as CashierReportResponse).summary.turnover.difference,
+                              )}
+                            </Badge>
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
                   <div className="grid gap-4 lg:grid-cols-2">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Por medio de pago</CardTitle>
-                        <CardDescription>Ingresos y egresos acumulados.</CardDescription>
+                        <CardTitle>Ventas por método de pago</CardTitle>
+                        <CardDescription>
+                          Importe neto vendido por cada método. Total del período:{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(
+                              (report as CashierReportResponse).summary.turnover.totalSales,
+                            )}
+                          </span>
+                          .
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        {(report as CashierReportResponse).rows.byPaymentMethod.length === 0 ? (
+                        {(report as CashierReportResponse).rows.salesByPaymentMethod.length ===
+                        0 ? (
                           <div className="rounded-2xl border border-dashed p-6 text-center">
-                            <p className="text-sm text-muted-foreground">Sin movimientos.</p>
+                            <p className="text-sm text-muted-foreground">Sin ventas en el período.</p>
                           </div>
                         ) : (
                           <Table>
                             <TableHeader>
                               <TableRow>
-                                <TableHead>Medio</TableHead>
-                                <TableHead className="text-right">Ingreso</TableHead>
-                                <TableHead className="text-right">Egreso</TableHead>
-                                <TableHead className="text-right">Neto</TableHead>
+                                <TableHead>Método</TableHead>
+                                <TableHead className="text-right">Operaciones</TableHead>
+                                <TableHead className="text-right">Vendido</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {(report as CashierReportResponse).rows.byPaymentMethod.map((row) => (
-                                <TableRow key={row.method}>
-                                  <TableCell>
-                                    <Badge variant="outline">{row.method}</Badge>
-                                  </TableCell>
-                                  <TableCell className="text-right font-medium text-foreground">
-                                    {formatCurrency(row.inflows)}
-                                  </TableCell>
-                                  <TableCell className="text-right font-medium text-foreground">
-                                    {formatCurrency(row.outflows)}
-                                  </TableCell>
-                                  <TableCell className="text-right font-medium text-foreground">
-                                    {formatCurrency(row.net)}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
+                              {(report as CashierReportResponse).rows.salesByPaymentMethod.map(
+                                (row) => (
+                                  <TableRow key={row.method}>
+                                    <TableCell>
+                                      <Badge variant="outline">{titleCaseMethod(row.method)}</Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right text-muted-foreground">
+                                      {row.operations}
+                                    </TableCell>
+                                    <TableCell className="text-right font-medium text-foreground">
+                                      {formatCurrency(row.soldAmount)}
+                                    </TableCell>
+                                  </TableRow>
+                                ),
+                              )}
+                              <TableRow className="bg-muted/40 font-semibold">
+                                <TableCell>Total</TableCell>
+                                <TableCell className="text-right text-muted-foreground">
+                                  {(
+                                    report as CashierReportResponse
+                                  ).rows.salesByPaymentMethod.reduce(
+                                    (sum, r) => sum + r.operations,
+                                    0,
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right text-foreground">
+                                  {formatCurrency(
+                                    (report as CashierReportResponse).summary.turnover.totalSales,
+                                  )}
+                                </TableCell>
+                              </TableRow>
                             </TableBody>
                           </Table>
                         )}
@@ -680,11 +1038,15 @@ export function ReportesPage() {
                                   <TableCell className="font-medium text-foreground">
                                     {opening.cashDrawerCode}
                                   </TableCell>
-                                  <TableCell className="text-muted-foreground">{opening.branchName}</TableCell>
+                                  <TableCell className="text-muted-foreground">
+                                    {opening.branchName}
+                                  </TableCell>
                                   <TableCell className="text-muted-foreground">
                                     {opening.openedAt.slice(0, 10)}
                                   </TableCell>
-                                  <TableCell className="text-muted-foreground">{opening.cashierName}</TableCell>
+                                  <TableCell className="text-muted-foreground">
+                                    {opening.cashierName}
+                                  </TableCell>
                                   <TableCell>
                                     <Badge variant="outline">{opening.status}</Badge>
                                   </TableCell>
@@ -694,6 +1056,39 @@ export function ReportesPage() {
                           </Table>
                         </div>
                       </CardContent>
+                    </Card>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-5">
+                    <Card className="p-4">
+                      <p className="text-xs text-muted-foreground">Ingreso</p>
+                      <p className="mt-2 text-xl font-bold text-foreground">
+                        {formatCurrency((report as CashierReportResponse).summary.inflows)}
+                      </p>
+                    </Card>
+                    <Card className="p-4">
+                      <p className="text-xs text-muted-foreground">Egreso</p>
+                      <p className="mt-2 text-xl font-bold text-foreground">
+                        {formatCurrency((report as CashierReportResponse).summary.outflows)}
+                      </p>
+                    </Card>
+                    <Card className="p-4">
+                      <p className="text-xs text-muted-foreground">Neto</p>
+                      <p className="mt-2 text-xl font-bold text-foreground">
+                        {formatCurrency((report as CashierReportResponse).summary.net)}
+                      </p>
+                    </Card>
+                    <Card className="p-4">
+                      <p className="text-xs text-muted-foreground">Turnos</p>
+                      <p className="mt-2 text-xl font-bold text-foreground">
+                        {(report as CashierReportResponse).summary.openingsCount}
+                      </p>
+                    </Card>
+                    <Card className="p-4">
+                      <p className="text-xs text-muted-foreground">Arqueos</p>
+                      <p className="mt-2 text-xl font-bold text-foreground">
+                        {(report as CashierReportResponse).summary.cashCountsCount}
+                      </p>
                     </Card>
                   </div>
 
@@ -732,7 +1127,11 @@ export function ReportesPage() {
                                       </p>
                                     ) : null}
                                   </div>
-                                  <Badge variant={row.differenceCashAmount === 0 ? 'success' : 'warning'}>
+                                  <Badge
+                                    variant={
+                                      row.differenceCashAmount === 0 ? 'success' : 'warning'
+                                    }
+                                  >
                                     {formatCurrency(row.differenceCashAmount)}
                                   </Badge>
                                 </div>
@@ -776,7 +1175,9 @@ export function ReportesPage() {
                                     </TableCell>
                                     <TableCell className="text-right">
                                       <Badge
-                                        variant={row.differenceCashAmount === 0 ? 'success' : 'warning'}
+                                        variant={
+                                          row.differenceCashAmount === 0 ? 'success' : 'warning'
+                                        }
                                       >
                                         {formatCurrency(row.differenceCashAmount)}
                                       </Badge>

@@ -1,4 +1,11 @@
-import { EstadoCompra, EstadoVenta, OperacionCaja, Prisma } from '@prisma/client'
+import {
+  CodigoFormaPago,
+  EstadoCompra,
+  EstadoVenta,
+  OperacionCaja,
+  Prisma,
+  TipoMovimientoCaja,
+} from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { requireBranchAuthContext } from '../../lib/auth.js'
@@ -519,20 +526,98 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
       ...(branchId ? { aperturaCaja: { caja: { sucursalId: branchId } } } : {}),
     },
     select: {
+      tipo: true,
       operacion: true,
       monto: true,
       formaPago: { select: { codigo: true } },
+      ventaPagoId: true,
+      observaciones: true,
     },
   })
 
+  const salesWhere: Prisma.VentaWhereInput = {
+    deletedAt: null,
+    fechaEmision: { gte: from, lte: to },
+    estado: { not: EstadoVenta.ANULADA },
+    ...(branchId ? { sucursalId: branchId } : {}),
+  }
+
+  const salePayments = await prisma.ventaPago.findMany({
+    where: {
+      deletedAt: null,
+      venta: salesWhere,
+    },
+    select: {
+      monto: true,
+      formaPago: { select: { codigo: true } },
+      venta: {
+        select: {
+          total: true,
+          vuelto: true,
+        },
+      },
+    },
+  })
+
+  const salesByPaymentMap = new Map<
+    string,
+    { method: string; soldAmount: number; operations: number }
+  >()
+  let totalSales = 0
+
+  for (const row of salePayments) {
+    const method = row.formaPago.codigo
+    const current = salesByPaymentMap.get(method) ?? { method, soldAmount: 0, operations: 0 }
+    const paymentGross = decimalToNumber(row.monto)
+    const changeForSale = decimalToNumber(row.venta.vuelto)
+    let saleNetForMethod = paymentGross
+    if (method === CodigoFormaPago.EFECTIVO && changeForSale > 0) {
+      saleNetForMethod = Number((paymentGross - changeForSale).toFixed(2))
+    }
+    current.soldAmount = roundMoney(current.soldAmount + saleNetForMethod)
+    current.operations += 1
+    salesByPaymentMap.set(method, current)
+    totalSales = roundMoney(totalSales + saleNetForMethod)
+  }
+
+  const allPaymentMethods = await prisma.formaPago.findMany({
+    where: { deletedAt: null, activo: true },
+    select: { codigo: true, nombre: true, orden: true },
+    orderBy: [{ orden: 'asc' }, { codigo: 'asc' }],
+  })
+
+  for (const pm of allPaymentMethods) {
+    if (!salesByPaymentMap.has(pm.codigo)) {
+      salesByPaymentMap.set(pm.codigo, {
+        method: pm.codigo,
+        soldAmount: 0,
+        operations: 0,
+      })
+    }
+  }
+
+  const salesByPaymentMethod = Array.from(salesByPaymentMap.values())
+    .map((row) => ({
+      method: row.method,
+      soldAmount: roundMoney(row.soldAmount),
+      operations: row.operations,
+    }))
+    .sort((a, b) => b.soldAmount - a.soldAmount)
+
   let inflows = 0
   let outflows = 0
+  let openingCash = 0
+  let salesCashGross = 0
+  let salesCashChange = 0
+  let manualIncomes = 0
+  let manualExpenses = 0
   const byMethodMap = new Map<string, { method: string; inflows: number; outflows: number }>()
 
   for (const movement of movements) {
     const method = movement.formaPago?.codigo ?? 'EFECTIVO'
     const amount = decimalToNumber(movement.monto)
     const current = byMethodMap.get(method) ?? { method, inflows: 0, outflows: 0 }
+
     if (movement.operacion === OperacionCaja.INGRESO) {
       inflows += amount
       current.inflows += amount
@@ -541,7 +626,46 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
       current.outflows += amount
     }
     byMethodMap.set(method, current)
+
+    const isCash =
+      method === CodigoFormaPago.EFECTIVO || !movement.formaPago
+    if (!isCash) continue
+
+    switch (movement.tipo) {
+      case TipoMovimientoCaja.APERTURA:
+        openingCash += amount
+        break
+      case TipoMovimientoCaja.VENTA:
+        if (movement.operacion === OperacionCaja.INGRESO) {
+          salesCashGross += amount
+        } else if (
+          movement.operacion === OperacionCaja.EGRESO &&
+          /vuelto/i.test(movement.observaciones ?? '')
+        ) {
+          salesCashChange += amount
+        }
+        break
+      case TipoMovimientoCaja.INGRESO:
+        if (movement.operacion === OperacionCaja.INGRESO) {
+          manualIncomes += amount
+        }
+        break
+      case TipoMovimientoCaja.EGRESO:
+        if (movement.operacion === OperacionCaja.EGRESO) {
+          manualExpenses += amount
+        }
+        break
+      case TipoMovimientoCaja.CIERRE:
+      case TipoMovimientoCaja.AJUSTE:
+      default:
+        break
+    }
   }
+
+  const salesCashNet = roundMoney(salesCashGross - salesCashChange)
+  const expectedCash = roundMoney(
+    openingCash + salesCashNet + manualIncomes - manualExpenses,
+  )
 
   const byPaymentMethod = Array.from(byMethodMap.values())
     .map((row) => ({
@@ -570,6 +694,12 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
     orderBy: { fechaApertura: 'desc' },
     take: 30,
   })
+
+  const countedCash = openings.reduce(
+    (sum, o) => sum + decimalToNumber(o.cierre?.montoDeclaradoEfectivo),
+    0,
+  )
+  const difference = roundMoney(countedCash - expectedCash)
 
   const cashCounts = await prisma.arqueoCaja.findMany({
     where: {
@@ -610,9 +740,20 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
       net: roundMoney(inflows - outflows),
       openingsCount: openings.length,
       cashCountsCount: cashCounts.length,
+      turnover: {
+        openingCash: roundMoney(openingCash),
+        salesCashNet,
+        manualIncomes: roundMoney(manualIncomes),
+        manualExpenses: roundMoney(manualExpenses),
+        expectedCash,
+        countedCash: roundMoney(countedCash),
+        difference,
+        totalSales: roundMoney(totalSales),
+      },
     },
     rows: {
       byPaymentMethod,
+      salesByPaymentMethod,
       openings: openings.map((opening) => ({
         id: opening.id,
         openedAt: opening.fechaApertura.toISOString(),
@@ -621,8 +762,12 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
         branchName: opening.caja.sucursal.nombre,
         cashierName: `${opening.usuario.nombres} ${opening.usuario.apellidos ?? ''}`.trim(),
         openingCash: decimalToNumber(opening.montoAperturaEfectivo),
-        countedCash: opening.cierre ? decimalToNumber(opening.cierre.montoDeclaradoEfectivo) : null,
-        differenceCash: opening.cierre ? decimalToNumber(opening.cierre.diferenciaEfectivo) : null,
+        countedCash: opening.cierre
+          ? decimalToNumber(opening.cierre.montoDeclaradoEfectivo)
+          : null,
+        differenceCash: opening.cierre
+          ? decimalToNumber(opening.cierre.diferenciaEfectivo)
+          : null,
       })),
       cashCounts: cashCounts.map((row) => ({
         id: row.id,
@@ -631,7 +776,9 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
         branchName: row.aperturaCaja.caja.sucursal.nombre,
         cashDrawerCode: row.aperturaCaja.caja.codigo,
         cashierName: `${row.aperturaCaja.usuario.nombres} ${row.aperturaCaja.usuario.apellidos ?? ''}`.trim(),
-        actorName: row.createdBy ? `${row.createdBy.nombres} ${row.createdBy.apellidos ?? ''}`.trim() : 'Sistema',
+        actorName: row.createdBy
+          ? `${row.createdBy.nombres} ${row.createdBy.apellidos ?? ''}`.trim()
+          : 'Sistema',
         expectedCashAmount: decimalToNumber(row.montoSistemaEfectivo),
         countedCashAmount: decimalToNumber(row.montoDeclaradoEfectivo),
         differenceCashAmount: decimalToNumber(row.diferenciaEfectivo),

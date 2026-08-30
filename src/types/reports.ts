@@ -114,6 +114,23 @@ export type CashierByPaymentMethodRow = {
   net: number
 }
 
+export type CashierTurnoverSummary = {
+  openingCash: number
+  salesCashNet: number
+  manualIncomes: number
+  manualExpenses: number
+  expectedCash: number
+  countedCash: number
+  difference: number
+  totalSales: number
+}
+
+export type CashierSalesByPaymentRow = {
+  method: string
+  soldAmount: number
+  operations: number
+}
+
 export type CashierOpeningRow = {
   id: string
   openedAt: string
@@ -148,9 +165,11 @@ export type CashierReportResponse = {
     net: number
     openingsCount: number
     cashCountsCount: number
+    turnover: CashierTurnoverSummary
   }
   rows: {
     byPaymentMethod: CashierByPaymentMethodRow[]
+    salesByPaymentMethod: CashierSalesByPaymentRow[]
     openings: CashierOpeningRow[]
     cashCounts: CashierCashCountRow[]
   }
