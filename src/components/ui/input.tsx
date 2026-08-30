@@ -20,17 +20,14 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           className,
         )}
         onPointerDown={(event) => {
-          props.onPointerDown?.(event)
-          if (event.defaultPrevented) return
           const el = innerRef.current
-          if (el && !el.disabled && !(el as any).readOnly) {
-            window.requestAnimationFrame(() => {
-              try {
-                el.focus({ preventScroll: true })
-              } catch {
-              }
-            })
+          if (el && !el.disabled && !(el as any).readOnly && document.activeElement !== el) {
+            try {
+              el.focus({ preventScroll: true })
+            } catch {
+            }
           }
+          props.onPointerDown?.(event)
         }}
         {...props}
       />

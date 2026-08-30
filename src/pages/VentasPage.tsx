@@ -219,11 +219,8 @@ export function VentasPage() {
   const accessToken = session?.accessToken ?? ''
 
   const [dashboard, setDashboard] = useState<SalesDashboardResponse | null>(null)
-  const searchTextRef = useRef('')
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const [searchKeySuffix, setSearchKeySuffix] = useState(0)
+  const [searchText, setSearchText] = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
-  const triggerSearchRef = useRef<() => void>(() => {})
   const [categoryFilter, setCategoryFilter] = useState<string>('TODAS')
   const [availabilityFilter, setAvailabilityFilter] = useState<'TODOS' | 'CON_STOCK' | 'SIN_STOCK'>('TODOS')
   const [medicationTypeFilter, _setMedicationTypeFilter] = useState<string>('TODOS')
@@ -239,20 +236,9 @@ export function VentasPage() {
   const handleUnauthorized = useHandleUnauthorized('VentasPage')
 
   useEffect(() => {
-    let handle: number | null = null
-    const run = () => setSearchDebounced(searchTextRef.current)
-    triggerSearchRef.current = () => {
-      if (handle) window.clearTimeout(handle)
-      handle = window.setTimeout(run, 220)
-    }
-    return () => {
-      if (handle) window.clearTimeout(handle)
-    }
-  }, [])
-
-  useEffect(() => {
-    setSearchKeySuffix((x) => x + 1)
-  }, [accessToken])
+    const handle = window.setTimeout(() => setSearchDebounced(searchText), 220)
+    return () => window.clearTimeout(handle)
+  }, [searchText])
 
   const checkoutForm = useForm<SaleCheckoutFormValues>({
     resolver: zodResolver(saleCheckoutSchema),
@@ -753,13 +739,8 @@ export function VentasPage() {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  ref={searchInputRef}
-                  key={`ventas-search-${searchKeySuffix}`}
-                  defaultValue=""
-                  onInput={(event) => {
-                    searchTextRef.current = event.currentTarget.value
-                    triggerSearchRef.current()
-                  }}
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.currentTarget.value)}
                   placeholder="Buscar por nombre, código de barras o principio activo"
                   className="pl-9"
                 />

@@ -393,12 +393,9 @@ export function ComprasPage() {
   const [isRegisteringCashIncome, setIsRegisteringCashIncome] = useState(false)
   const [isMissingCashDrawerDialogOpen, setIsMissingCashDrawerDialogOpen] = useState(false)
   const globalProductoSearchTextRef = useRef('')
-  const globalProductoSearchInputRef = useRef<HTMLInputElement | null>(null)
-  const [productoSearchKeySuffix, setProductoSearchKeySuffix] = useState(0)
+  const [globalProductoSearchText, setGlobalProductoSearchText] = useState('')
   const [globalProductoSearchOpen, setGlobalProductoSearchOpen] = useState<boolean>(false)
   const [createLineaPresentacionId, setCreateLineaPresentacionId] = useState<Record<number, string>>({})
-  const triggerProductoSearchRefreshRef = useRef(0)
-  const [, setProductoSearchTick] = useState(0)
 
   const form = useForm<CreatePurchaseFormValues>({
     resolver: zodResolver(createPurchaseSchema),
@@ -2248,11 +2245,12 @@ export function ComprasPage() {
           setIsCreateDialogOpen(open)
           if (open) {
             globalProductoSearchTextRef.current = ''
-            setProductoSearchKeySuffix((x) => x + 1)
+            setGlobalProductoSearchText('')
           }
           if (!open) {
             setEditingPurchaseOrderId(null)
             globalProductoSearchTextRef.current = ''
+            setGlobalProductoSearchText('')
             form.reset({
               ...defaultFormValues,
               fechaEmision: new Date().toISOString().slice(0, 10),
@@ -2374,13 +2372,11 @@ export function ComprasPage() {
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      ref={globalProductoSearchInputRef}
-                      key={`compras-productos-search-${productoSearchKeySuffix}`}
-                      defaultValue=""
-                      onInput={(event) => {
-                        globalProductoSearchTextRef.current = event.currentTarget.value
-                        triggerProductoSearchRefreshRef.current++
-                        setProductoSearchTick((x) => x + 1)
+                      value={globalProductoSearchText}
+                      onChange={(event) => {
+                        const v = event.currentTarget.value
+                        globalProductoSearchTextRef.current = v
+                        setGlobalProductoSearchText(v)
                         setGlobalProductoSearchOpen(true)
                       }}
                       onFocus={() => setGlobalProductoSearchOpen(true)}
@@ -2513,9 +2509,7 @@ export function ComprasPage() {
                                         }
                                         setGlobalProductoSearchOpen(false)
                                         globalProductoSearchTextRef.current = ''
-                                        if (globalProductoSearchInputRef.current) {
-                                          globalProductoSearchInputRef.current.value = ''
-                                        }
+                                        setGlobalProductoSearchText('')
                                       }}
                                     >
                                       <Plus className="h-4 w-4" />

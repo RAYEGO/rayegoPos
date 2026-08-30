@@ -297,7 +297,16 @@ export async function getSalesReport(filters: ReportsFilters, request: FastifyRe
     }),
     prisma.ventaPago.findMany({
       where: { deletedAt: null, venta: salesWhere },
-      select: { monto: true, formaPago: { select: { codigo: true } } },
+      select: {
+        monto: true,
+        formaPago: { select: { codigo: true } },
+        venta: {
+          select: {
+            total: true,
+            vuelto: true,
+          },
+        },
+      },
     }),
   ])
 
@@ -316,11 +325,17 @@ export async function getSalesReport(filters: ReportsFilters, request: FastifyRe
 
   const byPaymentMap = new Map<string, { method: string; amount: number; operations: number }>()
   for (const row of payments) {
-    const key = row.formaPago.codigo
-    const current = byPaymentMap.get(key) ?? { method: key, amount: 0, operations: 0 }
-    current.amount += decimalToNumber(row.monto)
+    const method = row.formaPago.codigo
+    const current = byPaymentMap.get(method) ?? { method, amount: 0, operations: 0 }
+    const paymentGross = decimalToNumber(row.monto)
+    const changeForSale = decimalToNumber(row.venta.vuelto)
+    let saleNetForMethod = paymentGross
+    if (method === CodigoFormaPago.EFECTIVO && changeForSale > 0) {
+      saleNetForMethod = Number((paymentGross - changeForSale).toFixed(2))
+    }
+    current.amount = roundMoney(current.amount + saleNetForMethod)
     current.operations += 1
-    byPaymentMap.set(key, current)
+    byPaymentMap.set(method, current)
   }
   const byPaymentMethod = Array.from(byPaymentMap.values()).sort((a, b) => b.amount - a.amount)
 

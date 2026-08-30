@@ -102,10 +102,10 @@ function ProductAutocomplete({
   placeholder: string
 }) {
   const [query, setQuery] = useState('')
+  const [displayValue, setDisplayValue] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [items, setItems] = useState<ProductCatalogItem[]>([])
-  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!query.trim() || !accessToken) {
@@ -132,38 +132,20 @@ function ProductAutocomplete({
     return () => window.clearTimeout(handle)
   }, [accessToken, query])
 
-  useEffect(() => {
-    const el = inputRef.current
-    if (!el) return
-
-    const handleFocus = () => setIsOpen(true)
-    const handleBlur = () => window.setTimeout(() => setIsOpen(false), 120)
-    const handleInput = () => {
-      setQuery(el.value)
-      setIsOpen(true)
-    }
-
-    el.addEventListener('focus', handleFocus)
-    el.addEventListener('blur', handleBlur)
-    el.addEventListener('input', handleInput)
-
-    return () => {
-      el.removeEventListener('focus', handleFocus)
-      el.removeEventListener('blur', handleBlur)
-      el.removeEventListener('input', handleInput)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!value) {
-      return
-    }
-  }, [value])
-
   return (
     <div className="relative">
       <Input
-        ref={inputRef}
+        value={displayValue}
+        onChange={(event) => {
+          const v = event.currentTarget.value
+          setDisplayValue(v)
+          setQuery(v)
+          setIsOpen(true)
+        }}
+        onFocus={() => {
+          if (query.trim()) setIsOpen(true)
+        }}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
         placeholder={placeholder}
       />
       {isOpen ? (
@@ -185,9 +167,7 @@ function ProductAutocomplete({
                   onClick={() => {
                     onValueChange(product.id)
                     onProductSelected?.(product)
-                    if (inputRef.current) {
-                      inputRef.current.value = `${product.name} · ${product.sku}`
-                    }
+                    setDisplayValue(`${product.name} · ${product.sku}`)
                     setQuery('')
                     setItems([])
                     setIsOpen(false)

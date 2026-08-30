@@ -77,24 +77,24 @@ export const SidePanelContent = React.forwardRef<
           })
         }
 
-        window.requestAnimationFrame(() => {
-          const active = document.activeElement as HTMLElement | null
-          if (active && root.contains(active)) return
-
-          const candidate =
-            pick('input:not([type="hidden"])') ??
-            pick('textarea') ??
-            pick('[role="combobox"]') ??
-            pick('button:not([disabled])') ??
-            pick('[tabindex]:not([tabindex="-1"])')
-
-          if (!candidate) {
-            event.preventDefault()
-            return
-          }
-          candidate.focus({ preventScroll: true })
+        const active = document.activeElement as HTMLElement | null
+        if (active && root.contains(active)) {
           event.preventDefault()
-        })
+          return
+        }
+
+        const candidate =
+          pick('input:not([type="hidden"])') ??
+          pick('textarea') ??
+          pick('[role="combobox"]') ??
+          pick('button:not([disabled])') ??
+          pick('[tabindex]:not([tabindex="-1"])')
+
+        if (!candidate) {
+          return
+        }
+        candidate.focus({ preventScroll: true })
+        event.preventDefault()
       }}
       {...props}
     >

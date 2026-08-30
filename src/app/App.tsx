@@ -33,61 +33,10 @@ function GlobalDialogSanitizer() {
     document.addEventListener('focusin', onAnyFocusChange, true)
     document.addEventListener('focusout', onAnyFocusChange, true)
 
-    const onKeyDownCapture = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return
-      const target = event.target as HTMLElement | null
-      if (!target) return
-      const tag = target.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
-        const asEl = target as HTMLInputElement | HTMLTextAreaElement
-        if (!asEl.disabled && !(asEl as any).readOnly) {
-          if (document.activeElement !== target) {
-            window.requestAnimationFrame(() => {
-              try {
-                if (document.activeElement !== target && !asEl.disabled && !(asEl as any).readOnly) {
-                  target.focus({ preventScroll: true })
-                }
-              } catch {
-              }
-            })
-          }
-        }
-      }
-    }
-    window.addEventListener('keydown', onKeyDownCapture, true)
-
-    const forceFocusIfEditableOnPointer = (event: MouseEvent | PointerEvent) => {
-      try {
-        const t = event.target as HTMLElement | null
-        if (!t) return
-        const editable = t.closest<HTMLElement>(
-          'input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]',
-        )
-        if (editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
-          if (document.activeElement !== editable) {
-            window.requestAnimationFrame(() => {
-              if (document.activeElement !== editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
-                try {
-                  editable.focus({ preventScroll: true })
-                } catch {
-                }
-              }
-            })
-          }
-        }
-      } catch {
-      }
-    }
-    window.addEventListener('pointerdown', forceFocusIfEditableOnPointer, true)
-    window.addEventListener('mousedown', forceFocusIfEditableOnPointer, true)
-
     return () => {
       window.clearInterval(timer)
       document.removeEventListener('focusin', onAnyFocusChange, true)
       document.removeEventListener('focusout', onAnyFocusChange, true)
-      document.removeEventListener('keydown', onKeyDownCapture, true)
-      document.removeEventListener('pointerdown', forceFocusIfEditableOnPointer, true)
-      document.removeEventListener('mousedown', forceFocusIfEditableOnPointer, true)
     }
   }, [])
 
