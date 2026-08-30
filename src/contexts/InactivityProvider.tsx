@@ -13,15 +13,16 @@ import type { AuthSession } from '@/types/auth'
 
 const ACTIVITY_EVENTS = [
   'mousedown',
-  'keydown',
+  'keyup',
   'scroll',
   'touchstart',
-  'pointerdown',
-  'input',
+  'pointerup',
   'change',
   'click',
   'wheel',
 ] as const
+
+const ACTIVITY_REPORT_COOLDOWN_MS = 800
 
 type InactivityStatus = 'active' | 'warning' | 'expired'
 
@@ -95,6 +96,8 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     }
   }
 
+  const lastReportAtRef = useRef<number>(0)
+
   const clearTickInterval = () => {
     if (tickIntervalRef.current !== null) {
       window.clearInterval(tickIntervalRef.current)
@@ -104,6 +107,11 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const reportActivity = () => {
     const now = Date.now()
+    if (now - lastReportAtRef.current < ACTIVITY_REPORT_COOLDOWN_MS) {
+      idleDeadlineRef.current = now + settings.idleTimeoutMs
+      return
+    }
+    lastReportAtRef.current = now
     setLastActivityAt(now)
     idleDeadlineRef.current = now + settings.idleTimeoutMs
     setIdleTimeLeftMs(settings.idleTimeoutMs)
@@ -241,7 +249,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
     const opts: AddEventListenerOptions & EventListenerOptions = {
       passive: true,
-      capture: true,
+      capture: false,
     }
 
     for (const eventName of ACTIVITY_EVENTS) {
