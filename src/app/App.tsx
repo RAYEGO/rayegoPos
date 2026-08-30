@@ -24,7 +24,6 @@ function GlobalDialogSanitizer() {
       }
     }
     sanitize()
-    const timer = window.setInterval(sanitize, 400)
 
     const onAnyFocusChange = () => {
       if (hasActiveRadixOverlay()) return
@@ -34,7 +33,6 @@ function GlobalDialogSanitizer() {
     document.addEventListener('focusout', onAnyFocusChange, true)
 
     return () => {
-      window.clearInterval(timer)
       document.removeEventListener('focusin', onAnyFocusChange, true)
       document.removeEventListener('focusout', onAnyFocusChange, true)
     }

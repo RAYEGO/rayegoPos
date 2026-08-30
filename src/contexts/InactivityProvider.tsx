@@ -79,6 +79,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const sessionRef = useRef<AuthSession | null>(session)
   const isAuthenticatedRef = useRef<boolean>(isAuthenticated)
   const statusRef = useRef<InactivityStatus>('active')
+  const lastIdleUpdateRef = useRef<number>(0)
 
   useEffect(() => {
     sessionRef.current = session
@@ -213,9 +214,21 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     tickIntervalRef.current = window.setInterval(() => {
       if (statusRef.current === 'expired') return
       const left = idleDeadlineRef.current - Date.now()
-      setIdleTimeLeftMs(left < 0 ? 0 : left)
+      const clampedLeft = left < 0 ? 0 : left
+      const inWarningWindow =
+        clampedLeft <= settings.warningCountdownMs || statusRef.current === 'warning'
 
-      if (left <= settings.warningCountdownMs) {
+      if (inWarningWindow) {
+        setIdleTimeLeftMs(clampedLeft)
+      } else {
+        const now = Date.now()
+        if (now - lastIdleUpdateRef.current >= 5000) {
+          lastIdleUpdateRef.current = now
+          setIdleTimeLeftMs(clampedLeft)
+        }
+      }
+
+      if (clampedLeft <= settings.warningCountdownMs) {
         transitionToWarning()
       }
 
