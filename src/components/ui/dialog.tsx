@@ -41,31 +41,6 @@ export const DialogContent = React.forwardRef<
         'fixed left-1/2 top-1/2 z-[60] grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-popover p-6 text-popover-foreground shadow-soft animate-in fade-in-0 zoom-in-95',
         className,
       )}
-      onPointerDown={(event) => {
-        const target = event.target as HTMLElement | null
-        if (!target) {
-          props.onPointerDown?.(event)
-          return
-        }
-        try {
-          const findEditable = (tgt: HTMLElement | null): HTMLElement | null => {
-            if (!tgt) return null
-            const selector = 'input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"]'
-            if (tgt.matches(selector)) return tgt as HTMLElement
-            const up = tgt.closest<HTMLElement>(selector)
-            if (up) return up
-            const down = tgt.querySelector<HTMLElement>(selector)
-            if (down) return down
-            return null
-          }
-          const editable = findEditable(target)
-          if (editable && document.activeElement !== editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
-            editable.focus({ preventScroll: true })
-          }
-        } catch {
-        }
-        props.onPointerDown?.(event)
-      }}
       onPointerDownOutside={(event) => {
         const target = event.target as HTMLElement | null
         if (target && target.closest('[data-radix-popper-content-wrapper]')) {
