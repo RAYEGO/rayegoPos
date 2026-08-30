@@ -21,7 +21,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )}
         onPointerDown={(event) => {
           const el = innerRef.current
-          if (el && !el.disabled && !(el as any).readOnly && document.activeElement !== el) {
+          if (el && !el.disabled && !(el as any).readOnly) {
             try {
               el.focus({ preventScroll: true })
             } catch {

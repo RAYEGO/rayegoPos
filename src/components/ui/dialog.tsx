@@ -42,18 +42,6 @@ export const DialogContent = React.forwardRef<
         className,
       )}
       onPointerDown={(event) => {
-        const target = event.target as HTMLElement | null
-        if (!target) {
-          props.onPointerDown?.(event)
-          return
-        }
-        try {
-          const editable = target.closest<HTMLElement>('input, textarea, [contenteditable="true"], [role="textbox"], [role="combobox"]')
-          if (editable && document.activeElement !== editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
-            editable.focus({ preventScroll: true })
-          }
-        } catch {
-        }
         props.onPointerDown?.(event)
       }}
       onPointerDownOutside={(event) => {

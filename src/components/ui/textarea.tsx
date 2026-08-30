@@ -20,7 +20,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         onPointerDown={(event) => {
           const el = innerRef.current
-          if (el && !el.disabled && !(el as any).readOnly && document.activeElement !== el) {
+          if (el && !el.disabled && !(el as any).readOnly) {
             try {
               el.focus({ preventScroll: true })
             } catch {

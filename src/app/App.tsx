@@ -33,10 +33,33 @@ function GlobalDialogSanitizer() {
     document.addEventListener('focusin', onAnyFocusChange, true)
     document.addEventListener('focusout', onAnyFocusChange, true)
 
+    const forceFocusIfEditableOnPointer = (event: MouseEvent | PointerEvent) => {
+      try {
+        const t = event.target as HTMLElement | null
+        if (!t) return
+        const editable = t.closest<HTMLElement>(
+          'input, textarea, [contenteditable="true"], [contenteditable=""], [role="textbox"]',
+        )
+        if (editable && !editable.hasAttribute('disabled') && !(editable as any).readOnly) {
+          if (document.activeElement !== editable) {
+            try {
+              editable.focus({ preventScroll: true })
+            } catch {
+            }
+          }
+        }
+      } catch {
+      }
+    }
+    window.addEventListener('pointerdown', forceFocusIfEditableOnPointer, true)
+    window.addEventListener('mousedown', forceFocusIfEditableOnPointer, true)
+
     return () => {
       window.clearInterval(timer)
       document.removeEventListener('focusin', onAnyFocusChange, true)
       document.removeEventListener('focusout', onAnyFocusChange, true)
+      window.removeEventListener('pointerdown', forceFocusIfEditableOnPointer, true)
+      window.removeEventListener('mousedown', forceFocusIfEditableOnPointer, true)
     }
   }, [])
 
