@@ -93,7 +93,12 @@ export const SidePanelContent = React.forwardRef<
         if (!candidate) {
           return
         }
-        candidate.focus({ preventScroll: true })
+        window.requestAnimationFrame(() => {
+          try {
+            candidate.focus({ preventScroll: true })
+          } catch {
+          }
+        })
         event.preventDefault()
       }}
       {...props}
