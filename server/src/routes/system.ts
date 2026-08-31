@@ -51,15 +51,43 @@ type EnvironmentResponse = {
   databaseConnected: boolean
 }
 
+function resolveMode(): EnvironmentMode {
+  const explicit = process.env.RAYEGO_ENV_MODE || process.env.APP_ENV || process.env.NODE_ENV
+  if (explicit) {
+    const n = normalizeMode(explicit)
+    if (n !== 'unknown') return n
+  }
+  const railwayEnv = String(process.env.RAILWAY_ENVIRONMENT_NAME ?? '').trim().toLowerCase()
+  if (railwayEnv === 'production' || railwayEnv === 'prod') return 'production'
+  if (railwayEnv === 'development' || railwayEnv === 'develop' || railwayEnv === 'dev') return 'development'
+  if (railwayEnv === 'staging') return 'staging'
+  return normalizeMode(explicit)
+}
+
+function resolveApiName(envMode: EnvironmentMode): string {
+  const explicitRayego = String(process.env.RAYEGO_API_NAME ?? '').trim()
+  if (explicitRayego) return explicitRayego
+  const railwayService = String(process.env.RAILWAY_SERVICE_NAME ?? '').trim()
+  if (railwayService) return railwayService
+  return envMode === 'production' ? 'Api-prod' : envMode === 'development' ? 'Api-dev' : 'Rayego POS API'
+}
+
+function resolveDatabaseName(envMode: EnvironmentMode): string {
+  const explicitRayego = String(process.env.RAYEGO_DB_NAME ?? '').trim()
+  if (explicitRayego) return explicitRayego
+  const railwayEnv = String(process.env.RAILWAY_ENVIRONMENT_NAME ?? '').trim().toLowerCase()
+  if (railwayEnv === 'production' || railwayEnv === 'prod') return 'Postgres-prod'
+  if (railwayEnv === 'development' || railwayEnv === 'develop' || railwayEnv === 'dev') return 'Postgres-dev'
+  return envMode === 'production' ? 'Postgres-prod' : envMode === 'development' ? 'Postgres-dev' : 'Postgres'
+}
+
 export async function systemRoutes(app: FastifyInstance) {
   app.get('/environment', async (request): Promise<EnvironmentResponse> => {
     await requirePermission(request, 'configuracion.read')
 
-    const envMode = normalizeMode(
-      process.env.RAYEGO_ENV_MODE || process.env.APP_ENV || process.env.NODE_ENV,
-    )
-    const apiName = String(process.env.RAYEGO_API_NAME ?? '').trim() || (envMode === 'production' ? 'Api-prod' : envMode === 'development' ? 'Api-dev' : 'Rayego POS API')
-    const dbName = String(process.env.RAYEGO_DB_NAME ?? '').trim() || (envMode === 'production' ? 'Postgres-prod' : envMode === 'development' ? 'Postgres-dev' : 'Postgres')
+    const envMode = resolveMode()
+    const apiName = resolveApiName(envMode)
+    const dbName = resolveDatabaseName(envMode)
     const branch = resolveBranch()
 
     const databaseConnected = await isDatabaseConnected()
