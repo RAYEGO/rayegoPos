@@ -19,6 +19,7 @@ import reportsRoutes from './routes/reports.js'
 import { implementationRoutes } from './routes/implementation.js'
 import { settingsRoutes } from './routes/settings.js'
 import { adminPosRoutes } from './routes/admin-pos.js'
+import { systemRoutes } from './routes/system.js'
 import usersRoutes from './routes/users.js'
 
 const performanceDebugConfig = (() => {
@@ -204,6 +205,10 @@ export function createApp() {
 
     instance.register(usersRoutes, {
       prefix: '/api/users',
+    })
+
+    instance.register(systemRoutes, {
+      prefix: '/api/system',
     })
   })
 

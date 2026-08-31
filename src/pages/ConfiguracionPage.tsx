@@ -4,11 +4,15 @@ import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   Building2,
+  Database,
   Download,
+  GitBranch,
+  Globe2,
   ImageUp,
   MoreHorizontal,
   Plus,
   RefreshCcw,
+  Server,
   Trash2,
   Upload,
   X,
@@ -43,6 +47,7 @@ import { branchesService } from '@/services/branchesService'
 import { implementationService } from '@/services/implementationService'
 import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
+import { systemService, getEnvironmentBadge, type SystemEnvironment } from '@/services/systemService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
 import type { Branch } from '@/types/settings'
@@ -79,6 +84,28 @@ function getApiErrorMessage(error: unknown) {
   }
 
   return 'No fue posible completar la operación.'
+}
+
+function EnvironmentBadge({ mode }: { mode: SystemEnvironment['environment'] }) {
+  const badge = getEnvironmentBadge(mode)
+  const kindToStyles: Record<(typeof badge)['kind'], string> = {
+    dev: 'bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300',
+    prod: 'bg-rose-500/10 text-rose-700 ring-1 ring-rose-500/30 dark:text-rose-300',
+    other: 'bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300',
+    unknown: 'bg-muted text-muted-foreground ring-1 ring-muted',
+  }
+  const kindToDot: Record<(typeof badge)['kind'], string> = {
+    dev: 'bg-emerald-500',
+    prod: 'bg-rose-500',
+    other: 'bg-amber-500',
+    unknown: 'bg-muted-foreground',
+  }
+  return (
+    <Badge className={`gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${kindToStyles[badge.kind]}`}>
+      <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${kindToDot[badge.kind]}`} />
+      {badge.label}
+    </Badge>
+  )
 }
 
 function getLoadStatusVariant(status: string) {
@@ -290,8 +317,11 @@ export function ConfiguracionPage() {
   const canEditCompany = authorization.hasRole('ADMIN')
 
   const [activeTab, setActiveTab] = useState<
-    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'herramientas' | 'catalogos'
+    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'entorno' | 'herramientas' | 'catalogos'
   >('empresa')
+  const [environment, setEnvironment] = useState<SystemEnvironment | null>(null)
+  const [isEnvironmentLoading, setIsEnvironmentLoading] = useState(false)
+  const [environmentError, setEnvironmentError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loads, setLoads] = useState<InitialInventoryLoadRow[]>([])
@@ -467,10 +497,29 @@ export function ConfiguracionPage() {
     }
   }
 
+  async function loadEnvironment() {
+    if (!accessToken) return
+    setIsEnvironmentLoading(true)
+    setEnvironmentError(null)
+    try {
+      const env = await systemService.getEnvironment({ accessToken })
+      setEnvironment(env)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setEnvironmentError(getApiErrorMessage(err))
+    } finally {
+      setIsEnvironmentLoading(false)
+    }
+  }
+
   useEffect(() => {
     void loadInitialInventoryLoads()
     void loadCompanyProfile()
     void loadBranches()
+    void loadEnvironment()
   }, [accessToken])
 
   function openCreateBranchPanel() {
@@ -1689,6 +1738,7 @@ export function ConfiguracionPage() {
             Comprobantes
           </TabsTrigger>
           <TabsTrigger value="implementacion">Implementación</TabsTrigger>
+          <TabsTrigger value="entorno">Entorno</TabsTrigger>
           <TabsTrigger value="herramientas" disabled={!company || !isImplementationMode}>
             Herramientas del sistema
           </TabsTrigger>
@@ -2153,6 +2203,112 @@ export function ConfiguracionPage() {
                   Esta sección se habilitará en una fase posterior.
                 </p>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="entorno" className="space-y-4 pt-4">
+          <Card>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Diagnóstico del entorno</CardTitle>
+                <CardDescription>
+                  Información segura del API y la base de datos a la que está conectado Rayego POS en este momento.
+                  Útil para evitar confundir entornos de desarrollo y producción.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadEnvironment()}
+                  disabled={isEnvironmentLoading}
+                >
+                  <RefreshCcw className={`mr-2 h-4 w-4 ${isEnvironmentLoading ? 'animate-spin' : ''}`} />
+                  {isEnvironmentLoading ? 'Actualizando…' : 'Actualizar'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {environmentError ? (
+                <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                  {environmentError}
+                </div>
+              ) : isEnvironmentLoading && !environment ? (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="rounded-xl border p-4">
+                      <div className="h-3 w-20 rounded bg-muted" />
+                      <div className="mt-3 h-5 w-40 rounded bg-muted" />
+                    </div>
+                  ))}
+                </div>
+              ) : environment ? (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Globe2 className="h-3.5 w-3.5" />
+                      Entorno
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <EnvironmentBadge mode={environment.environment} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Server className="h-3.5 w-3.5" />
+                      API
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">{environment.api}</div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Database className="h-3.5 w-3.5" />
+                      Base de datos
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">{environment.database}</div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <GitBranch className="h-3.5 w-3.5" />
+                      Rama
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">
+                      {environment.branch ? (
+                        <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-mono text-xs">
+                          {environment.branch}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border p-4 sm:col-span-2 lg:col-span-1">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Database className="h-3.5 w-3.5" />
+                      Estado BD
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className={`inline-block h-2.5 w-2.5 rounded-full ${environment.databaseConnected ? 'bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]' : 'bg-rose-500 shadow-[0_0_0_4px_rgba(244,63,94,0.12)] animate-pulse'}`}
+                      />
+                      <span className="text-sm font-semibold text-foreground">
+                        {environment.databaseConnected ? 'Conectada' : 'No conectada'}
+                      </span>
+                      {!environment.databaseConnected ? (
+                        <span className="text-xs text-muted-foreground">
+                          (revisa credenciales o conexión de Railway)
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </TabsContent>

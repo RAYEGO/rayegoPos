@@ -1,16 +1,67 @@
+import { useEffect, useState } from 'react'
 import { RoleBadge } from '@/components/auth/RoleBadge'
 import { Bell, Building2, Globe2, LogOut, Menu, Search, UserCircle2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
 import { paths } from '@/routes/paths'
+import { getEnvironmentBadge, systemService, type EnvironmentMode } from '@/services/systemService'
 
 type TopbarProps = {
   onOpenNavigation: () => void
+}
+
+type EnvironmentStatus = {
+  kind: ReturnType<typeof getEnvironmentBadge>['kind']
+  label: string
+  mode: EnvironmentMode
+}
+
+const statusCache: { value: EnvironmentStatus | null; expiresAt: number } = { value: null, expiresAt: 0 }
+
+function useEnvironmentStatus(accessToken?: string, authenticated = false): EnvironmentStatus | null {
+  const [status, setStatus] = useState<EnvironmentStatus | null>(null)
+
+  useEffect(() => {
+    if (!authenticated) {
+      setStatus(null)
+      return
+    }
+    const now = Date.now()
+    if (statusCache.value && now < statusCache.expiresAt) {
+      setStatus(statusCache.value)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const env = await systemService.getEnvironment(accessToken ? { accessToken } : undefined)
+        if (cancelled) return
+        const badge = getEnvironmentBadge(env.environment)
+        const next: EnvironmentStatus = { kind: badge.kind, label: badge.label, mode: env.environment }
+        statusCache.value = next
+        statusCache.expiresAt = Date.now() + 60 * 1000
+        setStatus(next)
+      } catch {
+        if (cancelled) return
+        const fallback: EnvironmentStatus = { kind: 'unknown', label: '—', mode: 'unknown' }
+        statusCache.value = fallback
+        statusCache.expiresAt = Date.now() + 15 * 1000
+        setStatus(fallback)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [accessToken, authenticated])
+
+  return status
 }
 
 export function Topbar({ onOpenNavigation }: TopbarProps) {
@@ -18,6 +69,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const { session, logout } = useAuth()
   const { hasRole } = useAuthorization()
   const isPlatformAdmin = hasRole('ADMIN_POS')
+  const environmentStatus = useEnvironmentStatus(session?.accessToken, Boolean(session?.accessToken))
 
   async function handleLogout() {
     await logout('Topbar.handleLogout')
@@ -54,6 +106,39 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {environmentStatus ? (
+            <div
+              className={
+                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ring-1 ' +
+                (environmentStatus.kind === 'prod'
+                  ? 'bg-rose-500/10 text-rose-700 ring-rose-500/30 dark:text-rose-300'
+                  : environmentStatus.kind === 'dev'
+                    ? 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300'
+                    : environmentStatus.kind === 'other'
+                      ? 'bg-amber-500/10 text-amber-700 ring-amber-500/30 dark:text-amber-300'
+                      : 'bg-muted text-muted-foreground ring-muted')
+              }
+              aria-label={`Entorno: ${environmentStatus.label}`}
+            >
+              <span
+                aria-hidden
+                className={
+                  'inline-block h-2 w-2 rounded-full ' +
+                  (environmentStatus.kind === 'prod'
+                    ? 'bg-rose-500'
+                    : environmentStatus.kind === 'dev'
+                      ? 'bg-emerald-500'
+                      : environmentStatus.kind === 'other'
+                        ? 'bg-amber-500'
+                        : 'bg-muted-foreground')
+                }
+              />
+              <span className="inline-flex items-center gap-1">
+                {environmentStatus.kind === 'prod' ? '🔴' : environmentStatus.kind === 'dev' ? '🟢' : environmentStatus.kind === 'other' ? '🟡' : '⚪️'}
+                {environmentStatus.label}
+              </span>
+            </div>
+          ) : null}
           {isPlatformAdmin ? (
             <div className="hidden items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary sm:flex">
               <Globe2 className="h-3.5 w-3.5 shrink-0" />
@@ -122,3 +207,5 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
     </header>
   )
 }
+
+export { Topbar as default }
