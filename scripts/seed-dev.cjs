@@ -1,13 +1,15 @@
 /**
  * ==============================================================
- *  SEED SOLO ENTORNO DEVELOPMENT — Usuario admin inicial DEV
+ *  SEED SOLO ENTORNO DEVELOPMENT — 2 usuarios DEV:
+ *    (a) ADMIN      de EMPRESA  → admin@rayego.pe
+ *    (b) ADMIN_POS  PLATAFORMA  → admin.pos@rayego.pe
  * ==============================================================
  *  Reglas INQUEBRANTABLES (NUNCA modificar estas líneas):
  *   1. Este script SOLO corre en entorno development.
  *   2. NUNCA usa DATABASE_URL de producción (sakura.proxy.rlwy.net).
  *   3. Requiere variable DEV_ADMIN_PASSWORD — NO default hardcodeada.
  *   4. Nunca loguea password_hash, password ni secrets.
- *   5. Si el usuario admin@rayego.pe ya existe → SKIP, no duplicar.
+ *   5. Si los usuarios ya existen → SKIP, no duplicar.
  *   6. Solo crea registros MINIMOS OBLIGATORIOS para login.
  *      NADA de productos/categorías/clientes/proveedores.
  * ==============================================================
@@ -64,6 +66,8 @@ const TIPO_EMPRESA = {
 const MODULOS_REQUERIDOS = [
   { codigo: 'dashboard', nombre: 'Dashboard', categoria: 'Operaciones' },
   { codigo: 'configuracion', nombre: 'Configuración', categoria: 'Sistema' },
+  { codigo: 'empresas', nombre: 'Empresas', categoria: 'Plataforma' },
+  { codigo: 'usuarios', nombre: 'Usuarios', categoria: 'Sistema' },
 ]
 const EMPRESA = {
   razonSocial: 'BOTICA DEV SAC',
@@ -80,12 +84,39 @@ const SUCURSAL = {
   esPrincipal: true,
   direccion: 'Av. DEV 123, Lima',
 }
-const ROL_ADMIN = {
+const ROL_ADMIN_EMPRESA = {
   codigo: 'ADMIN',
   nombre: 'Administrador',
-  descripcion: 'Acceso total DEV',
+  descripcion: 'Acceso total DEV en la empresa/sucursal.',
 }
-const USUARIO_ADMIN = {
+const ROL_ADMIN_POS = {
+  codigo: 'ADMIN_POS',
+  nombre: 'Administrador POS (Plataforma)',
+  descripcion: 'Acceso cross-empresa a gestión de empresas/usuarios/auditoría DEV.',
+}
+
+const PERMISOS_ADMIN_EMPRESA = [
+  { codigo: 'dashboard.read', modulo: 'dashboard', nombre: 'Ver Dashboard' },
+  { codigo: 'configuracion.read', modulo: 'configuracion', nombre: 'Ver Configuración' },
+  { codigo: 'configuracion.manage', modulo: 'configuracion', nombre: 'Editar Configuración' },
+]
+// Permisos de ADMIN_POS según auth.permissions.ts L47-60 — NO inventar nuevos:
+const PERMISOS_ADMIN_POS = [
+  { codigo: 'dashboard.read', modulo: 'dashboard', nombre: 'Ver Dashboard' },
+  { codigo: 'tipos_empresa.manage', modulo: 'empresas', nombre: 'Gestionar Tipos de Empresa' },
+  { codigo: 'empresas.read', modulo: 'empresas', nombre: 'Ver Empresas' },
+  { codigo: 'empresas.manage', modulo: 'empresas', nombre: 'Gestionar Empresas' },
+  { codigo: 'administradores.manage', modulo: 'usuarios', nombre: 'Gestionar Administradores' },
+  { codigo: 'usuarios.read', modulo: 'usuarios', nombre: 'Ver Usuarios' },
+  { codigo: 'usuarios.manage', modulo: 'usuarios', nombre: 'Gestionar Usuarios' },
+  { codigo: 'sesiones.read', modulo: 'usuarios', nombre: 'Ver Sesiones' },
+  { codigo: 'sesiones.revoke', modulo: 'usuarios', nombre: 'Revocar Sesiones' },
+  { codigo: 'auditoria.read', modulo: 'reportes', nombre: 'Ver Auditoría' },
+  { codigo: 'reportes.read', modulo: 'reportes', nombre: 'Ver Reportes' },
+  { codigo: 'configuracion.read', modulo: 'configuracion', nombre: 'Ver Configuración' },
+]
+
+const USUARIO_ADMIN_EMPRESA = {
   username: 'admin',
   email: 'admin@rayego.pe',
   nombres: 'Administrador',
@@ -93,10 +124,14 @@ const USUARIO_ADMIN = {
   tipoDocumento: 'DNI',
   numeroDocumento: '00000000',
 }
-const PERMISOS_ROL_ADMIN = [
-  { codigo: 'configuracion.read', modulo: 'configuracion', nombre: 'Ver Configuración' },
-  { codigo: 'dashboard.read', modulo: 'dashboard', nombre: 'Ver Dashboard' },
-]
+const USUARIO_ADMIN_POS = {
+  username: 'admin.pos',
+  email: 'admin.pos@rayego.pe',
+  nombres: 'Administrador',
+  apellidos: 'POS DEV',
+  tipoDocumento: 'DNI',
+  numeroDocumento: '00000001',
+}
 
 const BCRYPT_COST = 10 // MISMO COSTO QUE auth.service.ts L1059 (NO CAMBIAR)
 
@@ -104,33 +139,31 @@ const BCRYPT_COST = 10 // MISMO COSTO QUE auth.service.ts L1059 (NO CAMBIAR)
   const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } })
   try {
     // ============================================================
-    // PASO 2: Fast check — Si usuario admin ya existe → EXIT OK (idempotente)
+    // PASO 2: Password hash 1 sola vez (mismo valor para ambos users)
+    // ============================================================
+    const passwordHash = await bcrypt.hash(rawPw, BCRYPT_COST)
+    console.log(`✅ Password hasheado bcryptjs cost=${BCRYPT_COST} (longitud=${passwordHash.length}). No se muestra ni guarda texto plano.`)
+
+    // ============================================================
+    // PASO 3: Fast check — Si AMBOS usuarios existen → EXIT OK (idempotente)
     // ============================================================
     const preExisting = await prisma.$queryRawUnsafe(`
       SELECT id, username, email, activo FROM public.usuarios
       WHERE deleted_at IS NULL
-        AND (LOWER(COALESCE(email,''))='admin@rayego.pe' OR LOWER(COALESCE(username,''))='admin')
-      LIMIT 1;
+        AND (
+          LOWER(COALESCE(email,''))    IN ('admin@rayego.pe','admin.pos@rayego.pe') OR
+          LOWER(COALESCE(username,'')) IN ('admin','admin.pos')
+        )
+      ORDER BY username;
     `)
-    if (preExisting && preExisting.length > 0) {
-      console.log('\nℹ️  Usuario admin@rayego.pe YA EXISTE en Postgres-dev → no se creó nada (seed idempotente).')
-      console.log('   Usuario id:', preExisting[0].id,
-                  ' username:', preExisting[0].username,
-                  ' email:', preExisting[0].email,
-                  ' activo:', preExisting[0].activo)
+    if (preExisting && preExisting.length === 2) {
+      console.log('\nℹ️  AMBOS usuarios DEV ya existen en Postgres-dev → SKIP (seed idempotente).')
+      for (const u of preExisting) console.log(`   · ${u.username} / ${u.email} · activo=${u.activo}`)
       process.exit(0)
     }
-    console.log('✅ Usuario admin no existe → creando registros mínimos obligatorios...')
 
     // ============================================================
-    // PASO 3: Hash password (mismo bcryptjs 10 que producción)
-    // ============================================================
-    const passwordHash = await bcrypt.hash(rawPw, BCRYPT_COST)
-    const pwLen = passwordHash.length
-    console.log(`✅ Password hasheado (longitud=${pwLen}; bcryptjs cost=${BCRYPT_COST}). NUNCA se almacena ni muestra el texto plano.`)
-
-    // ============================================================
-    // PASO 4: Transacción — crear TODO o nada (evita estado roto a mitad)
+    // PASO 4: Transacción — TODO o nada (evita estado roto)
     // ============================================================
     await prisma.$transaction(async (tx) => {
       // 4a. TipoEmpresa BOTICA
@@ -140,7 +173,7 @@ const BCRYPT_COST = 10 // MISMO COSTO QUE auth.service.ts L1059 (NO CAMBIAR)
         create: TIPO_EMPRESA,
       })
 
-      // 4b. Modulos + TipoEmpresaModulo (2 modulos basicos para login/menu)
+      // 4b. Modulos + TipoEmpresaModulo (basicos + plataforma)
       for (const m of MODULOS_REQUERIDOS) {
         await tx.modulo.upsert({
           where: { codigo: m.codigo },
@@ -168,34 +201,56 @@ const BCRYPT_COST = 10 // MISMO COSTO QUE auth.service.ts L1059 (NO CAMBIAR)
         create: { ...SUCURSAL, empresaId: empresa.id },
       })
 
-      // 4e. Rol ADMIN + Permisos + RolPermiso
-      const rol = await tx.rol.upsert({
-        where: { codigo: ROL_ADMIN.codigo },
-        update: { nombre: ROL_ADMIN.nombre, descripcion: ROL_ADMIN.descripcion, activo: true, deletedAt: null },
-        create: ROL_ADMIN,
+      // ============================================================
+      // 4e. ROLES + PERMISOS
+      // ============================================================
+      const rolAdminEmpresa = await tx.rol.upsert({
+        where: { codigo: ROL_ADMIN_EMPRESA.codigo },
+        update: { nombre: ROL_ADMIN_EMPRESA.nombre, descripcion: ROL_ADMIN_EMPRESA.descripcion, activo: true, deletedAt: null },
+        create: ROL_ADMIN_EMPRESA,
       })
-      for (const p of PERMISOS_ROL_ADMIN) {
+      for (const p of PERMISOS_ADMIN_EMPRESA) {
         const perm = await tx.permiso.upsert({
           where: { codigo: p.codigo },
           update: { modulo: p.modulo, nombre: p.nombre, activo: true, deletedAt: null },
           create: p,
         })
         await tx.rolPermiso.upsert({
-          where: { rolId_permisoId: { rolId: rol.id, permisoId: perm.id } },
+          where: { rolId_permisoId: { rolId: rolAdminEmpresa.id, permisoId: perm.id } },
           update: { deletedAt: null },
-          create: { rolId: rol.id, permisoId: perm.id },
+          create: { rolId: rolAdminEmpresa.id, permisoId: perm.id },
         })
       }
 
-      // 4f. Usuario Admin DEV
-      const usuario = await tx.usuario.upsert({
-        where: { username: USUARIO_ADMIN.username },
+      const rolAdminPos = await tx.rol.upsert({
+        where: { codigo: ROL_ADMIN_POS.codigo },
+        update: { nombre: ROL_ADMIN_POS.nombre, descripcion: ROL_ADMIN_POS.descripcion, activo: true, deletedAt: null },
+        create: ROL_ADMIN_POS,
+      })
+      for (const p of PERMISOS_ADMIN_POS) {
+        const perm = await tx.permiso.upsert({
+          where: { codigo: p.codigo },
+          update: { modulo: p.modulo, nombre: p.nombre, activo: true, deletedAt: null },
+          create: p,
+        })
+        await tx.rolPermiso.upsert({
+          where: { rolId_permisoId: { rolId: rolAdminPos.id, permisoId: perm.id } },
+          update: { deletedAt: null },
+          create: { rolId: rolAdminPos.id, permisoId: perm.id },
+        })
+      }
+
+      // ============================================================
+      // 4f. USUARIO (a) ADMIN de EMPRESA — con empresaId + sucursalId
+      // ============================================================
+      const usuarioAdminEmpresa = await tx.usuario.upsert({
+        where: { username: USUARIO_ADMIN_EMPRESA.username },
         update: {
-          email: USUARIO_ADMIN.email,
-          nombres: USUARIO_ADMIN.nombres,
-          apellidos: USUARIO_ADMIN.apellidos,
-          tipoDocumento: USUARIO_ADMIN.tipoDocumento,
-          numeroDocumento: USUARIO_ADMIN.numeroDocumento,
+          email: USUARIO_ADMIN_EMPRESA.email,
+          nombres: USUARIO_ADMIN_EMPRESA.nombres,
+          apellidos: USUARIO_ADMIN_EMPRESA.apellidos,
+          tipoDocumento: USUARIO_ADMIN_EMPRESA.tipoDocumento,
+          numeroDocumento: USUARIO_ADMIN_EMPRESA.numeroDocumento,
           activo: true,
           deletedAt: null,
           passwordHash,
@@ -203,23 +258,55 @@ const BCRYPT_COST = 10 // MISMO COSTO QUE auth.service.ts L1059 (NO CAMBIAR)
           sucursalId: sucursal.id,
         },
         create: {
-          ...USUARIO_ADMIN,
+          ...USUARIO_ADMIN_EMPRESA,
           passwordHash,
           empresaId: empresa.id,
           sucursalId: sucursal.id,
         },
       })
-
-      // 4g. UsuarioSucursal (rol por sucursal) + UsuarioRol (global, compatibilidad)
+      // UsuarioSucursal (rol por sucursal) + UsuarioRol (compatibilidad)
       await tx.usuarioSucursal.upsert({
-        where: { usuarioId_sucursalId: { usuarioId: usuario.id, sucursalId: sucursal.id } },
-        update: { rolId: rol.id, activo: true, deletedAt: null },
-        create: { usuarioId: usuario.id, sucursalId: sucursal.id, rolId: rol.id },
+        where: { usuarioId_sucursalId: { usuarioId: usuarioAdminEmpresa.id, sucursalId: sucursal.id } },
+        update: { rolId: rolAdminEmpresa.id, activo: true, deletedAt: null },
+        create: { usuarioId: usuarioAdminEmpresa.id, sucursalId: sucursal.id, rolId: rolAdminEmpresa.id },
       })
       await tx.usuarioRol.upsert({
-        where: { usuarioId_rolId: { usuarioId: usuario.id, rolId: rol.id } },
+        where: { usuarioId_rolId: { usuarioId: usuarioAdminEmpresa.id, rolId: rolAdminEmpresa.id } },
         update: { activo: true, fechaFin: null, deletedAt: null },
-        create: { usuarioId: usuario.id, rolId: rol.id },
+        create: { usuarioId: usuarioAdminEmpresa.id, rolId: rolAdminEmpresa.id },
+      })
+
+      // ============================================================
+      // 4g. USUARIO (b) ADMIN_POS PLATAFORMA — SIN empresaId, SIN sucursalId, SOLO usuario_rol GLOBAL
+      // ============================================================
+      const usuarioAdminPos = await tx.usuario.upsert({
+        where: { username: USUARIO_ADMIN_POS.username },
+        update: {
+          email: USUARIO_ADMIN_POS.email,
+          nombres: USUARIO_ADMIN_POS.nombres,
+          apellidos: USUARIO_ADMIN_POS.apellidos,
+          tipoDocumento: USUARIO_ADMIN_POS.tipoDocumento,
+          numeroDocumento: USUARIO_ADMIN_POS.numeroDocumento,
+          activo: true,
+          deletedAt: null,
+          passwordHash,
+          // 🔴 SIN empresaId (plataforma)
+          empresaId: null,
+          // 🔴 SIN sucursalId (plataforma)
+          sucursalId: null,
+        },
+        create: {
+          ...USUARIO_ADMIN_POS,
+          passwordHash,
+          empresaId: null,     // plataforma
+          sucursalId: null,    // plataforma
+        },
+      })
+      // SOLO UsuarioRol GLOBAL (no UsuarioSucursal, ya que platform admin no tiene sucursal)
+      await tx.usuarioRol.upsert({
+        where: { usuarioId_rolId: { usuarioId: usuarioAdminPos.id, rolId: rolAdminPos.id } },
+        update: { activo: true, fechaFin: null, deletedAt: null },
+        create: { usuarioId: usuarioAdminPos.id, rolId: rolAdminPos.id },
       })
 
       console.log('\n=========================================================')
@@ -228,11 +315,18 @@ const BCRYPT_COST = 10 // MISMO COSTO QUE auth.service.ts L1059 (NO CAMBIAR)
       console.log('   Modulos     :', MODULOS_REQUERIDOS.map(m => m.codigo).join(', '))
       console.log('   Empresa     :', EMPRESA.numeroDocumento, EMPRESA.razonSocial, `(id=${empresa.id.slice(0,8)}...)`)
       console.log('   Sucursal    :', SUCURSAL.codigo, SUCURSAL.nombre, `(id=${sucursal.id.slice(0,8)}...)`)
-      console.log('   Rol         :', rol.codigo, rol.nombre, `(id=${rol.id.slice(0,8)}...)`)
-      console.log('   Permisos    :', PERMISOS_ROL_ADMIN.length, '(configuracion.read + dashboard.read)')
-      console.log('   Usuario     :', USUARIO_ADMIN.username, '/', USUARIO_ADMIN.email, `(id=${usuario.id.slice(0,8)}...)   activo=${true}`)
-      console.log('   Password    : HASH bcryptjs cost=10 (NUNCA se mostró ni guardó el texto plano).')
-      console.log('   NOTA        : No se creó ningún dato de negocio (sin productos/cat/clientes/proveedores).')
+      console.log('   Roles       : ADMIN empresa + ADMIN_POS plataforma (2)')
+      console.log('   Permisos    :', PERMISOS_ADMIN_EMPRESA.length + PERMISOS_ADMIN_POS.length, ' (empresa + plataforma)')
+      console.log('   👤 Usuario 1 (ADMIN EMPRESA):')
+      console.log('       · Login   :', USUARIO_ADMIN_EMPRESA.username, '/', USUARIO_ADMIN_EMPRESA.email)
+      console.log('       · Alcance : 1 empresa + sucursal DEV01 + sucursal + global usuario_rol')
+      console.log('       · Pill Topbar: "Empresa - Botica DEV"')
+      console.log('   👤 Usuario 2 (ADMIN POS PLATAFORMA):')
+      console.log('       · Login   :', USUARIO_ADMIN_POS.username, '/', USUARIO_ADMIN_POS.email)
+      console.log('       · Alcance : SIN empresaId · SIN sucursalId · SOLO rol global ADMIN_POS')
+      console.log('       · Pill Topbar: "Administración plataforma"')
+      console.log('   🔐 Password  : Mismo bcryptjs cost=10 para ambos. NUNCA se mostró/hardcodeó.')
+      console.log('   NOTA        : Sin datos de negocio (0 productos/clientes/proveedores/lotes).')
       console.log('=========================================================')
     })
   } finally {
