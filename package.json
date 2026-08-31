@@ -40,7 +40,8 @@
     "prisma:migrate:status": "node scripts/run-with-project-env.mjs -- prisma migrate status",
     "prisma:migrate:status:prod-local": "node scripts/run-with-project-env.mjs --env production -- prisma migrate status",
     "prisma:seed": "node scripts/run-with-project-env.mjs -- tsx prisma/seed.ts",
-    "prisma:seed:prod-local": "node scripts/run-with-project-env.mjs --env production -- tsx prisma/seed.ts"
+    "prisma:seed:prod-local": "node scripts/run-with-project-env.mjs --env production -- tsx prisma/seed.ts",
+    "seed:dev": "node scripts/run-with-project-env.mjs --env development -- node scripts/seed-dev.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1121.0",
