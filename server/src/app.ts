@@ -21,6 +21,7 @@ import { settingsRoutes } from './routes/settings.js'
 import { adminPosRoutes } from './routes/admin-pos.js'
 import { systemRoutes } from './routes/system.js'
 import usersRoutes from './routes/users.js'
+import { rtRoutes } from './routes/rt.js'
 
 const performanceDebugConfig = (() => {
   const fallback = {
@@ -209,6 +210,10 @@ export function createApp() {
 
     instance.register(systemRoutes, {
       prefix: '/api/system',
+    })
+
+    instance.register(rtRoutes, {
+      prefix: '/api/rt',
     })
   })
 
