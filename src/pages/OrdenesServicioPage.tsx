@@ -520,16 +520,16 @@ export function OrdenesServicioPage() {
                           <CardTitle className="text-sm">Técnico asignado</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-1 text-sm">
-                          {selectedOrden.asignaciones?.length ? (
-                            (selectedOrden.asignaciones as AsignacionTecnicoOrden[])
-                              .filter((a) => a.activo)
+                          {selectedOrden.asignacionesTecnico?.length ? (
+                            (selectedOrden.asignacionesTecnico as AsignacionTecnicoOrden[])
+                              .filter((a) => !a.fechaLiberacion)
                               .slice(-1)
                               .map((a) => (
                                 <div key={a.id}>
                                   <p className="font-medium">
-                                    {a.tecnico?.usuario?.nombre ||
-                                      (a as any).tecnicoNombre ||
-                                      '—'}
+                                    {a.tecnico?.usuario
+                                      ? `${a.tecnico.usuario.nombres} ${a.tecnico.usuario.apellidos || ''}`.trim()
+                                      : (a as any).tecnicoNombre || '—'}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
                                     {formatFecha(a.fechaAsignacion)}
@@ -548,18 +548,18 @@ export function OrdenesServicioPage() {
                         <CardContent className="space-y-2 text-sm">
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Subtotal</span>
-                            <span>{formatMoneda(selectedOrden.subtotal)}</span>
+                            <span>{formatMoneda(selectedOrden.subTotal)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Impuestos</span>
-                            <span>{formatMoneda(selectedOrden.impuestos)}</span>
+                            <span>{formatMoneda(selectedOrden.igvMonto)}</span>
                           </div>
                           <div className="flex justify-between font-semibold border-t pt-2">
                             <span>Total</span>
                             <span>
                               {formatMoneda(
-                                selectedOrden.totalFinal ??
-                                  selectedOrden.totalPresupuesto ??
+                                selectedOrden.total ??
+                                  (selectedOrden.presupuestos && selectedOrden.presupuestos[selectedOrden.presupuestos.length - 1]?.total) ??
                                   0,
                               )}
                             </span>
@@ -584,7 +584,8 @@ export function OrdenesServicioPage() {
                         <CardTitle className="text-sm">Motivo / Falla reportada</CardTitle>
                       </CardHeader>
                       <CardContent className="text-sm whitespace-pre-wrap min-h-[88px]">
-                        {selectedOrden.motivoConsulta ||
+                        {selectedOrden.clienteReporto ||
+                          selectedOrden.diagnosticoRecepcion ||
                           (selectedOrden as any).fallaReportada ||
                           '—'}
                       </CardContent>
@@ -618,12 +619,12 @@ export function OrdenesServicioPage() {
                             <Zap className="mr-2 h-5 w-5" /> Nuevo presupuesto
                           </Button>
                         </AuthorizationGate>
-                        <AuthorizationGate permission="ordenesServicio.aprobar" fallback={null}>
+                        <AuthorizationGate permission="presupuestosOrdenServicio.write" fallback={null}>
                           <Button
                             size="xl"
                             variant="outline"
                             onClick={() =>
-                              toast.info('Aprobar presupuesto (requiere permiso .aprobar).')
+                              toast.info('Aprobar presupuesto (presupuestosOrdenServicio.write).')
                             }
                           >
                             <ClipboardCheck className="mr-2 h-5 w-5" /> Aprobar
@@ -681,9 +682,10 @@ export function OrdenesServicioPage() {
                               >
                                 <div className="flex justify-between gap-2">
                                   <Badge variant="info">
-                                    {d.tecnico?.usuario?.nombre ||
-                                      (d as any).tecnicoNombre ||
-                                      'Técnico'}
+                                    {d.usuario
+                                      ? `${d.usuario.nombres} ${d.usuario.apellidos || ''}`.trim()
+                                      : (d as any).tecnicoNombre ||
+                                        'Técnico'}
                                   </Badge>
                                   <span className="text-xs text-muted-foreground">
                                     {formatFecha(d.fechaDiagnostico)}
@@ -692,7 +694,11 @@ export function OrdenesServicioPage() {
                                 <Textarea
                                   readOnly
                                   className="min-h-[80px] bg-muted/30"
-                                  value={d.descripcion || ''}
+                                  value={
+                                    d.detalle
+                                      ? `${d.resumen}\n\n${d.detalle}`
+                                      : d.resumen || ''
+                                  }
                                 />
                               </div>
                             ))}
@@ -722,9 +728,9 @@ export function OrdenesServicioPage() {
                                 <div className="flex flex-wrap justify-between gap-2">
                                   <Badge
                                     variant={
-                                      p.estado === 'APROBADO'
+                                      p.estado === 'APROBADO_CLIENTE'
                                         ? 'success'
-                                        : p.estado === 'RECHAZADO'
+                                        : p.estado === 'RECHAZADO_CLIENTE'
                                           ? 'destructive'
                                           : 'info'
                                     }
