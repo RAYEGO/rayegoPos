@@ -424,23 +424,50 @@ export function ReportesPage() {
     const totalEntregadas = ordenes.filter((o) => o.estado === 'ENTREGADO').length
     const entregadasConGarantia = ordenes.filter((o) => o.estado === 'ENTREGADO' && o.garantia).length
     const montoTotalCerradas = ordenes
-      .filter((o) => ['ENTREGADO', 'EN_GARANTÍA', 'RECHAZADO', 'CANCELADO'].includes(o.estado))
-      .reduce((s, o) => s + (o.totalFinal ?? o.subtotal ?? 0), 0)
+      .filter((o) => ['ENTREGADO', 'EN_GARANTIA', 'RECHAZADO', 'CANCELADO'].includes(o.estado))
+      .reduce((s, o) => s + (o.total ?? o.subTotal ?? 0), 0)
 
     for (const o of ordenes) {
       porEstado.set(o.estado, (porEstado.get(o.estado) ?? 0) + 1)
-      const tecnicoId = o.tecnicoId ?? ''
-      const tecnicoNombre = o.tecnico?.nombres ?? (tecnicoId ? 'Sin asignar' : 'Sin asignar')
-      const current = porTecnico.get(tecnicoId) ?? { nombre: tecnicoNombre, total: 0, entregadas: 0, dias: [], totalMonto: 0 }
+      const tecnicoId =
+        o.tecnicoAsignadoId ??
+        (o.asignacionesTecnico?.length
+          ? o.asignacionesTecnico[0].tecnicoId
+          : '') ??
+        ''
+      let tecnicoNombre = 'Sin asignar'
+      if (o.tecnicoAsignado?._usuario) {
+        const u = o.tecnicoAsignado._usuario
+        tecnicoNombre =
+          'nombres' in u
+            ? `${u.nombres} ${u.apellidos}`.trim()
+            : `${u.firstName} ${u.lastName}`.trim()
+      } else if (o.asignacionesTecnico?.length) {
+        const a = o.asignacionesTecnico[0]
+        const u = a.tecnico?._usuario
+        if (u) {
+          tecnicoNombre =
+            'nombres' in u
+              ? `${u.nombres} ${u.apellidos}`.trim()
+              : `${u.firstName} ${u.lastName}`.trim()
+        }
+      }
+      const current = porTecnico.get(tecnicoId) ?? {
+        nombre: tecnicoNombre,
+        total: 0,
+        entregadas: 0,
+        dias: [] as number[],
+        totalMonto: 0,
+      }
       current.total += 1
-      if (['ENTREGADO', 'EN_GARANTÍA'].includes(o.estado)) {
+      if (['ENTREGADO', 'EN_GARANTIA'].includes(o.estado)) {
         current.entregadas += 1
-        current.totalMonto += o.totalFinal ?? o.subtotal ?? 0
-        if (o.createdAt && o.fechaEntrega) {
+        current.totalMonto += o.total ?? o.subTotal ?? 0
+        if (o.createdAt && o.fechaEntregado) {
           const dias = Math.max(
             0,
             Math.ceil(
-              (new Date(String(o.fechaEntrega)).getTime() - new Date(String(o.createdAt)).getTime()) / 86400000,
+              (new Date(String(o.fechaEntregado)).getTime() - new Date(String(o.createdAt)).getTime()) / 86400000,
             ),
           )
           current.dias.push(dias)
@@ -1406,293 +1433,283 @@ export function ReportesPage() {
                     </TabsList>
 
                     <TabsContent value="ordenes-servicio" className="space-y-4 pt-4">
-                      <AuthorizationGate permission="ordenesServicio.read">
-                        {{
-                          granted: (
-                            <>
-                              {ordenesRTLoading ? (
-                                <div className="flex items-center justify-center py-12">
-                                  <Loader className="h-10 w-10" />
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="grid gap-3 sm:grid-cols-3">
-                                    <Card className="p-4">
-                                      <p className="text-xs text-muted-foreground">Total Órdenes</p>
-                                      <p className="mt-2 text-2xl font-bold text-foreground">
-                                        {rtStats.total}
-                                      </p>
-                                    </Card>
-                                    <Card className="p-4">
-                                      <p className="text-xs text-muted-foreground">Órdenes Entregadas</p>
-                                      <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
-                                        {rtStats.totalEntregadas}
-                                      </p>
-                                    </Card>
-                                    <Card className="p-4">
-                                      <p className="text-xs text-muted-foreground">Monto Total Cerradas</p>
-                                      <p className="mt-2 text-2xl font-bold text-foreground">
-                                        {formatCurrency(rtStats.montoTotalCerradas)}
-                                      </p>
-                                    </Card>
-                                  </div>
+                      <AuthorizationGate
+                        permission="ordenesServicio.read"
+                        fallback={
+                          <Card>
+                            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                              No tienes permiso para ver los reportes de órdenes de servicio.
+                            </CardContent>
+                          </Card>
+                        }
+                      >
+                        {ordenesRTLoading ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader className="h-10 w-10" />
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              <Card className="p-4">
+                                <p className="text-xs text-muted-foreground">Total Órdenes</p>
+                                <p className="mt-2 text-2xl font-bold text-foreground">{rtStats.total}</p>
+                              </Card>
+                              <Card className="p-4">
+                                <p className="text-xs text-muted-foreground">Órdenes Entregadas</p>
+                                <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
+                                  {rtStats.totalEntregadas}
+                                </p>
+                              </Card>
+                              <Card className="p-4">
+                                <p className="text-xs text-muted-foreground">Monto Total Cerradas</p>
+                                <p className="mt-2 text-2xl font-bold text-foreground">
+                                  {formatCurrency(rtStats.montoTotalCerradas)}
+                                </p>
+                              </Card>
+                            </div>
 
-                                  <Card>
-                                    <CardHeader>
-                                      <CardTitle>Órdenes por Estado</CardTitle>
-                                      <CardDescription>
-                                        Distribución actual de las órdenes de servicio
-                                      </CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
-                                      {rtStats.porEstado.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground text-center py-4">
-                                          Sin órdenes registradas
-                                        </p>
-                                      ) : (
-                                        <div className="grid gap-2">
-                                          {rtStats.porEstado.map((row) => (
-                                            <div
-                                              key={row.estado}
-                                              className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                                            >
-                                              <div className="flex items-center gap-3">
-                                                <Badge variant={estadoBadgeVariant(row.estado as EstadoOrdenServicio) as any}>
-                                                  {estadoLabel(row.estado as EstadoOrdenServicio)}
-                                                </Badge>
-                                              </div>
-                                              <p className="font-bold text-foreground text-lg">{row.cantidad}</p>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </CardContent>
-                                  </Card>
-                                </>
-                              )}
-                            </>
-                          ),
-                          denied: (
                             <Card>
-                              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                                No tienes permiso para ver los reportes de órdenes de servicio.
+                              <CardHeader>
+                                <CardTitle>Órdenes por Estado</CardTitle>
+                                <CardDescription>
+                                  Distribución actual de las órdenes de servicio
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent>
+                                {rtStats.porEstado.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground text-center py-4">
+                                    Sin órdenes registradas
+                                  </p>
+                                ) : (
+                                  <div className="grid gap-2">
+                                    {rtStats.porEstado.map((row) => (
+                                      <div
+                                        key={row.estado}
+                                        className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <Badge
+                                            variant={
+                                              estadoBadgeVariant(row.estado as EstadoOrdenServicio) as any
+                                            }
+                                          >
+                                            {estadoLabel(row.estado as EstadoOrdenServicio)}
+                                          </Badge>
+                                        </div>
+                                        <p className="font-bold text-foreground text-lg">{row.cantidad}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </CardContent>
                             </Card>
-                          ),
-                        }}
+                          </>
+                        )}
                       </AuthorizationGate>
                     </TabsContent>
 
                     <TabsContent value="rendimiento-tecnicos" className="space-y-4 pt-4">
-                      <AuthorizationGate permission="tecnicos.read">
-                        {{
-                          granted: (
-                            <>
-                              {tecnicosRTLoading || ordenesRTLoading ? (
-                                <div className="flex items-center justify-center py-12">
-                                  <Loader className="h-10 w-10" />
-                                </div>
+                      <AuthorizationGate
+                        permission="tecnicos.read"
+                        fallback={
+                          <Card>
+                            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                              No tienes permiso para ver el rendimiento de técnicos.
+                            </CardContent>
+                          </Card>
+                        }
+                      >
+                        {tecnicosRTLoading || ordenesRTLoading ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader className="h-10 w-10" />
+                          </div>
+                        ) : (
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Rendimiento por Técnico</CardTitle>
+                              <CardDescription>
+                                Cantidad de órdenes atendidas, entregadas y promedio de días
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              {rtStats.porTecnico.length === 0 ? (
+                                <p className="text-sm text-muted-foreground text-center py-4">
+                                  Sin datos de rendimiento de técnicos
+                                </p>
                               ) : (
-                                <Card>
-                                  <CardHeader>
-                                    <CardTitle>Rendimiento por Técnico</CardTitle>
-                                    <CardDescription>
-                                      Cantidad de órdenes atendidas, entregadas y promedio de días
-                                    </CardDescription>
-                                  </CardHeader>
-                                  <CardContent>
-                                    {rtStats.porTecnico.length === 0 ? (
-                                      <p className="text-sm text-muted-foreground text-center py-4">
-                                        Sin datos de rendimiento de técnicos
-                                      </p>
-                                    ) : (
-                                      <div className="hidden md:block">
-                                        <Table>
-                                          <TableHeader>
-                                            <TableRow>
-                                              <TableHead>Técnico</TableHead>
-                                              <TableHead className="text-right">Órdenes Asignadas</TableHead>
-                                              <TableHead className="text-right">Entregadas</TableHead>
-                                              <TableHead className="text-right">Promedio Días</TableHead>
-                                              <TableHead className="text-right">Monto Total Entregadas</TableHead>
-                                            </TableRow>
-                                          </TableHeader>
-                                          <TableBody>
-                                            {rtStats.porTecnico.map((t) => (
-                                              <TableRow key={t.nombre}>
-                                                <TableCell className="font-medium text-foreground">{t.nombre}</TableCell>
-                                                <TableCell className="text-right">{t.total}</TableCell>
-                                                <TableCell className="text-right">
-                                                  <Badge variant="success">{t.entregadas}</Badge>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                  {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
-                                                </TableCell>
-                                                <TableCell className="text-right font-semibold text-foreground">
-                                                  {formatCurrency(t.totalMonto)}
-                                                </TableCell>
-                                              </TableRow>
-                                            ))}
-                                          </TableBody>
-                                        </Table>
-                                      </div>
-                                    )}
-                                    {rtStats.porTecnico.length > 0 ? (
-                                      <div className="md:hidden space-y-3 mt-4">
-                                        {rtStats.porTecnico.map((t) => (
-                                          <Card key={t.nombre} className="p-4">
-                                            <p className="font-medium text-foreground">{t.nombre}</p>
-                                            <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                                              <div>
-                                                <p className="text-muted-foreground">Asignadas</p>
-                                                <p className="text-base font-bold">{t.total}</p>
-                                              </div>
-                                              <div>
-                                                <p className="text-muted-foreground">Entregadas</p>
-                                                <p className="text-base font-bold text-emerald-600 dark:text-emerald-500">{t.entregadas}</p>
-                                              </div>
-                                              <div>
-                                                <p className="text-muted-foreground">Promedio días</p>
-                                                <p className="text-base font-semibold">
-                                                  {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
-                                                </p>
-                                              </div>
-                                              <div>
-                                                <p className="text-muted-foreground">Monto entregadas</p>
-                                                <p className="text-base font-semibold">{formatCurrency(t.totalMonto)}</p>
-                                              </div>
-                                            </div>
-                                          </Card>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                  </CardContent>
-                                </Card>
+                                <div className="hidden md:block">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Técnico</TableHead>
+                                        <TableHead className="text-right">Órdenes Asignadas</TableHead>
+                                        <TableHead className="text-right">Entregadas</TableHead>
+                                        <TableHead className="text-right">Promedio Días</TableHead>
+                                        <TableHead className="text-right">Monto Total Entregadas</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {rtStats.porTecnico.map((t) => (
+                                        <TableRow key={t.nombre}>
+                                          <TableCell className="font-medium text-foreground">{t.nombre}</TableCell>
+                                          <TableCell className="text-right">{t.total}</TableCell>
+                                          <TableCell className="text-right">
+                                            <Badge variant="success">{t.entregadas}</Badge>
+                                          </TableCell>
+                                          <TableCell className="text-right">
+                                            {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
+                                          </TableCell>
+                                          <TableCell className="text-right font-semibold text-foreground">
+                                            {formatCurrency(t.totalMonto)}
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </div>
                               )}
-                            </>
-                          ),
-                          denied: (
-                            <Card>
-                              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                                No tienes permiso para ver el rendimiento de técnicos.
-                              </CardContent>
-                            </Card>
-                          ),
-                        }}
+                              {rtStats.porTecnico.length > 0 ? (
+                                <div className="md:hidden space-y-3 mt-4">
+                                  {rtStats.porTecnico.map((t) => (
+                                    <Card key={t.nombre} className="p-4">
+                                      <p className="font-medium text-foreground">{t.nombre}</p>
+                                      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                                        <div>
+                                          <p className="text-muted-foreground">Asignadas</p>
+                                          <p className="text-base font-bold">{t.total}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-muted-foreground">Entregadas</p>
+                                          <p className="text-base font-bold text-emerald-600 dark:text-emerald-500">{t.entregadas}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-muted-foreground">Promedio días</p>
+                                          <p className="text-base font-semibold">
+                                            {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-muted-foreground">Monto entregadas</p>
+                                          <p className="text-base font-semibold">{formatCurrency(t.totalMonto)}</p>
+                                        </div>
+                                      </div>
+                                    </Card>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </CardContent>
+                          </Card>
+                        )}
                       </AuthorizationGate>
                     </TabsContent>
 
                     <TabsContent value="garantias" className="space-y-4 pt-4">
-                      <AuthorizationGate permission="garantias.read">
-                        {{
-                          granted: (
-                            <>
-                              {ordenesRTLoading ? (
-                                <div className="flex items-center justify-center py-12">
-                                  <Loader className="h-10 w-10" />
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="grid gap-3 sm:grid-cols-3">
-                                    <Card className="p-4">
-                                      <p className="text-xs text-muted-foreground">Garantías Activas</p>
-                                      <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
-                                        {rtStats.garantiasActivas.filter((g) => g.estado === 'ACTIVA').length}
-                                      </p>
-                                    </Card>
-                                    <Card className="p-4">
-                                      <p className="text-xs text-muted-foreground">Garantías Vencidas</p>
-                                      <p className="mt-2 text-2xl font-bold text-destructive">
-                                        {rtStats.garantiasActivas.filter((g) => g.estado === 'VENCIDA').length}
-                                      </p>
-                                    </Card>
-                                    <Card className="p-4">
-                                      <p className="text-xs text-muted-foreground">Cobertura de Órdenes Entregadas</p>
-                                      <p className="mt-2 text-2xl font-bold text-foreground">
-                                        {(rtStats.coberturaGarantia * 100).toFixed(0)}%
-                                      </p>
-                                    </Card>
-                                  </div>
+                      <AuthorizationGate
+                        permission="garantiasOrdenServicio.read"
+                        fallback={
+                          <Card>
+                            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                              No tienes permiso para ver las garantías.
+                            </CardContent>
+                          </Card>
+                        }
+                      >
+                        {ordenesRTLoading ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader className="h-10 w-10" />
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              <Card className="p-4">
+                                <p className="text-xs text-muted-foreground">Garantías Activas</p>
+                                <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
+                                  {rtStats.garantiasActivas.filter((g) => g.estado === 'ACTIVA').length}
+                                </p>
+                              </Card>
+                              <Card className="p-4">
+                                <p className="text-xs text-muted-foreground">Garantías Vencidas</p>
+                                <p className="mt-2 text-2xl font-bold text-destructive">
+                                  {rtStats.garantiasActivas.filter((g) => g.estado === 'VENCIDA').length}
+                                </p>
+                              </Card>
+                              <Card className="p-4">
+                                <p className="text-xs text-muted-foreground">Cobertura de Órdenes Entregadas</p>
+                                <p className="mt-2 text-2xl font-bold text-foreground">
+                                  {(rtStats.coberturaGarantia * 100).toFixed(0)}%
+                                </p>
+                              </Card>
+                            </div>
 
-                                  <Card>
-                                    <CardHeader>
-                                      <CardTitle>Detalle de Garantías</CardTitle>
-                                      <CardDescription>
-                                        {rtStats.totalEntregadas > 0
-                                          ? `${rtStats.entregadasConGarantia} de ${rtStats.totalEntregadas} órdenes entregadas con garantía`
-                                          : 'Sin órdenes entregadas aún'}
-                                      </CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
-                                      {rtStats.garantiasActivas.length === 0 ? (
-                                        <p className="text-sm text-muted-foreground text-center py-4">
-                                          Sin garantías registradas aún
-                                        </p>
-                                      ) : (
-                                        <div className="hidden md:block">
-                                          <Table>
-                                            <TableHeader>
-                                              <TableRow>
-                                                <TableHead>N° OS</TableHead>
-                                                <TableHead>Vence</TableHead>
-                                                <TableHead>Estado</TableHead>
-                                              </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                              {rtStats.garantiasActivas.map((g, idx) => (
-                                                <TableRow key={`${g.ordenNumero}-${idx}`}>
-                                                  <TableCell className="font-medium text-foreground">{g.ordenNumero}</TableCell>
-                                                  <TableCell className="text-muted-foreground">{g.vence ? fmtDate(g.vence) : '—'}</TableCell>
-                                                  <TableCell>
-                                                    <Badge
-                                                      variant={
-                                                        g.estado === 'ACTIVA' ? 'success' : 'destructive'
-                                                      }
-                                                    >
-                                                      {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
-                                                    </Badge>
-                                                  </TableCell>
-                                                </TableRow>
-                                              ))}
-                                            </TableBody>
-                                          </Table>
-                                        </div>
-                                      )}
-                                      {rtStats.garantiasActivas.length > 0 ? (
-                                        <div className="md:hidden space-y-3 mt-4">
-                                          {rtStats.garantiasActivas.map((g, idx) => (
-                                            <Card key={`${g.ordenNumero}-${idx}`} className="p-4">
-                                              <div className="flex items-center justify-between gap-3">
-                                                <p className="font-medium text-foreground">{g.ordenNumero}</p>
-                                                <Badge
-                                                  variant={
-                                                    g.estado === 'ACTIVA' ? 'success' : 'destructive'
-                                                  }
-                                                >
-                                                  {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
-                                                </Badge>
-                                              </div>
-                                              <p className="mt-2 text-xs text-muted-foreground">
-                                                Vence: {g.vence ? fmtDate(g.vence) : 'Sin fecha'}
-                                              </p>
-                                            </Card>
-                                          ))}
-                                        </div>
-                                      ) : null}
-                                    </CardContent>
-                                  </Card>
-                                </>
-                              )}
-                            </>
-                          ),
-                          denied: (
                             <Card>
-                              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                                No tienes permiso para ver las garantías.
+                              <CardHeader>
+                                <CardTitle>Detalle de Garantías</CardTitle>
+                                <CardDescription>
+                                  {rtStats.totalEntregadas > 0
+                                    ? `${rtStats.entregadasConGarantia} de ${rtStats.totalEntregadas} órdenes entregadas con garantía`
+                                    : 'Sin órdenes entregadas aún'}
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent>
+                                {rtStats.garantiasActivas.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground text-center py-4">
+                                    Sin garantías registradas aún
+                                  </p>
+                                ) : (
+                                  <div className="hidden md:block">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>N° OS</TableHead>
+                                          <TableHead>Vence</TableHead>
+                                          <TableHead>Estado</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {rtStats.garantiasActivas.map((g, idx) => (
+                                          <TableRow key={`${g.ordenNumero}-${idx}`}>
+                                            <TableCell className="font-medium text-foreground">{g.ordenNumero}</TableCell>
+                                            <TableCell className="text-muted-foreground">{g.vence ? fmtDate(g.vence) : '—'}</TableCell>
+                                            <TableCell>
+                                              <Badge
+                                                variant={
+                                                  g.estado === 'ACTIVA' ? 'success' : 'destructive'
+                                                }
+                                              >
+                                                {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
+                                              </Badge>
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                )}
+                                {rtStats.garantiasActivas.length > 0 ? (
+                                  <div className="md:hidden space-y-3 mt-4">
+                                    {rtStats.garantiasActivas.map((g, idx) => (
+                                      <Card key={`${g.ordenNumero}-${idx}`} className="p-4">
+                                        <div className="flex items-center justify-between gap-3">
+                                          <p className="font-medium text-foreground">{g.ordenNumero}</p>
+                                          <Badge
+                                            variant={
+                                              g.estado === 'ACTIVA' ? 'success' : 'destructive'
+                                            }
+                                          >
+                                            {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
+                                          </Badge>
+                                        </div>
+                                        <p className="mt-2 text-xs text-muted-foreground">
+                                          Vence: {g.vence ? fmtDate(g.vence) : 'Sin fecha'}
+                                        </p>
+                                      </Card>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </CardContent>
                             </Card>
-                          ),
-                        }}
+                          </>
+                        )}
                       </AuthorizationGate>
                     </TabsContent>
                   </Tabs>

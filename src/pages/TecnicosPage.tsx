@@ -72,7 +72,7 @@ function getEspecialidadesBadges(especialidades: EspecialidadTecnico[]) {
   return (
     <div className="flex flex-wrap gap-1">
       {especialidades.map((esp) => (
-        <Badge key={esp} variant="secondary" className="text-[11px]">
+        <Badge key={esp} variant="default" className="text-[11px]">
           {esp}
         </Badge>
       ))}
