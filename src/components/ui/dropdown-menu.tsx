@@ -95,13 +95,11 @@ export const DropdownMenuItem = React.forwardRef<
           ranOnceRef.current = false
         })
       }
-      if (firstError != null) {
-        throw firstError
-      }
+      if (firstError != null) throw firstError
     },
     [onClick, onSelect],
   )
-  const wrappedSelect = React.useCallback(
+  const wrappedHandler = React.useCallback(
     (event?: Event) => {
       const ev = event ?? new Event('dropdown-select')
       requestAnimationFrame(() =>
@@ -120,13 +118,14 @@ export const DropdownMenuItem = React.forwardRef<
   return (
     <DropdownMenuPrimitive.Item
       ref={ref}
+      {...props}
       className={cn(
         'relative flex cursor-default select-none items-center rounded-md px-2 py-1.5 text-sm outline-none transition-colors focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         inset && 'pl-8',
         className,
       )}
-      onSelect={wrappedSelect as any}
-      {...props}
+      onSelect={wrappedHandler as any}
+      onClick={wrappedHandler as any}
     />
   )
 })
