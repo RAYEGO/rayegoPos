@@ -70,6 +70,55 @@ const PLATAFORMA_PRIORITY: readonly string[] = [
   'configuracion',
 ]
 
+const BOTICA_PRINCIPALES_COD: readonly string[] = [
+  'dashboard',
+  'ventas',
+  'productos',
+  'compras',
+  'inventario',
+  'caja',
+]
+
+const RAYEGOTECH_PRINCIPALES_COD: readonly string[] = [
+  'dashboard',
+  'ordenesServicio',
+  'clientes',
+  'inventario',
+  'caja',
+  'reportes',
+]
+
+const PLATAFORMA_PRINCIPALES_COD: readonly string[] = [
+  'dashboard',
+  'empresas',
+  'administradores',
+  'tipos_empresa',
+  'usuarios',
+  'reportes',
+  'configuracion',
+]
+
+function getPrincipalesForContext(ctx: CompanyContext): readonly string[] {
+  if (ctx === 'PLATAFORMA') return PLATAFORMA_PRINCIPALES_COD
+  if (ctx === 'RAYEGOTECH') return RAYEGOTECH_PRINCIPALES_COD
+  return BOTICA_PRINCIPALES_COD
+}
+
+export function splitNavItemsByTactical(
+  items: NavItem[],
+  session: AuthSession | null,
+): { mainItems: NavItem[]; moreItems: NavItem[] } {
+  const ctx = detectCompanyContext(session)
+  const principales = new Set(getPrincipalesForContext(ctx))
+  const mainItems: NavItem[] = []
+  const moreItems: NavItem[] = []
+  for (const it of items) {
+    if (!it.moduleCode || principales.has(it.moduleCode)) mainItems.push(it)
+    else moreItems.push(it)
+  }
+  return { mainItems, moreItems }
+}
+
 export type NavItem = {
   label: string
   href: string
