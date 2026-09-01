@@ -887,17 +887,18 @@ export function OrdenesServicioPage() {
                                 <li key={h.id} className="ms-2">
                                   <div className="absolute -start-1.5 mt-1 h-3 w-3 rounded-full bg-primary" />
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <Badge variant={estadoBadgeVariant(h.nuevoEstado)}>
-                                      {h.nuevoEstado}
+                                    <Badge variant={estadoBadgeVariant(h.estadoNuevo)}>
+                                      {h.estadoNuevo}
                                     </Badge>
                                     <span className="text-xs text-muted-foreground">
                                       {formatFecha(h.fechaCambio)}
                                     </span>
                                     <span className="text-xs text-muted-foreground">
                                       ·{' '}
-                                      {h.usuario?.nombre ||
-                                        (h as any).usuarioNombre ||
-                                        'Sistema'}
+                                      {h.usuario?.nombres
+                                        ? `${h.usuario.nombres} ${h.usuario.apellidos || ''}`.trim()
+                                        : (h as any).usuarioNombre ||
+                                          'Sistema'}
                                     </span>
                                   </div>
                                   {h.observaciones ? (
@@ -971,10 +972,10 @@ function GarantiaCard({ g }: { g: GarantiaOrden }) {
           </Badge>
         </p>
       </div>
-      {g.observaciones ? (
+      {g.terminos ? (
         <div className="md:col-span-3 rounded-xl border p-4">
           <p className="text-xs text-muted-foreground mb-1">Condiciones / cobertura</p>
-          <Textarea readOnly className="min-h-[80px] bg-muted/30" value={g.observaciones} />
+          <Textarea readOnly className="min-h-[80px] bg-muted/30" value={g.terminos} />
         </div>
       ) : null}
     </div>
@@ -983,11 +984,7 @@ function GarantiaCard({ g }: { g: GarantiaOrden }) {
 
 function getApiErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    return (
-      err.body?.message ||
-      (Array.isArray(err.body?.details) ? err.body.details.join(', ') : null) ||
-      `Error ${err.status}`
-    )
+    return err.message || `Error ${err.status}`
   }
   if (err instanceof ApiNetworkError) return 'Sin conexión con el servidor.'
   if (err instanceof Error) return err.message

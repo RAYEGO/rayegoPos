@@ -158,9 +158,7 @@ export function ReportesPage() {
   const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('ventas')
   const [tabRT, setTabRT] = useState<TabRT>('ordenes-servicio')
   const [ordenesRT, setOrdenesRT] = useState<OrdenServicio[]>([])
-  const [tecnicosRT, setTecnicosRT] = useState<Tecnico[]>([])
   const [ordenesRTLoading, setOrdenesRTLoading] = useState(false)
-  const [tecnicosRTLoading, setTecnicosRTLoading] = useState(false)
 
   const handleUnauthorized = useHandleUnauthorized('ReportesPage')
 
@@ -363,15 +361,14 @@ export function ReportesPage() {
   }, [tabPrincipal, category])
 
   useEffect(() => {
-    const mapa: Record<ReportsCategory, TabPrincipal> = {
+    const mapa: Partial<Record<ReportsCategory, TabPrincipal>> = {
       VENTAS: 'ventas',
       COMPRAS: 'compras',
       INVENTARIO: 'inventario',
       CAJA: 'caja',
-      USUARIOS: 'ventas',
     }
     if (mapa[category] && mapa[category] !== tabPrincipal) {
-      setTabPrincipal(mapa[category])
+      setTabPrincipal(mapa[category] as TabPrincipal)
     }
   }, [category, tabPrincipal])
 
@@ -379,7 +376,7 @@ export function ReportesPage() {
     if (!accessToken) return
     setOrdenesRTLoading(true)
     try {
-      const response = await rtService.listOrdenesServicio()
+      const response = await rtService.listOrdenes()
       setOrdenesRT(response?.items ?? [])
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
@@ -392,28 +389,11 @@ export function ReportesPage() {
     }
   }, [accessToken, handleUnauthorized])
 
-  const loadTecnicosRT = useCallback(async () => {
-    if (!accessToken) return
-    setTecnicosRTLoading(true)
-    try {
-      const response = await rtService.listTecnicos()
-      setTecnicosRT(response?.items ?? [])
-    } catch (nextError) {
-      if (nextError instanceof ApiError && nextError.status === 401) {
-        await handleUnauthorized()
-        return
-      }
-      setTecnicosRT([])
-    } finally {
-      setTecnicosRTLoading(false)
-    }
-  }, [accessToken, handleUnauthorized])
-
   useEffect(() => {
     if (tabPrincipal === 'servicio-tecnico') {
-      void Promise.all([loadOrdenesRT(), loadTecnicosRT()])
+      void loadOrdenesRT()
     }
-  }, [tabPrincipal, loadOrdenesRT, loadTecnicosRT])
+  }, [tabPrincipal, loadOrdenesRT])
 
   const rtStats = useMemo(() => {
     const ordenes = ordenesRT
@@ -436,15 +416,15 @@ export function ReportesPage() {
           : '') ??
         ''
       let tecnicoNombre = 'Sin asignar'
-      if (o.tecnicoAsignado?._usuario) {
-        const u = o.tecnicoAsignado._usuario
+      if (o.tecnicoAsignado?.usuario) {
+        const u = o.tecnicoAsignado.usuario
         tecnicoNombre =
           'nombres' in u
             ? `${u.nombres} ${u.apellidos}`.trim()
             : `${u.firstName} ${u.lastName}`.trim()
       } else if (o.asignacionesTecnico?.length) {
         const a = o.asignacionesTecnico[0]
-        const u = a.tecnico?._usuario
+        const u = a.tecnico?.usuario
         if (u) {
           tecnicoNombre =
             'nombres' in u
@@ -1519,7 +1499,7 @@ export function ReportesPage() {
                           </Card>
                         }
                       >
-                        {tecnicosRTLoading || ordenesRTLoading ? (
+                        {ordenesRTLoading ? (
                           <div className="flex items-center justify-center py-12">
                             <Loader className="h-10 w-10" />
                           </div>
