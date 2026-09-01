@@ -125,7 +125,7 @@ export function OrdenesServicioPage() {
     if (!accessToken) return
     try {
       setOrdenesLoading(true)
-      const res = await rtService.listOrdenesServicio({
+      const res = await rtService.listOrdenes({
         estado: estadoFilter === 'TODOS' ? undefined : estadoFilter,
         search: search.trim() || undefined,
       })
@@ -150,7 +150,7 @@ export function OrdenesServicioPage() {
     if (!id) return
     try {
       setIsRefreshLoading(true)
-      const res = await rtService.getOrdenServicio(id)
+      const res = await rtService.getOrden(id)
       setSelectedOrden(res.item)
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -302,12 +302,12 @@ export function OrdenesServicioPage() {
                         <TableCell>
                           <div className="space-y-0.5">
                             <p className="font-medium">
-                              {os.cliente?.nombre || os.clienteNombre || '—'}
+                              {os.cliente?.nombresRazonSocial || '—'}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {os.cliente?.tipoDocumento && os.cliente?.numeroDocumento
-                                ? `${os.cliente.tipoDocumento} ${os.cliente.numeroDocumento}`
-                                : (os as any).clienteDocumento || '—'}
+                              {os.cliente?.numeroDocumento ||
+                                (os as any).clienteDocumento ||
+                                '—'}
                             </p>
                           </div>
                         </TableCell>
@@ -327,16 +327,16 @@ export function OrdenesServicioPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {os.tecnicoAsignado?.usuario?.nombre ||
-                            (os.tecnicoAsignado as any)?.usuarioNombre ||
-                            (os as any).tecnicoNombre ||
-                            '—'}
+                          {os.tecnicoAsignado?.usuario
+                            ? `${os.tecnicoAsignado.usuario.nombres} ${os.tecnicoAsignado.usuario.apellidos || ''}`.trim()
+                            : (os as any).tecnicoNombre ||
+                              '—'}
                         </TableCell>
                         <TableCell>
                           <Badge variant={estadoBadgeVariant(os.estado)}>{os.estado}</Badge>
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          {formatMoneda(os.totalFinal ?? os.totalPresupuesto ?? 0)}
+                          {formatMoneda(os.total ?? 0)}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {formatFecha(os.fechaRecepcion)}
@@ -381,8 +381,7 @@ export function OrdenesServicioPage() {
                     </Badge>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground line-clamp-1">
-                    {selectedOrden.cliente?.nombre ||
-                      selectedOrden.clienteNombre ||
+                    {selectedOrden.cliente?.nombresRazonSocial ||
                       'Cliente —'}
                     {' · '}
                     {formatFecha(selectedOrden.fechaRecepcion)}
@@ -449,17 +448,11 @@ export function OrdenesServicioPage() {
                         </CardHeader>
                         <CardContent className="space-y-1 text-sm">
                           <p className="font-medium">
-                            {selectedOrden.cliente?.nombre ||
-                              selectedOrden.clienteNombre ||
+                            {selectedOrden.cliente?.nombresRazonSocial ||
                               '—'}
                           </p>
                           <p className="text-muted-foreground">
-                            {[
-                              selectedOrden.cliente?.tipoDocumento,
-                              selectedOrden.cliente?.numeroDocumento,
-                            ]
-                              .filter(Boolean)
-                              .join(' ') ||
+                            {selectedOrden.cliente?.numeroDocumento ||
                               (selectedOrden as any).clienteDocumento ||
                               '—'}
                           </p>
