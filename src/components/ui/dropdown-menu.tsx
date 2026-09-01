@@ -70,30 +70,43 @@ export const DropdownMenuItem = React.forwardRef<
   }
 >(({ className, inset, onClick, onSelect, ...props }, ref) => {
   const ranOnceRef = React.useRef(false)
-  const runConsumerHandler = React.useCallback(() => {
-    if (ranOnceRef.current) return
-    ranOnceRef.current = true
-    try {
-      if (typeof onSelect === 'function') {
-        ;(onSelect as any)()
-      } else if (typeof onClick === 'function') {
-        ;(onClick as any)({
-          type: 'click',
-          currentTarget: null,
-          target: null,
-          preventDefault: () => {},
-          stopPropagation: () => {},
+  const runConsumerHandlers = React.useCallback(
+    (originalEvent: Event) => {
+      if (ranOnceRef.current) return
+      ranOnceRef.current = true
+      let firstError: unknown = null
+      try {
+        if (typeof onSelect === 'function') {
+          try {
+            ;(onSelect as any)(originalEvent)
+          } catch (e) {
+            if (firstError == null) firstError = e
+          }
+        }
+        if (typeof onClick === 'function') {
+          try {
+            ;(onClick as any)(originalEvent)
+          } catch (e) {
+            if (firstError == null) firstError = e
+          }
+        }
+      } finally {
+        requestAnimationFrame(() => {
+          ranOnceRef.current = false
         })
       }
-    } finally {
-      requestAnimationFrame(() => {
-        ranOnceRef.current = false
-      })
-    }
-  }, [onClick, onSelect])
+      if (firstError != null) {
+        throw firstError
+      }
+    },
+    [onClick, onSelect],
+  )
   const wrappedSelect = React.useCallback(
     (event?: Event) => {
-      requestAnimationFrame(() => requestAnimationFrame(runConsumerHandler))
+      const ev = event ?? new Event('dropdown-select')
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => runConsumerHandlers(ev)),
+      )
       if (event) {
         try {
           event.preventDefault()
@@ -102,7 +115,7 @@ export const DropdownMenuItem = React.forwardRef<
         }
       }
     },
-    [runConsumerHandler],
+    [runConsumerHandlers],
   )
   return (
     <DropdownMenuPrimitive.Item
