@@ -2,20 +2,13 @@ import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3,
-  Building2,
   Boxes,
   ClipboardCheck,
   CreditCard,
   LayoutDashboard,
-  Layers,
   Settings,
-  Shield,
-  ShoppingCart,
-  Store,
-  Truck,
   Users,
   Wrench,
-  Package,
 } from 'lucide-react'
 import { CajaPage } from '@/pages/CajaPage'
 import { ClientesPage } from '@/pages/ClientesPage'

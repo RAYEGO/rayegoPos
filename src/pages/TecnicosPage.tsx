@@ -354,8 +354,12 @@ export function TecnicosPage() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="text-sm font-medium">{u?.username || '—'}</div>
-                            <div className="text-xs text-muted-foreground">DNI {u?.documentId || '—'}</div>
+                            <div className="text-sm font-medium">
+                              {u && 'username' in u ? u.username : (u && 'email' in u ? (u.email?.split('@')[0] || '—') : '—')}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              DNI {u && 'documentId' in u ? u.documentId : (u && 'numeroDocumento' in u ? u.numeroDocumento : '—')}
+                            </div>
                           </TableCell>
                           <TableCell>{getEspecialidadesBadges(t.especialidades)}</TableCell>
                           <TableCell>
