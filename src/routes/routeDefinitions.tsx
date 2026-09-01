@@ -3,10 +3,17 @@ import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3,
   Boxes,
+  Building2,
   ClipboardCheck,
   CreditCard,
   LayoutDashboard,
+  Layers,
+  PackageOpen,
   Settings,
+  ShieldCheck,
+  ShoppingBasket,
+  ShoppingCart,
+  Truck,
   Users,
   Wrench,
 } from 'lucide-react'
@@ -171,11 +178,14 @@ export const privateRoutes: AppRouteDefinition[] = [
     },
   },
 
-  // ==================== RUTAS OCULTAS (SIN MENU, ACCESO POR URL) ====================
-  // Módulos POS antiguos — siguen disponibles por URL pero fuera del menú 8 máx
+  // ==================== RUTAS LEGACY + ADMINISTRACIÓN POS ====================
+  // Módulos Botica / Farmacia
   {
     path: paths.ventas,
     component: VentasPage,
+    navLabel: 'Ventas',
+    navIcon: ShoppingCart,
+    navSection: 'Operaciones',
     access: {
       requiresAuth: true,
       allowedPermissions: ['ventas.read'],
@@ -185,6 +195,9 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.productos,
     component: ProductosPage,
+    navLabel: 'Productos',
+    navIcon: ShoppingBasket,
+    navSection: 'Operaciones',
     access: {
       requiresAuth: true,
       allowedPermissions: ['productos.read'],
@@ -194,6 +207,9 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.compras,
     component: ComprasPage,
+    navLabel: 'Compras',
+    navIcon: PackageOpen,
+    navSection: 'Operaciones',
     access: {
       requiresAuth: true,
       allowedPermissions: ['compras.read'],
@@ -203,6 +219,9 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.proveedores,
     component: ProveedoresPage,
+    navLabel: 'Proveedores',
+    navIcon: Truck,
+    navSection: 'Operaciones',
     access: {
       requiresAuth: true,
       allowedPermissions: ['proveedores.read'],
@@ -212,6 +231,9 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.usuarios,
     component: UsuariosPage,
+    navLabel: 'Usuarios',
+    navIcon: Users,
+    navSection: 'Seguridad',
     access: {
       requiresAuth: true,
       allowedPermissions: ['usuarios.read', 'sesiones.read', 'auditoria.read'],
@@ -219,9 +241,13 @@ export const privateRoutes: AppRouteDefinition[] = [
       moduleCode: 'usuarios',
     },
   },
+  // Módulos Administración de Plataforma (ADMIN_POS)
   {
     path: paths.empresas,
     component: EmpresasPage,
+    navLabel: 'Empresas',
+    navIcon: Building2,
+    navSection: 'Administración POS',
     access: {
       requiresAuth: true,
       allowedPermissions: ['empresas.read', 'empresas.manage'],
@@ -232,6 +258,9 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.administradores,
     component: AdministradoresPage,
+    navLabel: 'Administradores',
+    navIcon: ShieldCheck,
+    navSection: 'Administración POS',
     access: {
       requiresAuth: true,
       allowedPermissions: ['administradores.manage', 'usuarios.read'],
@@ -242,6 +271,9 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.tiposEmpresa,
     component: TiposEmpresaPage,
+    navLabel: 'Tipos de empresa',
+    navIcon: Layers,
+    navSection: 'Administración POS',
     access: {
       requiresAuth: true,
       allowedPermissions: ['tipos_empresa.manage'],

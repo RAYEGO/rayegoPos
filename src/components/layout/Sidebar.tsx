@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { AppLogo } from '@/components/brand/AppLogo'
-import { navItems } from '@/config/navigation'
-import { useAuthorization } from '@/hooks/useAuthorization'
+import { buildNavItems } from '@/config/navigation'
+import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import {
   Dialog,
@@ -14,8 +14,8 @@ type SidebarProps = {
 }
 
 function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
-  const { canAccess } = useAuthorization()
-  const visibleNavItems = navItems.filter((item) => canAccess(item.access))
+  const { session } = useAuth()
+  const visibleNavItems = buildNavItems(session)
 
   return (
     <>
