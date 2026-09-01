@@ -1419,7 +1419,7 @@ export function InventarioPage() {
         </TabsContent>
 
         <TabsContent value="consumo-rt" className="space-y-6">
-          <AuthorizationGate permission="inventarioServicio.write">
+          <AuthorizationGate permission="consumoInventarioRT.write">
             <Card>
               <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>

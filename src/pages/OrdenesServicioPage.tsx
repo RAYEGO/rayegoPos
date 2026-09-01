@@ -10,7 +10,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  ShieldAlert,
   Wrench,
   X,
   Zap,

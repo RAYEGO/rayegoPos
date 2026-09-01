@@ -1729,13 +1729,13 @@ export function ClientesPage() {
                         <TableCell>
                           <Badge
                             variant={
-                              o.estado === 'ENTREGADA'
+                              o.estado === 'ENTREGADO'
                                 ? 'success'
-                                : o.estado === 'ANULADA'
+                                : o.estado === 'CANCELADO' || o.estado === 'RECHAZADO'
                                   ? 'destructive'
-                                  : o.estado === 'PRESUPUESTO_RECHAZADO' || o.estado === 'EN_DIAGNOSTICO'
+                                  : o.estado === 'DIAGNOSTICO' || o.estado === 'RECHAZADO_CLIENTE'
                                     ? 'warning'
-                                    : o.estado === 'PENDIENTE_APROBACION_PRESUPUESTO'
+                                    : o.estado === 'ESPERANDO_APROBACION'
                                       ? 'info'
                                       : 'default'
                             }
@@ -1749,12 +1749,12 @@ export function ClientesPage() {
                             '—'}
                         </TableCell>
                         <TableCell>
-                          {o.tecnicoAsignado?.usuario?.nombre ||
-                            (o.tecnicoAsignado as any)?.usuarioNombre ||
-                            '—'}
+                          {o.tecnicoAsignado?.usuario
+                            ? `${o.tecnicoAsignado.usuario.nombres} ${o.tecnicoAsignado.usuario.apellidos || ''}`.trim()
+                            : '—'}
                         </TableCell>
                         <TableCell className="text-right font-medium">
-                          S/ {Number(o.totalFinal ?? o.totalPresupuesto ?? 0).toFixed(2)}
+                          S/ {Number(o.total ?? 0).toFixed(2)}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {o.fechaRecepcion
@@ -1850,7 +1850,7 @@ export function ClientesPage() {
                         <TableCell className="font-mono text-xs font-semibold text-primary">
                           {(p as any).numeroOrden || '—'}
                         </TableCell>
-                        <TableCell>{p.metodoPago || '—'}</TableCell>
+                        <TableCell>{(p as any).formaPago?.nombre || p.formaPagoId || p.metodoPago || '—'}</TableCell>
                         <TableCell>{p.referencia || '—'}</TableCell>
                         <TableCell className="text-right font-medium">
                           S/ {Number(p.monto ?? 0).toFixed(2)}
@@ -1957,7 +1957,7 @@ export function ClientesPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
-                            {g.observaciones || '—'}
+                            {g.terminos || '—'}
                           </TableCell>
                         </TableRow>
                       )

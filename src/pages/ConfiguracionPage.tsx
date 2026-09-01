@@ -393,7 +393,7 @@ export function ConfiguracionPage() {
   })
 
   const [garantiaDefaultDias, setGarantiaDefaultDias] = useState<number>(30)
-  const [garantiaGuardando, setGarantiaGuardando] = useState(false)
+  const [garantiaGuardando] = useState(false)
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
@@ -2330,7 +2330,7 @@ export function ConfiguracionPage() {
                       Catálogo de equipos del Servicio Técnico (Celular, PC, Laptop, Impresora, Audio, etc.).
                     </CardDescription>
                   </div>
-                  <AuthorizationGate permission="configuracion.manage" fallback={null}>
+                  <AuthorizationGate permission="ordenesServicio.write" fallback={null}>
                     <Button
                       size="xl"
                       className="min-h-[48px]"
@@ -2459,7 +2459,7 @@ export function ConfiguracionPage() {
                       Catálogo de servicios del taller con costo base referencial.
                     </CardDescription>
                   </div>
-                  <AuthorizationGate permission="configuracion.manage" fallback={null}>
+                  <AuthorizationGate permission="ordenesServicio.write" fallback={null}>
                     <Button
                       size="xl"
                       className="min-h-[48px]"
@@ -2603,7 +2603,7 @@ export function ConfiguracionPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <AuthorizationGate permission="configuracion.manage">
+                <AuthorizationGate permission="ordenesServicio.write">
                   <div className="rounded-xl border p-4 sm:p-6">
                     <div className="flex flex-col gap-2">
                       <label className="text-sm font-semibold">Días de garantía por defecto</label>
