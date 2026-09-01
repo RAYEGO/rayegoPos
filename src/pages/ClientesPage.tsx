@@ -4,7 +4,6 @@ import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   ChevronDown,
-  ClipboardCheck,
   CreditCard,
   MoreVertical,
   Edit,
@@ -23,7 +22,6 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardHeader,
   CardTitle,
 } from '@/components/ui/card'
 import {
@@ -533,7 +531,7 @@ export function ClientesPage() {
       if (!accessToken) return
       try {
         setEquiposClienteLoading(true)
-        const res = await rtService.listEquiposCliente({ clienteId })
+        const res = await rtService.listEquipos(clienteId)
         setEquiposCliente(res.items || [])
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -553,7 +551,7 @@ export function ClientesPage() {
       if (!accessToken) return
       try {
         setOrdenesRTLoading(true)
-        const res = await rtService.listOrdenesServicio({ clienteId })
+        const res = await rtService.listOrdenes({ clienteId })
         setOrdenesRT(res.items || [])
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -573,7 +571,7 @@ export function ClientesPage() {
       setPagosOS([])
       setPagosOSLoading(true)
       try {
-        const ordenes = await rtService.listOrdenesServicio({ clienteId })
+        const ordenes = await rtService.listOrdenes({ clienteId })
         const todos: OrdenPago[] = []
         for (const o of ordenes.items || []) {
           if (o.pagos && o.pagos.length > 0) todos.push(...o.pagos)
@@ -596,7 +594,7 @@ export function ClientesPage() {
       setGarantiasRT([])
       setGarantiasRTLoading(true)
       try {
-        const ordenes = await rtService.listOrdenesServicio({ clienteId })
+        const ordenes = await rtService.listOrdenes({ clienteId })
         const todas: GarantiaOrden[] = []
         for (const o of ordenes.items || []) {
           if (o.garantia) todas.push(o.garantia)
@@ -1640,8 +1638,8 @@ export function ClientesPage() {
                           <Badge variant="outline">{e.estadoFisico || '—'}</Badge>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {e.fechaCompra
-                            ? new Date(e.fechaCompra).toLocaleDateString('es-PE')
+                          {e.createdAt
+                            ? new Date(e.createdAt).toLocaleDateString('es-PE')
                             : '—'}
                         </TableCell>
                       </TableRow>
@@ -1733,7 +1731,7 @@ export function ClientesPage() {
                                 ? 'success'
                                 : o.estado === 'CANCELADO' || o.estado === 'RECHAZADO'
                                   ? 'destructive'
-                                  : o.estado === 'DIAGNOSTICO' || o.estado === 'RECHAZADO_CLIENTE'
+                                  : o.estado === 'DIAGNOSTICO' || o.estado === 'RECHAZADO'
                                     ? 'warning'
                                     : o.estado === 'ESPERANDO_APROBACION'
                                       ? 'info'
@@ -1850,7 +1848,7 @@ export function ClientesPage() {
                         <TableCell className="font-mono text-xs font-semibold text-primary">
                           {(p as any).numeroOrden || '—'}
                         </TableCell>
-                        <TableCell>{(p as any).formaPago?.nombre || p.formaPagoId || p.metodoPago || '—'}</TableCell>
+                        <TableCell>{(p as any).formaPago?.nombre || p.formaPagoId || '—'}</TableCell>
                         <TableCell>{p.referencia || '—'}</TableCell>
                         <TableCell className="text-right font-medium">
                           S/ {Number(p.monto ?? 0).toFixed(2)}

@@ -471,7 +471,7 @@ export function CajaPage() {
     if (!accessToken) return
     setPagosOSLoading(true)
     try {
-      const response = await rtService.listOrdenesServicio()
+      const response = await rtService.listOrdenes()
       const ordenes: OrdenServicio[] = response?.items ?? []
       const flat: PagoOSExtendido[] = []
       for (const orden of ordenes) {
@@ -480,7 +480,7 @@ export function CajaPage() {
             flat.push({
               ...pago,
               ordenNumero: orden.numeroOrden,
-              clienteNombre: orden.cliente?.razonSocial ?? orden.cliente?.nombres ?? '—',
+              clienteNombre: orden.cliente?.nombresRazonSocial ?? '—',
               ordenEstado: orden.estado,
             })
           }
@@ -1683,125 +1683,123 @@ export function CajaPage() {
             </TabsContent>
 
             <TabsContent value="pagos-os" className="space-y-4 pt-4">
-              <AuthorizationGate permission="pagosOrdenServicio.write">
-                {{
-                  granted: (
+              <AuthorizationGate
+                permission="pagosOrdenServicio.write"
+                fallback={
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      No tienes permiso para ver los pagos de órdenes de servicio.
+                    </CardContent>
+                  </Card>
+                }
+              >
+                <>
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div className="grid gap-3 md:grid-cols-3 flex-1">
+                      <div className="md:col-span-1" />
+                    </div>
+                    <Button type="button" size="xl" variant="outline" onClick={() => void loadPagosOS()}>
+                      <RefreshCw className="mr-2 h-5 w-5" />
+                      Actualizar
+                    </Button>
+                  </div>
+
+                  {pagosOSLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader className="h-8 w-8" />
+                    </div>
+                  ) : pagosOS.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed p-8 text-center">
+                      <p className="text-sm font-medium text-foreground">No hay pagos de órdenes de servicio</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Los cobros de órdenes de servicio integrados a caja aparecerán aquí
+                      </p>
+                    </div>
+                  ) : (
                     <>
-                      <div className="flex flex-wrap items-end justify-between gap-3">
-                        <div className="grid gap-3 md:grid-cols-3 flex-1">
-                          <div className="md:col-span-1" />
-                        </div>
-                        <Button type="button" size="xl" variant="outline" onClick={() => void loadPagosOS()}>
-                          <RefreshCw className="mr-2 h-5 w-5" />
-                          Actualizar
-                        </Button>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <Card className="p-4">
+                          <p className="text-xs text-muted-foreground">Pagos OS</p>
+                          <p className="mt-2 text-xl font-bold text-foreground">{pagosOS.length}</p>
+                        </Card>
+                        <Card className="p-4">
+                          <p className="text-xs text-muted-foreground">Monto total cobrado</p>
+                          <p className="mt-2 text-xl font-bold text-emerald-600 dark:text-emerald-500">
+                            {formatCurrency(pagosOS.reduce((s, p) => s + (p.monto ?? 0), 0))}
+                          </p>
+                        </Card>
+                        <Card className="p-4">
+                          <p className="text-xs text-muted-foreground">Órdenes con pago</p>
+                          <p className="mt-2 text-xl font-bold text-foreground">
+                            {new Set(pagosOS.map((p) => p.ordenServicioId)).size}
+                          </p>
+                        </Card>
                       </div>
 
-                      {pagosOSLoading ? (
-                        <div className="flex items-center justify-center py-8">
-                          <Loader className="h-8 w-8" />
-                        </div>
-                      ) : pagosOS.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed p-8 text-center">
-                          <p className="text-sm font-medium text-foreground">No hay pagos de órdenes de servicio</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Los cobros de órdenes de servicio integrados a caja aparecerán aquí
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <Card className="p-4">
-                              <p className="text-xs text-muted-foreground">Pagos OS</p>
-                              <p className="mt-2 text-xl font-bold text-foreground">{pagosOS.length}</p>
-                            </Card>
-                            <Card className="p-4">
-                              <p className="text-xs text-muted-foreground">Monto total cobrado</p>
-                              <p className="mt-2 text-xl font-bold text-emerald-600 dark:text-emerald-500">
-                                {formatCurrency(pagosOS.reduce((s, p) => s + (p.monto ?? 0), 0))}
-                              </p>
-                            </Card>
-                            <Card className="p-4">
-                              <p className="text-xs text-muted-foreground">Órdenes con pago</p>
-                              <p className="mt-2 text-xl font-bold text-foreground">
-                                {new Set(pagosOS.map((p) => p.ordenServicioId)).size}
-                              </p>
-                            </Card>
-                          </div>
+                      <div className="md:hidden space-y-3">
+                        {pagosOS.map((pago) => (
+                          <Card key={pago.id} className="p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-medium text-foreground">{pago.ordenNumero ?? '—'}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{pago.clienteNombre ?? '—'}</p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  {fmtDate(pago.fechaPago)} · {pago.formaPago?.nombre ?? '—'}
+                                </p>
+                                {pago.referencia ? (
+                                  <p className="mt-1 text-xs text-muted-foreground">Ref: {pago.referencia}</p>
+                                ) : null}
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                <Badge variant="outline">{pago.ordenEstado ?? '—'}</Badge>
+                                <p className="font-medium text-foreground">{formatCurrency(pago.monto)}</p>
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
 
-                          <div className="md:hidden space-y-3">
+                      <div className="hidden md:block">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>N° OS</TableHead>
+                              <TableHead>Cliente</TableHead>
+                              <TableHead>Fecha</TableHead>
+                              <TableHead>Método</TableHead>
+                              <TableHead className="hidden lg:table-cell">Referencia</TableHead>
+                              <TableHead>Estado</TableHead>
+                              <TableHead className="text-right">Monto</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
                             {pagosOS.map((pago) => (
-                              <Card key={pago.id} className="p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate font-medium text-foreground">{pago.ordenNumero ?? '—'}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">{pago.clienteNombre ?? '—'}</p>
-                                    <p className="mt-2 text-xs text-muted-foreground">
-                                      {fmtDate(pago.fechaPago)} · {pago.formaPago?.nombre ?? '—'}
-                                    </p>
-                                    {pago.referencia ? (
-                                      <p className="mt-1 text-xs text-muted-foreground">Ref: {pago.referencia}</p>
-                                    ) : null}
-                                  </div>
-                                  <div className="flex flex-col items-end gap-2">
-                                    <Badge variant="outline">{pago.ordenEstado ?? '—'}</Badge>
-                                    <p className="font-medium text-foreground">{formatCurrency(pago.monto)}</p>
-                                  </div>
-                                </div>
-                              </Card>
+                              <TableRow key={pago.id}>
+                                <TableCell className="font-medium text-foreground">
+                                  {pago.ordenNumero ?? '—'}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">{pago.clienteNombre ?? '—'}</TableCell>
+                                <TableCell className="text-muted-foreground">{fmtDate(pago.fechaPago)}</TableCell>
+                                <TableCell>
+                                  <Badge variant="info">{pago.formaPago?.nombre ?? '—'}</Badge>
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell text-muted-foreground">
+                                  {pago.referencia ?? '—'}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">{pago.ordenEstado ?? '—'}</Badge>
+                                </TableCell>
+                                <TableCell className="text-right font-medium text-foreground">
+                                  {formatCurrency(pago.monto)}
+                                </TableCell>
+                              </TableRow>
                             ))}
-                          </div>
-
-                          <div className="hidden md:block">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>N° OS</TableHead>
-                                  <TableHead>Cliente</TableHead>
-                                  <TableHead>Fecha</TableHead>
-                                  <TableHead>Método</TableHead>
-                                  <TableHead className="hidden lg:table-cell">Referencia</TableHead>
-                                  <TableHead>Estado</TableHead>
-                                  <TableHead className="text-right">Monto</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {pagosOS.map((pago) => (
-                                  <TableRow key={pago.id}>
-                                    <TableCell className="font-medium text-foreground">
-                                      {pago.ordenNumero ?? '—'}
-                                    </TableCell>
-                                    <TableCell className="text-muted-foreground">{pago.clienteNombre ?? '—'}</TableCell>
-                                    <TableCell className="text-muted-foreground">{fmtDate(pago.fechaPago)}</TableCell>
-                                    <TableCell>
-                                      <Badge variant="info">{pago.formaPago?.nombre ?? '—'}</Badge>
-                                    </TableCell>
-                                    <TableCell className="hidden lg:table-cell text-muted-foreground">
-                                      {pago.referencia ?? '—'}
-                                    </TableCell>
-                                    <TableCell>
-                                      <Badge variant="outline">{pago.ordenEstado ?? '—'}</Badge>
-                                    </TableCell>
-                                    <TableCell className="text-right font-medium text-foreground">
-                                      {formatCurrency(pago.monto)}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </>
-                      )}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </>
-                  ),
-                  denied: (
-                    <Card>
-                      <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                        No tienes permiso para ver los pagos de órdenes de servicio.
-                      </CardContent>
-                    </Card>
-                  ),
-                }}
+                  )}
+                </>
               </AuthorizationGate>
             </TabsContent>
           </Tabs>
