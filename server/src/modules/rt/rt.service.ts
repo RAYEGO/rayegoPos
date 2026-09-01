@@ -1,7 +1,7 @@
 // ==============================================================
 // RayegoTech (RT) Servicio Técnico — Lógica Backend
-// Fastify Plugin-style service functions. Toda la lógica
-// business está en este módulo; routes/rt.ts es super thin.
+// Fastify Plugin-style service functions.
+// Nombres alineados EXACTAMENTE a prisma/schema.prisma v actual.
 // ==============================================================
 import {
   Prisma,
@@ -14,8 +14,8 @@ import {
   OrigenMovimientoInventario,
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
-import { createHttpError, requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
-import prisma from '../../lib/prisma.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
+import { prisma } from '../../lib/prisma.js'
 
 export function decimalToNumber(value: Prisma.Decimal | number | null | undefined): number {
   if (value === null || value === undefined) return 0
@@ -34,10 +34,15 @@ export function roundMoney(n: number): number {
   return Number(n.toFixed(2))
 }
 
-const UNAUTH = (s: number, m: string) => createHttpError(s, m)
+function httpError(statusCode: number, message: string): Error {
+  const err = new Error(message) as any
+  err.statusCode = statusCode
+  return err
+}
+const UNAUTH = (s: number, m: string) => httpError(s, m)
 
 // ============================================================
-// HELPERS: scope por empresa/sucursal (multi-empresa seguro)
+// HELPERS: scope por empresa
 // ============================================================
 export function scopeEmpresa<T extends { empresaId?: string }>(base: T, empresaId: string): T & { empresaId: string } {
   ;(base as any).empresaId = empresaId
@@ -49,44 +54,37 @@ export function scopeEmpresa<T extends { empresaId?: string }>(base: T, empresaI
 // ============================================================
 export async function getNextNumeroOrden(
   db: PrismaClient | Prisma.TransactionClient,
-  empresaId: string,
+  _empresaId: string,
   sucursalId: string,
   sucursalCodigo: string,
   anio: number,
   userId: string,
 ): Promise<{ numeroOrden: string; proximoNumero: number }> {
-  // SELECT sucursal.codigo para garantizar formato visible. Este helper
-  // se usa desde create Orden; caller puede pasar código.
-  // Rowlock por Postgres UPDATE: una sola transacción ve el incremento.
   const row = await db.$queryRawUnsafe<Array<{ proximo_numero: number }>>(`
     UPDATE secuencias_ordenes_servicio
     SET proximo_numero = proximo_numero + 1, updated_at = NOW(), updated_by = $5::uuid
-    WHERE empresa_id = $1::uuid AND sucursal_id = $2::uuid AND anio = $3::int
+    WHERE sucursal_id = $2::uuid AND anio = $3::int
     RETURNING proximo_numero;
-  `, empresaId, sucursalId, anio, userId, userId)
-  let proximo = (row && row[0]) ? row[0].proximo_numero : 0
+  `, _empresaId, sucursalId, anio, userId, userId)
+  let proximo = row && row[0] ? row[0].proximo_numero : 0
   if (!proximo) {
-    // Insertar la fila si no existe (1er OS de la sucursal x año)
     const ins = await db.$queryRawUnsafe<Array<{ proximo_numero: number }>>(`
       INSERT INTO secuencias_ordenes_servicio
         (id, empresa_id, sucursal_id, anio, proximo_numero, created_at, updated_at, created_by, updated_by)
       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::int, 1, NOW(), NOW(), $4::uuid, $4::uuid)
       ON CONFLICT (sucursal_id, anio) DO UPDATE SET proximo_numero = secuencias_ordenes_servicio.proximo_numero + 1
       RETURNING proximo_numero;
-    `, empresaId, sucursalId, anio, userId)
-    proximo = (ins && ins[0]) ? ins[0].proximo_numero : 1
+    `, _empresaId, sucursalId, anio, userId)
+    proximo = ins && ins[0] ? ins[0].proximo_numero : 1
   }
   const codSuc = sucursalCodigo.padStart(3, '0').toUpperCase()
   const sec = String(proximo).padStart(5, '0')
-  const numeroOrden = `OS-${codSuc}-${anio}-${sec}`
-  return { numeroOrden, proximoNumero: proximo }
+  return { numeroOrden: `OS-${codSuc}-${anio}-${sec}`, proximoNumero: proximo }
 }
 
 // ============================================================
-// CATALOGOS: tiposEquipos, tiposServicio, tecnicos, motivo RT
+// CATALOGOS: tiposEquipos, tiposServicio
 // ============================================================
-
-// ------- TIPOS EQUIPO CLIENTE -------
 export async function listTiposEquipo(request: FastifyRequest) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'equiposCliente.read')
@@ -101,9 +99,7 @@ export async function createTipoEquipo(request: FastifyRequest, payload: any) {
   requirePermission(request, 'equiposCliente.write')
   const codigo = String(payload.codigo || '').toUpperCase().trim()
   if (!codigo || !payload.nombre) throw UNAUTH(400, 'Código y nombre son obligatorios.')
-  const exists = await prisma.tipoEquipoCliente.findFirst({
-    where: { empresaId: companyId, codigo },
-  })
+  const exists = await prisma.tipoEquipoCliente.findFirst({ where: { empresaId: companyId, codigo } })
   if (exists) throw UNAUTH(409, `Ya existe el código de equipo "${codigo}".`)
   const row = await prisma.tipoEquipoCliente.create({
     data: {
@@ -120,7 +116,6 @@ export async function createTipoEquipo(request: FastifyRequest, payload: any) {
   return { item: row }
 }
 
-// ------- TIPOS SERVICIO TECNICO -------
 export async function listTiposServicio(request: FastifyRequest) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.read')
@@ -142,7 +137,6 @@ export async function createTipoServicio(request: FastifyRequest, payload: any) 
       codigo,
       nombre: String(payload.nombre),
       descripcion: toOptionalString(payload.descripcion),
-      tarifaBase: Number(payload.tarifaBase || 0) || 0,
       orden: Number(payload.orden || 0) || 0,
       activo: true,
       createdById: userId,
@@ -153,20 +147,32 @@ export async function createTipoServicio(request: FastifyRequest, payload: any) 
 }
 
 // ============================================================
-// TECNICOS (rol TECNICO + perfil 1:1 via tabla tecnicos)
+// TECNICOS
+// Columnas schema: id, usuarioId, legajo, especialidad, telefono,
+// emailContacto, estado, observaciones, activo, + relaciones/auditoria
 // ============================================================
-const tecnicoInclude = Prisma.validator<Prisma.TecnicoInclude>()({
-  usuario: {
-    select: { id: true, nombres: true, apellidos: true, email: true, numeroDocumento: true, activo: true },
-  },
-})
 export async function listTecnicos(request: FastifyRequest, inactivo = false) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'tecnicos.read')
   return {
     items: await prisma.tecnico.findMany({
-      where: { empresaId: companyId, deletedAt: null, activo: inactivo ? undefined : true },
-      include: tecnicoInclude,
+      where: {
+        usuario: { empresaId: companyId, deletedAt: null },
+        deletedAt: null,
+        activo: inactivo ? undefined : true,
+      },
+      include: {
+        usuario: {
+          select: {
+            id: true,
+            nombres: true,
+            apellidos: true,
+            email: true,
+            numeroDocumento: true,
+            activo: true,
+          },
+        },
+      },
       orderBy: [{ activo: 'desc' }],
     }),
   }
@@ -175,8 +181,19 @@ export async function getTecnico(request: FastifyRequest, id: string) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'tecnicos.read')
   const row = await prisma.tecnico.findFirst({
-    where: { id, empresaId: companyId, deletedAt: null },
-    include: tecnicoInclude,
+    where: { id, usuario: { empresaId: companyId }, deletedAt: null },
+    include: {
+      usuario: {
+        select: {
+          id: true,
+          nombres: true,
+          apellidos: true,
+          email: true,
+          numeroDocumento: true,
+          activo: true,
+        },
+      },
+    },
   })
   if (!row) throw UNAUTH(404, 'Técnico no existe.')
   return { item: row }
@@ -186,67 +203,143 @@ export async function createTecnico(request: FastifyRequest, payload: any) {
   requirePermission(request, 'tecnicos.write')
   const usuarioId = String(payload.usuarioId || '').trim()
   if (!usuarioId) throw UNAUTH(400, 'Se requiere usuarioId (Usuario asociado).')
-  // Verificar usuario pertenezca a la empresa
-  const user = await prisma.usuario.findFirst({ where: { id: usuarioId, deletedAt: null, empresaId: companyId } })
+  const user = await prisma.usuario.findFirst({
+    where: { id: usuarioId, deletedAt: null, empresaId: companyId },
+  })
   if (!user) throw UNAUTH(404, 'Usuario no existe en la empresa.')
-  // Garantizar que tenga al menos rol TECNICO (no bloqueante pero warn opcional)
   const exists = await prisma.tecnico.findFirst({ where: { usuarioId } })
   if (exists) throw UNAUTH(409, 'Usuario ya tiene perfil Técnico.')
   const esp = Array.isArray(payload.especialidades) ? payload.especialidades : []
   const row = await prisma.tecnico.create({
     data: {
-      empresaId: companyId,
       usuarioId,
-      codigo: String(payload.codigo || user.numeroDocumento || user.email || '').slice(0, 40),
-      especialidades: esp.length ? esp : ['CELULAR'],
+      legajo: String(payload.legajo || user.numeroDocumento || user.email || '').slice(0, 30) || undefined,
+      especialidad: esp.length ? esp.join(', ') : (payload.especialidad ? String(payload.especialidad) : null),
+      telefono: toOptionalString(payload.telefono),
+      emailContacto: toOptionalString(payload.email),
+      estado: 'ACTIVO',
+      observaciones: toOptionalString(payload.observaciones),
       activo: Boolean(payload.activo ?? true),
       createdById: userId,
       updatedById: userId,
     },
-    include: tecnicoInclude,
+    include: {
+      usuario: {
+        select: {
+          id: true,
+          nombres: true,
+          apellidos: true,
+          email: true,
+          numeroDocumento: true,
+          activo: true,
+        },
+      },
+    },
   })
   return { item: row }
 }
 export async function updateTecnico(request: FastifyRequest, id: string, payload: any) {
   const { companyId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'tecnicos.write')
-  const t = await prisma.tecnico.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  const t = await prisma.tecnico.findFirst({
+    where: { id, usuario: { empresaId: companyId }, deletedAt: null },
+  })
   if (!t) throw UNAUTH(404, 'Técnico no existe.')
-  const patch: Prisma.TecnicoUpdateInput = { updatedById: userId }
-  if ('codigo' in payload) patch.codigo = String(payload.codigo)
-  if ('especialidades' in payload && Array.isArray(payload.especialidades)) patch.especialidades = payload.especialidades
+  const patch: any = { updatedById: userId }
+  if ('legajo' in payload) patch.legajo = toOptionalString(payload.legajo) || undefined
+  if ('especialidad' in payload) patch.especialidad = toOptionalString(payload.especialidad)
+  if ('especialidades' in payload && Array.isArray(payload.especialidades)) {
+    patch.especialidad = payload.especialidades.length ? payload.especialidades.join(', ') : null
+  }
+  if ('telefono' in payload) patch.telefono = toOptionalString(payload.telefono)
+  if ('email' in payload || 'emailContacto' in payload) {
+    patch.emailContacto = toOptionalString(payload.emailContacto ?? payload.email)
+  }
+  if ('estado' in payload) patch.estado = String(payload.estado || 'ACTIVO')
   if ('activo' in payload) patch.activo = Boolean(payload.activo)
-  if ('fechaContratacion' in payload) patch.fechaContratacion = payload.fechaContratacion ? new Date(payload.fechaContratacion) : null
-  if ('fechaBaja' in payload) patch.fechaBaja = payload.fechaBaja ? new Date(payload.fechaBaja) : null
   if ('observaciones' in payload) patch.observaciones = toOptionalString(payload.observaciones)
-  return { item: await prisma.tecnico.update({ where: { id }, data: patch, include: tecnicoInclude }) }
+  return {
+    item: await prisma.tecnico.update({
+      where: { id },
+      data: patch,
+      include: {
+        usuario: {
+          select: {
+            id: true,
+            nombres: true,
+            apellidos: true,
+            email: true,
+            numeroDocumento: true,
+            activo: true,
+          },
+        },
+      },
+    }),
+  }
 }
 export async function deleteTecnico(request: FastifyRequest, id: string) {
   const { companyId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'tecnicos.write')
-  const t = await prisma.tecnico.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  const t = await prisma.tecnico.findFirst({
+    where: { id, usuario: { empresaId: companyId }, deletedAt: null },
+  })
   if (!t) throw UNAUTH(404, 'Técnico no existe.')
-  await prisma.tecnico.update({ where: { id }, data: { deletedAt: new Date(), updatedById: userId, activo: false } })
+  await prisma.tecnico.update({
+    where: { id },
+    data: { deletedAt: new Date(), updatedById: userId, activo: false },
+  })
   return { ok: true }
 }
 
 // ============================================================
-// CLIENTE EQUIPOS (Equipos asociados a Cliente)
+// CLIENTE EQUIPOS
+// Columnas schema: id,empresaId,clienteId,tipoEquipoId,marca,modelo,
+// numeroSerie,accesorios,notasInternas,activo + auditoria
 // ============================================================
-const clienteEquipoInclude = Prisma.validator<Prisma.ClienteEquipoInclude>()({
-  tipoEquipo: true, cliente: { select: { id: true, nombresRazonSocial: true, numeroDocumento: true } },
-})
 export async function listEquiposCliente(request: FastifyRequest, clienteId?: string) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'equiposCliente.read')
   const where: Prisma.ClienteEquipoWhereInput = { empresaId: companyId, deletedAt: null }
   if (clienteId) where.clienteId = clienteId
-  return { items: await prisma.clienteEquipo.findMany({ where, include: clienteEquipoInclude, orderBy: [{ createdAt: 'desc' }] }) }
+  return {
+    items: await prisma.clienteEquipo.findMany({
+      where,
+      include: {
+        tipoEquipo: true,
+        cliente: {
+          select: {
+            id: true,
+            nombres: true,
+            apellidos: true,
+            razonSocial: true,
+            nombreCompleto: true,
+            numeroDocumento: true,
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    }),
+  }
 }
 export async function getEquipo(request: FastifyRequest, id: string) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'equiposCliente.read')
-  const r = await prisma.clienteEquipo.findFirst({ where: { id, empresaId: companyId, deletedAt: null }, include: clienteEquipoInclude })
+  const r = await prisma.clienteEquipo.findFirst({
+    where: { id, empresaId: companyId, deletedAt: null },
+    include: {
+      tipoEquipo: true,
+      cliente: {
+        select: {
+          id: true,
+          nombres: true,
+          apellidos: true,
+          razonSocial: true,
+          nombreCompleto: true,
+          numeroDocumento: true,
+        },
+      },
+    },
+  })
   if (!r) throw UNAUTH(404, 'Equipo no existe.')
   return { item: r }
 }
@@ -255,10 +348,15 @@ export async function createEquipo(request: FastifyRequest, payload: any) {
   requirePermission(request, 'equiposCliente.write')
   const clienteId = String(payload.clienteId || '').trim()
   const tipoEquipoId = String(payload.tipoEquipoId || '').trim()
-  if (!clienteId || !tipoEquipoId || !payload.marca || !payload.modelo) throw UNAUTH(400, 'Falta data (clienteId/tipoEquipoId/marca/modelo).')
-  const cli = await prisma.cliente.findFirst({ where: { id: clienteId, empresaId: companyId, deletedAt: null } })
+  if (!clienteId || !tipoEquipoId || !payload.marca || !payload.modelo)
+    throw UNAUTH(400, 'Falta data (clienteId/tipoEquipoId/marca/modelo).')
+  const cli = await prisma.cliente.findFirst({
+    where: { id: clienteId, empresaId: companyId, deletedAt: null },
+  })
   if (!cli) throw UNAUTH(404, 'Cliente no existe.')
-  const tipo = await prisma.tipoEquipoCliente.findFirst({ where: { id: tipoEquipoId, empresaId: companyId } })
+  const tipo = await prisma.tipoEquipoCliente.findFirst({
+    where: { id: tipoEquipoId, empresaId: companyId },
+  })
   if (!tipo) throw UNAUTH(404, 'Tipo Equipo no existe.')
   const row = await prisma.clienteEquipo.create({
     data: {
@@ -268,58 +366,147 @@ export async function createEquipo(request: FastifyRequest, payload: any) {
       marca: String(payload.marca),
       modelo: String(payload.modelo),
       numeroSerie: toOptionalString(payload.numeroSerie),
-      numeroImei: toOptionalString(payload.numeroImei),
-      capacidadAlmacenamiento: toOptionalString(payload.capacidadAlmacenamiento),
-      memoriaRam: toOptionalString(payload.memoriaRam),
-      color: toOptionalString(payload.color),
-      observaciones: toOptionalString(payload.observaciones),
-      estadoFisico: String(payload.estadoFisico || 'USADO'),
-      gar: Number(payload.garantiaDias || 0) || 0,
+      accesorios: toOptionalString(payload.accesorios),
+      notasInternas: toOptionalString(payload.observaciones),
+      activo: true,
       createdById: userId,
       updatedById: userId,
     },
-    include: clienteEquipoInclude,
+    include: {
+      tipoEquipo: true,
+      cliente: {
+        select: {
+          id: true,
+          nombres: true,
+          apellidos: true,
+          razonSocial: true,
+          nombreCompleto: true,
+          numeroDocumento: true,
+        },
+      },
+    },
   })
   return { item: row }
 }
 export async function updateEquipo(request: FastifyRequest, id: string, payload: any) {
   const { companyId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'equiposCliente.write')
-  const row = await prisma.clienteEquipo.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  const row = await prisma.clienteEquipo.findFirst({
+    where: { id, empresaId: companyId, deletedAt: null },
+  })
   if (!row) throw UNAUTH(404, 'Equipo no existe.')
-  const patch: Prisma.ClienteEquipoUpdateInput = { updatedById: userId }
-  for (const k of ['tipoEquipoId', 'marca', 'modelo', 'numeroSerie', 'numeroImei', 'capacidadAlmacenamiento', 'memoriaRam', 'color', 'observaciones', 'estadoFisico'] as const) {
-    if (k in payload) (patch as any)[k] = toOptionalString(payload[k])
+  const patch: any = { updatedById: userId }
+  for (const k of [
+    'tipoEquipoId',
+    'marca',
+    'modelo',
+    'numeroSerie',
+    'accesorios',
+    'notasInternas',
+  ] as const) {
+    if (k in payload) patch[k] = toOptionalString(payload[k])
   }
-  if ('garantiaDias' in payload) patch.gar = Number(payload.garantiaDias || 0) || 0
+  if ('observaciones' in payload) patch.notasInternas = toOptionalString(payload.observaciones)
   if ('activo' in payload) patch.activo = Boolean(payload.activo)
-  return { item: await prisma.clienteEquipo.update({ where: { id }, data: patch, include: clienteEquipoInclude }) }
+  return {
+    item: await prisma.clienteEquipo.update({
+      where: { id },
+      data: patch,
+      include: {
+        tipoEquipo: true,
+        cliente: {
+          select: {
+            id: true,
+            nombres: true,
+            apellidos: true,
+            razonSocial: true,
+            nombreCompleto: true,
+            numeroDocumento: true,
+          },
+        },
+      },
+    }),
+  }
 }
 
 // ============================================================
-// ORDENES SERVICIO (módulo CENTRAL)
+// ORDENES SERVICIO (CENTRAL)
 // ============================================================
-const ordenSelect = {
-  id: true, numeroOrden: true, estado: true, tipoServicioId: true,
-  fechaRecepcion: true, fechaPrometida: true, fechaEntregado: true,
-  clienteEquipoId: true, clienteId: true, tecnicoAsignadoId: true,
-  clienteReporto: true, diagnosticoRecepcion: true,
-  montoManoObra: true, montoRepuestos: true, montoServicios: true,
-  subTotal: true, igvPorcentaje: true, igvMonto: true, total: true,
-  saldoPendiente: true, garantiaDiasAplicados: true, garantiaVence: true,
-  aprobadoPorClienteAt: true, creadoEnSucursalId: true, empresaId: true, sucursalId: true,
-  createdById: true, updatedById: true, createdAt: true,
-  cliente: { select: { id: true, nombresRazonSocial: true, numeroDocumento: true, telefono: true, email: true } },
+const ordenInclude: any = {
+  cliente: {
+    select: {
+      id: true,
+      nombres: true,
+      apellidos: true,
+      razonSocial: true,
+      nombreCompleto: true,
+      numeroDocumento: true,
+      telefono: true,
+      email: true,
+    },
+  },
   clienteEquipo: { include: { tipoEquipo: true } },
-  tecnicoAsignado: { select: { id: true, usuario: { select: { nombres: true, apellidos: true } } } },
-  items: { orderBy: { createdAt: 'asc' }, include: { producto: true, lote: true, tecnicoAsignado: { include: { usuario: { select: { nombres: true, apellidos: true } } } } } },
-  pagos: { orderBy: { fechaPago: 'asc' }, include: { formaPago: true, movimientoCaja: true } },
-  historialEstados: { orderBy: { fechaCambio: 'asc' }, include: { usuario: { select: { nombres: true, apellidos: true } } } },
-  diagnosticos: { orderBy: { fechaDiagnostico: 'asc' }, include: { usuario: { select: { nombres: true, apellidos: true } } } },
-  presupuestos: { orderBy: { version: 'desc' } },
-  asignacionesTecnico: { orderBy: { fechaAsignacion: 'desc' }, include: { tecnico: { include: { usuario: { select: { nombres: true, apellidos: true } } } }, usuario: { select: { nombres: true, apellidos: true } } } },
-  garantia: true,
-} as const
+  tecnicoAsignado: {
+    include: {
+      usuario: { select: { id: true, nombres: true, apellidos: true } },
+    },
+  },
+  items: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'asc' },
+    include: {
+      producto: true,
+      lote: true,
+      tipoServicio: true,
+      tecnico: {
+        include: {
+          usuario: { select: { id: true, nombres: true, apellidos: true } },
+        },
+      },
+    },
+  },
+  pagos: {
+    where: { deletedAt: null },
+    orderBy: { fechaPago: 'asc' },
+    include: { formaPago: true, movimientoCaja: true },
+  },
+  historialEstados: {
+    where: { deletedAt: null },
+    orderBy: { fecha: 'asc' },
+    include: {
+      realizadoPor: { select: { id: true, nombres: true, apellidos: true } },
+    },
+  },
+  diagnosticos: {
+    where: { deletedAt: null },
+    orderBy: { fecha: 'asc' },
+    include: {
+      tecnico: true,
+      creadoPor: { select: { id: true, nombres: true, apellidos: true } },
+    },
+  },
+  presupuestos: {
+    where: { deletedAt: null },
+    orderBy: { version: 'desc' },
+  },
+  asignacionesTecnico: {
+    where: { deletedAt: null },
+    orderBy: { fechaAsignacion: 'desc' },
+    include: {
+      tecnico: {
+        include: {
+          usuario: { select: { id: true, nombres: true, apellidos: true } },
+        },
+      },
+    },
+  },
+  garantias: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' } },
+}
+
+function flatClienteNombre(c: any): string | null {
+  if (!c) return null
+  return c.razonSocial || c.nombreCompleto || [c.nombres, c.apellidos].filter(Boolean).join(' ').trim() || null
+}
 
 type Filters = {
   estado?: EstadoOrdenServicio | EstadoOrdenServicio[]
@@ -336,400 +523,559 @@ export async function listOrdenesServicio(request: FastifyRequest, filters: Filt
   const where: Prisma.OrdenServicioWhereInput = { empresaId: companyId, deletedAt: null }
   if (filters.sucursalId) where.sucursalId = filters.sucursalId
   else where.sucursalId = branchId
-  if (filters.estado) where.estado = Array.isArray(filters.estado) ? { in: filters.estado } : filters.estado
+  if (filters.estado) {
+    where.estadoActual = Array.isArray(filters.estado) ? { in: filters.estado } : filters.estado
+  }
   if (filters.clienteId) where.clienteId = filters.clienteId
   if (filters.tecnicoAsignadoId) where.tecnicoAsignadoId = filters.tecnicoAsignadoId
   if (filters.desde || filters.hasta) {
-    where.fechaRecepcion = {}
+    where.fechaRecepcion = {} as any
     if (filters.desde) (where.fechaRecepcion as any).gte = new Date(filters.desde + 'T00:00:00')
     if (filters.hasta) (where.fechaRecepcion as any).lte = new Date(filters.hasta + 'T23:59:59')
   }
   if (filters.search) {
-    const s = `%${filters.search.trim().toLowerCase()}%`
+    const q = filters.search.trim()
     where.OR = [
-      { numeroOrden: { contains: filters.search.trim() } },
-      { cliente: { nombresRazonSocial: { contains: filters.search.trim(), mode: 'insensitive' } } },
-      { clienteEquipo: { numeroSerie: { contains: filters.search.trim(), mode: 'insensitive' } } },
-    ]
+      { numeroOrden: { contains: q, mode: 'insensitive' } },
+      {
+        cliente: {
+          OR: [
+            { numeroDocumento: { contains: q, mode: 'insensitive' } },
+            { razonSocial: { contains: q, mode: 'insensitive' } },
+            { nombreCompleto: { contains: q, mode: 'insensitive' } },
+            { nombres: { contains: q, mode: 'insensitive' } },
+            { apellidos: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+      },
+      { clienteEquipo: { numeroSerie: { contains: q, mode: 'insensitive' } } },
+    ] as any
   }
   const [items, total] = await Promise.all([
     prisma.ordenServicio.findMany({
       where,
-      select: ordenSelect,
+      include: ordenInclude,
       orderBy: { fechaRecepcion: 'desc' },
       take: 200,
     }),
     prisma.ordenServicio.count({ where }),
   ])
-  return { items, total }
+  const itemsNormalizado = items.map((o: any) => ({
+    ...o,
+    estado: o.estadoActual,
+    cliente: o.cliente
+      ? { ...o.cliente, nombresRazonSocial: flatClienteNombre(o.cliente) }
+      : o.cliente,
+    tipoServicioId: o.tipoServicioId,
+    fechaEntregado: o.fechaEntregaReal,
+    fechaPrometida: o.fechaEntregaEstimada,
+    clienteReporto: o.problemaReportado,
+    diagnosticoRecepcion: toOptionalString(o.observacionesInternas),
+    montoManoObra: decimalToNumber(o.subtotalManoObra),
+    montoRepuestos: decimalToNumber(o.subtotalRepuestos),
+    montoServicios: decimalToNumber(o.subtotalServiciosAdic),
+    subTotal: decimalToNumber(o.subtotalRepuestos) +
+      decimalToNumber(o.subtotalManoObra) +
+      decimalToNumber(o.subtotalServiciosAdic) -
+      decimalToNumber(o.descuentoTotal),
+    igvPorcentaje: decimalToNumber(o.impuestoTotal) > 0
+      ? 18
+      : 0,
+    igvMonto: decimalToNumber(o.impuestoTotal),
+    total: decimalToNumber(o.totalOrden),
+    totalFinal: decimalToNumber(o.totalOrden),
+    saldoPendiente: decimalToNumber(o.saldoPendiente),
+    garantiaVence: null,
+    creadoEnSucursalId: o.sucursalId,
+  }))
+  return { items: itemsNormalizado, total }
 }
+
 export async function getOrdenServicio(request: FastifyRequest, id: string) {
   const { companyId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.read')
   const row = await prisma.ordenServicio.findFirst({
     where: { id, empresaId: companyId, deletedAt: null },
-    select: ordenSelect,
+    include: ordenInclude,
   })
   if (!row) throw UNAUTH(404, 'Orden de Servicio no existe.')
-  return { item: row }
+  const o = row as any
+  return {
+    item: {
+      ...o,
+      estado: o.estadoActual,
+      cliente: o.cliente
+        ? { ...o.cliente, nombresRazonSocial: flatClienteNombre(o.cliente) }
+        : o.cliente,
+      fechaEntregado: o.fechaEntregaReal,
+      fechaPrometida: o.fechaEntregaEstimada,
+      clienteReporto: o.problemaReportado,
+      diagnosticoRecepcion: toOptionalString(o.observacionesInternas),
+      montoManoObra: decimalToNumber(o.subtotalManoObra),
+      montoRepuestos: decimalToNumber(o.subtotalRepuestos),
+      montoServicios: decimalToNumber(o.subtotalServiciosAdic),
+      subTotal: decimalToNumber(o.subtotalRepuestos) +
+        decimalToNumber(o.subtotalManoObra) +
+        decimalToNumber(o.subtotalServiciosAdic) -
+        decimalToNumber(o.descuentoTotal),
+      igvPorcentaje: decimalToNumber(o.impuestoTotal) > 0 ? 18 : 0,
+      igvMonto: decimalToNumber(o.impuestoTotal),
+      total: decimalToNumber(o.totalOrden),
+      totalFinal: decimalToNumber(o.totalOrden),
+      saldoPendiente: decimalToNumber(o.saldoPendiente),
+      garantiaVence: null,
+      creadoEnSucursalId: o.sucursalId,
+    },
+  }
 }
 
-/**
- * Crear OrdenServicio.
- * Payload opcional: items[] + montoManuales. Genera estado inicial RECIBIDO.
- * No inserta pagos ni movimientos de caja.
- */
+// Helper para crear Orden. Acepta payload flex; campos schema oficiales.
 export async function createOrdenServicio(request: FastifyRequest, payload: any) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
   const clienteId = String(payload.clienteId || '').trim()
-  const clienteEquipoId = String(payload.clienteEquipoId || '').trim()
-  const tipoServicioId = payload.tipoServicioId ? String(payload.tipoServicioId).trim() : null
+  const clienteEquipoId = toOptionalString(payload.clienteEquipoId)
+  const tipoServicioId = toOptionalString(payload.tipoServicioId)
   if (!clienteId) throw UNAUTH(400, 'clienteId es obligatorio.')
-  const cliente = await prisma.cliente.findFirst({ where: { id: clienteId, empresaId: companyId, deletedAt: null } })
+  const cliente = await prisma.cliente.findFirst({
+    where: { id: clienteId, empresaId: companyId, deletedAt: null },
+  })
   if (!cliente) throw UNAUTH(404, 'Cliente no existe.')
-  const sucursal = await prisma.sucursal.findFirst({ where: { id: branchId, empresaId: companyId, activo: true, deletedAt: null } })
+  const sucursal = await prisma.sucursal.findFirst({
+    where: { id: branchId, empresaId: companyId, activo: true, deletedAt: null },
+  })
   if (!sucursal) throw UNAUTH(409, 'Sucursal no disponible para OS.')
-  let equipo: any = null
   if (clienteEquipoId) {
-    equipo = await prisma.clienteEquipo.findFirst({ where: { id: clienteEquipoId, empresaId: companyId, deletedAt: null } })
-    if (!equipo) throw UNAUTH(404, 'Equipo no existe en la empresa.')
+    const eq = await prisma.clienteEquipo.findFirst({
+      where: { id: clienteEquipoId, empresaId: companyId, deletedAt: null },
+    })
+    if (!eq) throw UNAUTH(404, 'Equipo no existe en la empresa.')
   }
-  // Garantía por defecto (configuración)
   let garantiaDef = 30
   try {
     const cfg = await prisma.configuracion.findFirst({
-      where: { empresaId: companyId, ambito: 'EMPRESA', sucursalId: null, clave: 'GARANTIA_DEFAULT_DIAS', deletedAt: null },
+      where: {
+        empresaId: companyId,
+        ambito: 'EMPRESA',
+        clave: 'GARANTIA_DEFAULT_DIAS',
+        deletedAt: null,
+      },
     })
     if (cfg && cfg.valorNumero != null) garantiaDef = Number(cfg.valorNumero) || 30
-  } catch (_) { garantiaDef = 30 }
-  const garantiaDias = Number(payload.garantiaDiasAplicados ?? payload.garantiaDias ?? garantiaDef) || 0
+  } catch {
+    garantiaDef = 30
+  }
+  const garantiaDias =
+    Number(payload.garantiaDiasAplicados ?? payload.garantiaDias ?? garantiaDef) || 0
 
   const fechaRecepcion = payload.fechaRecepcion ? new Date(payload.fechaRecepcion) : new Date()
   const anio = fechaRecepcion.getFullYear()
 
-  return await prisma.$transaction(async (tx) => {
-    // Numeración segura
-    const { numeroOrden } = await getNextNumeroOrden(tx, companyId, branchId, sucursal.codigo, anio, userId)
-    const igvPorc = Number(payload.igvPorcentaje ?? clientIgvDefault(companyId))
-    // Montos: si vienen vacíos los items, aceptar 0. Endpoint separado itemsAdd agrega costo (rep / MO)
-    const { subTotal = 0, totalManoObra = 0, totalRepuestos = 0, totalServicios = 0 } = calcMontosDesdeItems(payload.items || [], igvPorc)
-    const igvMonto = roundMoney(subTotal * (igvPorc / 100))
-    const total = roundMoney(subTotal + igvMonto)
+  const igvPorc = Number(payload.igvPorcentaje ?? clientIgvDefault(companyId)) || 18
+
+  return await prisma.$transaction(async (tx: any) => {
+    const { numeroOrden } = await getNextNumeroOrden(
+      tx,
+      companyId,
+      branchId,
+      sucursal.codigo,
+      anio,
+      userId,
+    )
+
+    const repuestos = 0
+    const manoObra = 0
+    const servicios = 0
+    const descuento = 0
+    const sub = Math.max(0, roundMoney(repuestos + manoObra + servicios - descuento))
+    const igv = roundMoney(sub * (igvPorc / 100))
+    const totalOrden = roundMoney(sub + igv)
 
     const orden = await tx.ordenServicio.create({
       data: {
         empresaId: companyId,
         sucursalId: branchId,
-        creadoEnSucursalId: branchId,
         numeroOrden,
-        estado: EstadoOrdenServicio.RECIBIDO,
+        estadoActual: EstadoOrdenServicio.RECIBIDO,
         clienteId,
-        clienteEquipoId: equipo?.id || null,
-        tipoServicioId,
+        clienteEquipoId: clienteEquipoId || undefined,
+        tipoServicioId: tipoServicioId || undefined,
+        tecnicoAsignadoId: payload.tecnicoAsignadoId
+          ? String(payload.tecnicoAsignadoId)
+          : undefined,
         fechaRecepcion,
-        fechaPrometida: payload.fechaPrometida ? new Date(payload.fechaPrometida) : null,
-        clienteReporto: toOptionalString(payload.clienteReporto),
-        diagnosticoRecepcion: toOptionalString(payload.diagnosticoRecepcion),
-        tecnicoAsignadoId: payload.tecnicoAsignadoId ? String(payload.tecnicoAsignadoId) : null,
-        montoManoObra: toDecimal(totalManoObra, 2),
-        montoRepuestos: toDecimal(totalRepuestos, 2),
-        montoServicios: toDecimal(totalServicios, 2),
-        subTotal: toDecimal(subTotal, 2),
-        igvPorcentaje: toDecimal(igvPorc, 4),
-        igvMonto: toDecimal(igvMonto, 2),
-        total: toDecimal(total, 2),
-        saldoPendiente: toDecimal(total, 2),
+        fechaEntregaEstimada: payload.fechaPrometida
+          ? new Date(payload.fechaPrometida)
+          : undefined,
+        problemaReportado: String(payload.clienteReporto || payload.problemaReportado || '').slice(0, 2000),
+        accesoriosRecibidos: toOptionalString(payload.accesoriosRecibidos),
+        contrasenaEquipo: toOptionalString(payload.contrasenaEquipo),
         garantiaDiasAplicados: garantiaDias,
-        garantiaVence: garantiaDias > 0 ? addDays(fechaRecepcion, garantiaDias) : null,
-        observaciones: toOptionalString(payload.observaciones),
+        subtotalRepuestos: toDecimal(repuestos, 2),
+        subtotalManoObra: toDecimal(manoObra, 2),
+        subtotalServiciosAdic: toDecimal(servicios, 2),
+        descuentoTotal: toDecimal(descuento, 2),
+        impuestoTotal: toDecimal(igv, 2),
+        totalOrden: toDecimal(totalOrden, 2),
+        totalPagado: toDecimal(0, 2),
+        saldoPendiente: toDecimal(totalOrden, 2),
+        observacionesInternas: toOptionalString(payload.diagnosticoRecepcion ?? payload.observaciones),
         createdById: userId,
         updatedById: userId,
       },
-      select: ordenSelect,
+      include: ordenInclude,
     })
 
-    // Historial primer estado (RECIBIDO)
     await tx.ordenEstadoHistorial.create({
       data: {
-        ordenServicioId: orden.id,
-        estadoAnterior: null,
-        estadoNuevo: EstadoOrdenServicio.RECIBIDO,
-        fechaCambio: new Date(),
-        usuarioId: userId,
-        empresaId: companyId,
-        sucursalId: branchId,
-        createdById: userId,
-        updatedById: userId,
+        ordenId: orden.id,
+        estado: EstadoOrdenServicio.RECIBIDO,
         observaciones: 'Creación de la Orden de Servicio.',
+        fecha: new Date(),
+        realizadoPorId: userId,
       },
     })
 
-    // Asignación inicial técnico
     if (payload.tecnicoAsignadoId) {
-      const tec = await tx.tecnico.findFirst({ where: { id: String(payload.tecnicoAsignadoId), empresaId: companyId, deletedAt: null, activo: true } })
+      const tec = await tx.tecnico.findFirst({
+        where: {
+          id: String(payload.tecnicoAsignadoId),
+          usuario: { empresaId: companyId },
+          deletedAt: null,
+          activo: true,
+        },
+      })
       if (!tec) throw UNAUTH(404, 'Técnico asignado no existe en la empresa.')
       await tx.ordenAsignacionTecnico.create({
         data: {
-          ordenServicioId: orden.id,
+          ordenId: orden.id,
           tecnicoId: tec.id,
           fechaAsignacion: new Date(),
-          esPrincipal: true,
-          usuarioId: userId,
-          empresaId: companyId,
-          sucursalId: branchId,
-          observaciones: 'Asignación inicial en la creación de OS.',
-          createdById: userId,
-          updatedById: userId,
+          activo: true,
+          motivoCambio: 'Asignación inicial en la creación de OS.',
         },
       })
     }
 
-    // Presupuesto v1 inicial (0 si no items)
     await tx.ordenPresupuestoVersion.create({
       data: {
-        ordenServicioId: orden.id,
+        ordenId: orden.id,
         version: 1,
-        montoManoObra: toDecimal(totalManoObra, 2),
-        montoRepuestos: toDecimal(totalRepuestos, 2),
-        montoServicios: toDecimal(totalServicios, 2),
-        subTotal: toDecimal(subTotal, 2),
-        igvPorcentaje: toDecimal(igvPorc, 4),
-        igvMonto: toDecimal(igvMonto, 2),
-        total: toDecimal(total, 2),
-        descripcion: toOptionalString(payload.descripcionPresupuesto) || 'Presupuesto inicial al crear OS.',
-        empresaId: companyId,
-        sucursalId: branchId,
-        createdById: userId,
-        updatedById: userId,
+        subtotalRepuestos: toDecimal(repuestos, 2),
+        subtotalManoObra: toDecimal(manoObra, 2),
+        subtotalServiciosAdic: toDecimal(servicios, 2),
+        descuentoTotal: toDecimal(descuento, 2),
+        impuestoTotal: toDecimal(igv, 2),
+        total: toDecimal(totalOrden, 2),
+        estadoAprobacion: 'PENDIENTE',
+        notasCliente: toOptionalString(payload.descripcionPresupuesto) || 'Presupuesto inicial al crear OS.',
+        creadoPorId: userId,
       },
     })
 
-    // Items (incluir repuestos = Kardex SALIDA)
     if (Array.isArray(payload.items) && payload.items.length) {
-      for (const it of payload.items) await addOrdenItemInternal(tx, orden, it, userId, companyId, branchId)
+      for (const it of payload.items) {
+        await addOrdenItemInternal(tx, orden as any, it, userId, companyId, branchId)
+      }
     }
 
-    // Recalcular montos por si hubo items
-    const recalc = await recalcularMontosOrden(tx, orden.id, userId, companyId, branchId)
-    return { item: recalc }
+    return getOrdenServicioFromTx(tx, orden.id)
   })
 }
 
-// ============================================================
-// ESTADOS ORDEN: avanzar / retroceder con historial + transiciones inválidas 409
-// ============================================================
-const SIGUIENTE_ESTADO_RAPIDO: Partial<Record<EstadoOrdenServicio, EstadoOrdenServicio>> = {
-  [EstadoOrdenServicio.RECIBIDO]: EstadoOrdenServicio.DIAGNOSTICO,
-  [EstadoOrdenServicio.DIAGNOSTICO]: EstadoOrdenServicio.PRESUPUESTO,
-  [EstadoOrdenServicio.PRESUPUESTO]: EstadoOrdenServicio.ESPERANDO_APROBACION,
-  [EstadoOrdenServicio.ESPERANDO_APROBACION]: EstadoOrdenServicio.APROBADO,
-  [EstadoOrdenServicio.APROBADO]: EstadoOrdenServicio.EN_REPARACION,
-  [EstadoOrdenServicio.EN_REPARACION]: EstadoOrdenServicio.EN_PRUEBAS,
-  [EstadoOrdenServicio.EN_PRUEBAS]: EstadoOrdenServicio.LISTO_PARA_ENTREGA,
-  [EstadoOrdenServicio.LISTO_PARA_ENTREGA]: EstadoOrdenServicio.PENDIENTE_RETIRO,
-  [EstadoOrdenServicio.PENDIENTE_RETIRO]: EstadoOrdenServicio.ENTREGADO,
+async function getOrdenServicioFromTx(tx: any, id: string) {
+  const row = await tx.ordenServicio.findFirst({
+    where: { id },
+    include: ordenInclude,
+  })
+  if (!row) throw UNAUTH(404, 'Orden de Servicio no existe.')
+  const o = row as any
+  return {
+    item: {
+      ...o,
+      estado: o.estadoActual,
+      cliente: o.cliente
+        ? { ...o.cliente, nombresRazonSocial: flatClienteNombre(o.cliente) }
+        : o.cliente,
+      fechaEntregado: o.fechaEntregaReal,
+      fechaPrometida: o.fechaEntregaEstimada,
+      clienteReporto: o.problemaReportado,
+      diagnosticoRecepcion: toOptionalString(o.observacionesInternas),
+      montoManoObra: decimalToNumber(o.subtotalManoObra),
+      montoRepuestos: decimalToNumber(o.subtotalRepuestos),
+      montoServicios: decimalToNumber(o.subtotalServiciosAdic),
+      subTotal: decimalToNumber(o.subtotalRepuestos) +
+        decimalToNumber(o.subtotalManoObra) +
+        decimalToNumber(o.subtotalServiciosAdic) -
+        decimalToNumber(o.descuentoTotal),
+      igvPorcentaje: decimalToNumber(o.impuestoTotal) > 0 ? 18 : 0,
+      igvMonto: decimalToNumber(o.impuestoTotal),
+      total: decimalToNumber(o.totalOrden),
+      totalFinal: decimalToNumber(o.totalOrden),
+      saldoPendiente: decimalToNumber(o.saldoPendiente),
+      garantiaVence: null,
+      creadoEnSucursalId: o.sucursalId,
+    },
+  }
 }
 
-export async function cambiarEstadoOrden(request: FastifyRequest, id: string, payload: any) {
+export async function cambiarEstadoOrden(
+  request: FastifyRequest,
+  id: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.cambioEstado')
-  const estadoNuevo: EstadoOrdenServicio | undefined = payload?.estado as any
+  const estadoNuevo: EstadoOrdenServicio | undefined = payload?.estado
   if (!estadoNuevo) throw UNAUTH(400, 'Parámetro estado es obligatorio.')
   const observaciones = toOptionalString(payload?.observaciones)
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id, empresaId: companyId, deletedAt: null },
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
-    const estadoAnterior = orden.estado
+    const estadoAnterior: EstadoOrdenServicio = orden.estadoActual
     if (estadoAnterior === estadoNuevo) {
-      return { item: await tx.ordenServicio.findFirst({ where: { id }, select: ordenSelect }) }
+      return getOrdenServicioFromTx(tx, id)
     }
-    // Validaciones de transición
-    if (estadoAnterior === EstadoOrdenServicio.ENTREGADO && ![EstadoOrdenServicio.EN_GARANTIA].includes(estadoNuevo)) {
-      throw UNAUTH(409, 'Orden ENTREGADA solo puede ir a EN_GARANTIA.')
+    if (
+      estadoAnterior === EstadoOrdenServicio.ENTREGADO &&
+      estadoNuevo !== EstadoOrdenServicio.EN_GARANTÍA
+    ) {
+      throw UNAUTH(409, 'Orden ENTREGADA solo puede ir a EN_GARANTÍA.')
     }
     if (estadoNuevo === EstadoOrdenServicio.ENTREGADO) {
       const saldo = decimalToNumber(orden.saldoPendiente)
-      if (saldo > 0.005) throw UNAUTH(409, `No se puede ENTREGAR. Saldo pendiente S/ ${saldo.toFixed(2)}.`)
+      if (saldo > 0.005)
+        throw UNAUTH(409, `No se puede ENTREGAR. Saldo pendiente S/ ${saldo.toFixed(2)}.`)
     }
-    if (estadoNuevo === EstadoOrdenServicio.EN_GARANTIA && estadoAnterior !== EstadoOrdenServicio.ENTREGADO) {
-      throw UNAUTH(409, 'EN_GARANTIA solo aplica después de ENTREGADO.')
+    if (
+      estadoNuevo === EstadoOrdenServicio.EN_GARANTÍA &&
+      estadoAnterior !== EstadoOrdenServicio.ENTREGADO
+    ) {
+      throw UNAUTH(409, 'EN_GARANTÍA solo aplica después de ENTREGADO.')
     }
-    // Si es ENTREGADO, crear registro Garantía 1:1 (si no existía)
+
     if (estadoNuevo === EstadoOrdenServicio.ENTREGADO) {
-      await tx.ordenGarantia.upsert({
-        where: { ordenServicioId: orden.id },
-        create: {
-          ordenServicioId: orden.id,
-          empresaId: companyId,
-          sucursalId: branchId,
-          diasGarantia: orden.garantiaDiasAplicados,
-          fechaInicio: new Date(),
-          fechaFin: orden.garantiaVence || null,
-          terminos: toOptionalString(payload.terminosGarantia),
-          estado: 'VIGENTE',
-          createdById: userId,
-          updatedById: userId,
-        },
-        update: {
-          diasGarantia: orden.garantiaDiasAplicados,
-          fechaInicio: new Date(),
-          fechaFin: orden.garantiaVence || null,
-          estado: 'VIGENTE',
-          updatedById: userId,
-        },
+      const dias = Number(orden.garantiaDiasAplicados || 0)
+      const fechaInicio = new Date()
+      const fechaFin = dias > 0 ? addDays(fechaInicio, dias) : undefined
+      await tx.ordenGarantia.createMany({
+        data: [
+          {
+            ordenId: id,
+            dias: dias,
+            fechaInicio,
+            fechaFin,
+            detalle: toOptionalString(payload?.terminosGarantia),
+            estado: dias > 0 ? 'VIGENTE' : 'SIN_GARANTIA',
+          },
+        ],
+        skipDuplicates: true,
       })
     }
-    await tx.ordenServicio.update({
-      where: { id },
-      data: {
-        estado: estadoNuevo,
-        updatedById: userId,
-        fechaEntregado: estadoNuevo === EstadoOrdenServicio.ENTREGADO ? new Date() : orden.fechaEntregado,
-      },
-    })
+
+    const updateData: any = {
+      estadoActual: estadoNuevo,
+      updatedById: userId,
+    }
+    if (estadoNuevo === EstadoOrdenServicio.ENTREGADO) {
+      updateData.fechaEntregaReal = new Date()
+    }
+    await tx.ordenServicio.update({ where: { id }, data: updateData })
+
     await tx.ordenEstadoHistorial.create({
       data: {
-        ordenServicioId: id,
-        estadoAnterior,
-        estadoNuevo,
-        fechaCambio: new Date(),
-        usuarioId: userId,
-        empresaId: companyId,
-        sucursalId: branchId,
+        ordenId: id,
+        estado: estadoNuevo,
         observaciones,
-        createdById: userId,
-        updatedById: userId,
+        fecha: new Date(),
+        realizadoPorId: userId,
       },
     })
-    return { item: await tx.ordenServicio.findFirst({ where: { id }, select: ordenSelect }) }
+    return getOrdenServicioFromTx(tx, id)
   })
 }
 
-// ============================================================
-// ASIGNACION TECNICO (con historial)
-// ============================================================
-export async function asignarTecnicoOrden(request: FastifyRequest, id: string, payload: any) {
+export async function asignarTecnicoOrden(
+  request: FastifyRequest,
+  id: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.cambioEstado')
   const tecnicoId = String(payload.tecnicoId || '').trim()
   if (!tecnicoId) throw UNAUTH(400, 'tecnicoId es obligatorio.')
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id, empresaId: companyId, deletedAt: null },
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
-    const tec = await tx.tecnico.findFirst({ where: { id: tecnicoId, empresaId: companyId, deletedAt: null, activo: true } })
-    if (!tec) throw UNAUTH(404, 'Técnico no existe.')
-    await tx.ordenServicio.update({ where: { id }, data: { tecnicoAsignadoId: tecnicoId, updatedById: userId } })
-    await tx.ordenAsignacionTecnico.create({
-      data: {
-        ordenServicioId: id,
-        tecnicoId,
-        fechaAsignacion: new Date(),
-        esPrincipal: true,
-        usuarioId: userId,
-        empresaId: companyId,
-        sucursalId: branchId,
-        observaciones: toOptionalString(payload.observaciones),
-        createdById: userId,
-        updatedById: userId,
+    const tec = await tx.tecnico.findFirst({
+      where: {
+        id: tecnicoId,
+        usuario: { empresaId: companyId },
+        deletedAt: null,
+        activo: true,
       },
     })
-    return { item: await tx.ordenServicio.findFirst({ where: { id }, select: ordenSelect }) }
+    if (!tec) throw UNAUTH(404, 'Técnico no existe.')
+    await tx.ordenAsignacionTecnico.updateMany({
+      where: { ordenId: id, activo: true },
+      data: { activo: false, fechaLiberacion: new Date(), motivoCambio: 'Reasignación' },
+    })
+    await tx.ordenServicio.update({
+      where: { id },
+      data: { tecnicoAsignadoId: tecnicoId, updatedById: userId },
+    })
+    await tx.ordenAsignacionTecnico.create({
+      data: {
+        ordenId: id,
+        tecnicoId,
+        fechaAsignacion: new Date(),
+        activo: true,
+        motivoCambio: toOptionalString(payload.observaciones),
+      },
+    })
+    return getOrdenServicioFromTx(tx, id)
   })
 }
 
 // ============================================================
-// PRESUPUESTO VERSIONAR + APROBACION CLIENTE
+// PRESUPUESTO
 // ============================================================
-export async function crearVersionPresupuesto(request: FastifyRequest, id: string, payload: any) {
+export async function crearVersionPresupuesto(
+  request: FastifyRequest,
+  id: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id, empresaId: companyId, deletedAt: null },
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
     const last = await tx.ordenPresupuestoVersion.findFirst({
-      where: { ordenServicioId: id }, orderBy: { version: 'desc' },
+      where: { ordenId: id, deletedAt: null },
+      orderBy: { version: 'desc' },
     })
     const version = last ? last.version + 1 : 1
-    const igvPorc = Number(payload.igvPorcentaje ?? decimalToNumber(orden.igvPorcentaje)) || 18
-    const sub = roundMoney(Number(payload.subTotal ?? payload.montoTotal ?? 0))
+    const igvPorc = Number(payload.igvPorcentaje || 18) || 18
+    const rep = Number(payload.subtotalRepuestos || payload.montoRepuestos || 0)
+    const mo = Number(payload.subtotalManoObra || payload.montoManoObra || 0)
+    const serv = Number(payload.subtotalServiciosAdic || payload.montoServicios || 0)
+    const des = Number(payload.descuentoTotal || 0)
+    const sub = Math.max(0, roundMoney(rep + mo + serv - des))
     const igv = roundMoney(sub * (igvPorc / 100))
     const total = roundMoney(sub + igv)
     const pv = await tx.ordenPresupuestoVersion.create({
       data: {
-        ordenServicioId: id,
+        ordenId: id,
         version,
-        descripcion: toOptionalString(payload.descripcion) || `Presupuesto v${version}`,
-        montoManoObra: toDecimal(Number(payload.montoManoObra || 0), 2),
-        montoRepuestos: toDecimal(Number(payload.montoRepuestos || 0), 2),
-        montoServicios: toDecimal(Number(payload.montoServicios || 0), 2),
-        subTotal: toDecimal(sub, 2),
-        igvPorcentaje: toDecimal(igvPorc, 4),
-        igvMonto: toDecimal(igv, 2),
+        subtotalRepuestos: toDecimal(rep, 2),
+        subtotalManoObra: toDecimal(mo, 2),
+        subtotalServiciosAdic: toDecimal(serv, 2),
+        descuentoTotal: toDecimal(des, 2),
+        impuestoTotal: toDecimal(igv, 2),
         total: toDecimal(total, 2),
-        empresaId: companyId,
-        sucursalId: branchId,
-        aprobadoCliente: false,
-        createdById: userId,
-        updatedById: userId,
+        estadoAprobacion: 'PENDIENTE',
+        notasCliente: toOptionalString(payload.descripcion) || `Presupuesto v${version}`,
+        creadoPorId: userId,
       },
     })
-    // Si es >v1 → estado pasa a ESPERANDO_APROBACION (solo si estado era anterior a APROBADO)
-    const estadosCambioPend = [EstadoOrdenServicio.RECIBIDO, EstadoOrdenServicio.DIAGNOSTICO, EstadoOrdenServicio.PRESUPUESTO]
-    if (estadosCambioPend.includes(orden.estado as any)) {
-      await tx.ordenServicio.update({ where: { id }, data: { estado: EstadoOrdenServicio.ESPERANDO_APROBACION, updatedById: userId } })
+    const estadosCambioPend = [
+      EstadoOrdenServicio.RECIBIDO,
+      EstadoOrdenServicio.DIAGNÓSTICO,
+      EstadoOrdenServicio.PRESUPUESTO,
+    ]
+    if (estadosCambioPend.includes(orden.estadoActual)) {
+      await tx.ordenServicio.update({
+        where: { id },
+        data: {
+          estadoActual: EstadoOrdenServicio.ESPERANDO_APROBACIÓN,
+          updatedById: userId,
+        },
+      })
       await tx.ordenEstadoHistorial.create({
-        data: { ordenServicioId: id, estadoAnterior: orden.estado, estadoNuevo: EstadoOrdenServicio.ESPERANDO_APROBACION, fechaCambio: new Date(), usuarioId: userId, empresaId: companyId, sucursalId: branchId, observaciones: `Se creó presupuesto v${version}.`, createdById: userId, updatedById: userId },
+        data: {
+          ordenId: id,
+          estado: EstadoOrdenServicio.ESPERANDO_APROBACIÓN,
+          observaciones: `Se creó presupuesto v${version}.`,
+          fecha: new Date(),
+          realizadoPorId: userId,
+        },
       })
     }
     return { presupuesto: pv }
   })
 }
-export async function aprobarPresupuestoCliente(request: FastifyRequest, id: string, payload: any) {
+
+export async function aprobarPresupuestoCliente(
+  request: FastifyRequest,
+  id: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.aprobar')
   const version = Number(payload.version) || 0
   const accion = String(payload.accion || 'APROBAR').toUpperCase()
   if (!version) throw UNAUTH(400, 'version es obligatoria.')
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id, empresaId: companyId, deletedAt: null },
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
-    const pv = await tx.ordenPresupuestoVersion.findFirst({ where: { ordenServicioId: id, version } })
+    const pv = await tx.ordenPresupuestoVersion.findFirst({
+      where: { ordenId: id, version, deletedAt: null },
+    })
     if (!pv) throw UNAUTH(404, `Presupuesto v${version} no existe.`)
     const aprobado = accion === 'APROBAR'
+    const newEstado = aprobado ? 'APROBADO' : accion === 'RECHAZAR' ? 'RECHAZADO' : 'PENDIENTE'
     await tx.ordenPresupuestoVersion.update({
       where: { id: pv.id },
       data: {
-        aprobadoCliente: aprobado,
-        fechaAprobacionCliente: new Date(),
-        usuarioAprobacionClienteId: userId,
-        comentariosCliente: toOptionalString(payload.comentarios),
-        updatedById: userId,
+        estadoAprobacion: newEstado,
+        fechaDecisionCliente: new Date(),
+        decididoClientePor: toOptionalString(payload.nombreCliente) || 'Cliente',
+        motivoRechazo: toOptionalString(payload.comentarios),
       },
     })
     if (aprobado) {
-      // Actualiza montos de orden según el presupuesto aprobado oficial
-      const newSub = decimalToNumber(pv.subTotal)
-      const igv = decimalToNumber(pv.igvMonto)
-      const total = roundMoney(newSub + igv)
+      const sub =
+        decimalToNumber(pv.subtotalRepuestos) +
+        decimalToNumber(pv.subtotalManoObra) +
+        decimalToNumber(pv.subtotalServiciosAdic) -
+        decimalToNumber(pv.descuentoTotal)
+      const igv = decimalToNumber(pv.impuestoTotal)
+      const total = roundMoney(Math.max(0, sub) + igv)
+      const totalPagado = decimalToNumber(orden.totalPagado)
+      const saldoPendiente = Math.max(0, roundMoney(total - totalPagado))
       await tx.ordenServicio.update({
         where: { id },
         data: {
-          montoManoObra: pv.montoManoObra,
-          montoRepuestos: pv.montoRepuestos,
-          montoServicios: pv.montoServicios,
-          subTotal: pv.subTotal,
-          igvPorcentaje: pv.igvPorcentaje,
-          igvMonto: pv.igvMonto,
-          total: toDecimal(total, 2),
-          saldoPendiente: toDecimal(total, 2),
-          aprobadoPorClienteAt: new Date(),
-          estado: EstadoOrdenServicio.APROBADO,
+          subtotalRepuestos: pv.subtotalRepuestos,
+          subtotalManoObra: pv.subtotalManoObra,
+          subtotalServiciosAdic: pv.subtotalServiciosAdic,
+          descuentoTotal: pv.descuentoTotal,
+          impuestoTotal: pv.impuestoTotal,
+          totalOrden: pv.total,
+          saldoPendiente: toDecimal(saldoPendiente, 2),
+          aprobadoClienteAt: new Date(),
+          aprobadoClientePorId: userId,
+          estadoActual: EstadoOrdenServicio.APROBADO,
           updatedById: userId,
         },
       })
       await tx.ordenEstadoHistorial.create({
-        data: { ordenServicioId: id, estadoAnterior: orden.estado, estadoNuevo: EstadoOrdenServicio.APROBADO, fechaCambio: new Date(), usuarioId: userId, empresaId: companyId, sucursalId: branchId, observaciones: `Cliente aprueba presupuesto v${version}.`, createdById: userId, updatedById: userId },
+        data: {
+          ordenId: id,
+          estado: EstadoOrdenServicio.APROBADO,
+          observaciones: `Cliente aprueba presupuesto v${version}.`,
+          fecha: new Date(),
+          realizadoPorId: userId,
+        },
       })
     }
     return { ok: true, aprobado }
@@ -739,34 +1085,42 @@ export async function aprobarPresupuestoCliente(request: FastifyRequest, id: str
 // ============================================================
 // DIAGNOSTICOS
 // ============================================================
-export async function addDiagnostico(request: FastifyRequest, id: string, payload: any) {
+export async function addDiagnostico(
+  request: FastifyRequest,
+  id: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
-  const texto = String(payload.diagnostico || '').trim()
+  const texto = String(payload.diagnostico || payload.detalle || '').trim()
   if (!texto) throw UNAUTH(400, 'diagnostico es obligatorio.')
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id, empresaId: companyId, deletedAt: null },
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
     const d = await tx.ordenDiagnostico.create({
       data: {
-        ordenServicioId: id,
+        ordenId: id,
         tecnicoId: toOptionalString(payload.tecnicoId),
-        fechaDiagnostico: new Date(),
-        diagnostico: texto,
-        recomendaciones: toOptionalString(payload.recomendaciones),
-        requiereRepuestos: Boolean(payload.requiereRepuestos ?? false),
-        empresaId: companyId,
-        sucursalId: branchId,
-        usuarioId: userId,
-        createdById: userId,
-        updatedById: userId,
+        detalle: texto,
+        fecha: new Date(),
+        creadoPorId: userId,
       },
     })
-    // Si estado era RECIBIDO → pasa a DIAGNOSTICO automáticamente (opcional)
-    if (orden.estado === EstadoOrdenServicio.RECIBIDO) {
-      await tx.ordenServicio.update({ where: { id }, data: { estado: EstadoOrdenServicio.DIAGNOSTICO, updatedById: userId } })
+    if (orden.estadoActual === EstadoOrdenServicio.RECIBIDO) {
+      await tx.ordenServicio.update({
+        where: { id },
+        data: { estadoActual: EstadoOrdenServicio.DIAGNÓSTICO, updatedById: userId },
+      })
       await tx.ordenEstadoHistorial.create({
-        data: { ordenServicioId: id, estadoAnterior: EstadoOrdenServicio.RECIBIDO, estadoNuevo: EstadoOrdenServicio.DIAGNOSTICO, fechaCambio: new Date(), usuarioId: userId, empresaId: companyId, sucursalId: branchId, observaciones: 'Diagnóstico inicial registrado.', createdById: userId, updatedById: userId },
+        data: {
+          ordenId: id,
+          estado: EstadoOrdenServicio.DIAGNÓSTICO,
+          observaciones: 'Diagnóstico inicial registrado.',
+          fecha: new Date(),
+          realizadoPorId: userId,
+        },
       })
     }
     return { diagnostico: d }
@@ -774,51 +1128,85 @@ export async function addDiagnostico(request: FastifyRequest, id: string, payloa
 }
 
 // ============================================================
-// ITEMS SERVICIO (REPUESTO → genera Kardex SALIDA; MO/SERVICIO/ACC no)
+// ITEMS SERVICIO
 // ============================================================
-export async function addOrdenItem(request: FastifyRequest, ordenId: string, payload: any) {
+export async function addOrdenItem(
+  request: FastifyRequest,
+  ordenId: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id: ordenId, empresaId: companyId, deletedAt: null }, select: ordenSelect })
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id: ordenId, empresaId: companyId, deletedAt: null },
+      include: ordenInclude,
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
     await addOrdenItemInternal(tx, orden as any, payload, userId, companyId, branchId)
-    return { item: await recalcularMontosOrden(tx, ordenId, userId, companyId, branchId) }
+    await recalcularMontosOrden(tx, ordenId, userId, companyId)
+    return getOrdenServicioFromTx(tx, ordenId)
   })
 }
+
 export async function deleteOrdenItem(request: FastifyRequest, itemId: string) {
   const { companyId, userId, branchId } = await requireBranchAuthContext(request)
   requirePermission(request, 'inventarioServicio.write')
-  return await prisma.$transaction(async (tx) => {
-    const item = await tx.ordenItemServicio.findFirst({ where: { id: itemId, empresaId: companyId, deletedAt: null } })
+  return await prisma.$transaction(async (tx: any) => {
+    const item = await tx.ordenItemServicio.findFirst({
+      where: { id: itemId, deletedAt: null },
+    })
     if (!item) throw UNAUTH(404, 'Item no existe.')
-    // Si era REPUESTO y tenía loteId: devolver stock (MovimientoInventario ORIGEN DEVOLUCION)
     if (item.tipo === TipoItemOrdenServicio.REPUESTO && item.loteId && item.productoId) {
-      const qty = Math.max(0, Number(item.cantidad || 0))
+      const qty = Math.max(0, decimalToNumber(item.cantidad))
       if (qty > 0) {
-        const lote = await tx.lote.findFirst({ where: { id: item.loteId, empresaId: companyId, deletedAt: null } })
+        const lote = await tx.lote.findFirst({
+          where: { id: item.loteId, empresaId: companyId, deletedAt: null },
+        })
         if (lote) {
-          const costoUnit = lote.costoUnitario
           const prevStock = decimalToNumber(lote.stockDisponible)
           const nextStock = prevStock + qty
-          await tx.lote.update({ where: { id: lote.id }, data: { stockDisponible: toDecimal(nextStock, 4), updatedById: userId } })
-          const prodPrev = decimalToNumber(
-            (await tx.producto.findFirst({
-              where: { id: item.productoId, empresaId: companyId },
-              select: { stockTotal: true },
-            }))?.stockTotal || 0,
-          )
-          await tx.producto.update({ where: { id: item.productoId }, data: { stockTotal: toDecimal(prodPrev + qty, 4), updatedById: userId } })
+          await tx.lote.update({
+            where: { id: lote.id },
+            data: { stockDisponible: toDecimal(nextStock, 4), updatedById: userId },
+          })
+          const prod = await tx.producto.findFirst({
+            where: { id: item.productoId, empresaId: companyId, deletedAt: null },
+          })
+          if (prod && (prod as any).inventarios) {
+            // Stock por sucursal vía Inventario (Producto no tiene stockTotal propio)
+            const inv = await tx.inventario.findFirst({
+              where: {
+                productoId: prod.id,
+                sucursalId: branchId,
+                empresaId: companyId,
+                deletedAt: null,
+              },
+            })
+            if (inv) {
+              const invPrev = decimalToNumber(inv.stockActual)
+              await tx.inventario.update({
+                where: { id: inv.id },
+                data: {
+                  stockActual: toDecimal(invPrev + qty, 4),
+                  updatedById: userId,
+                },
+              })
+            }
+          }
           await tx.movimientoInventario.create({
             data: {
-              sucursalId: branchId, productoId: item.productoId, loteId: item.loteId,
-              tipo: TipoMovimientoInventario.INGRESO,
+              sucursalId: branchId,
+              productoId: item.productoId,
+              loteId: item.loteId,
+              tipo: TipoMovimientoInventario.ENTRADA,
               origen: OrigenMovimientoInventario.SERVICIO_TECNICO_DEVOLUCION,
-              cantidad: toDecimal(qty, 4) as any,
-              costoUnitario: costoUnit,
-              stockResultante: toDecimal(nextStock, 4),
-              referencia: `Devolución ${item.id.slice(0, 6)} OS`,
-              ordenServicioId: item.ordenServicioId,
+              cantidad: toDecimal(qty, 4),
+              costoUnitario: lote.costoUnitario
+                ? toDecimal(decimalToNumber(lote.costoUnitario), 6)
+                : undefined,
+              referencia: `Devolución OS item ${item.id.slice(0, 6)}`,
+              ordenServicioId: item.ordenId,
               itemOrdenServicioId: item.id,
               createdById: userId,
               updatedById: userId,
@@ -827,15 +1215,23 @@ export async function deleteOrdenItem(request: FastifyRequest, itemId: string) {
         }
       }
     }
-    await tx.ordenItemServicio.update({ where: { id: item.id }, data: { deletedAt: new Date(), updatedById: userId } })
-    return { ok: true, item: await recalcularMontosOrden(tx, item.ordenServicioId, userId, companyId, branchId) }
+    await tx.ordenItemServicio.update({
+      where: { id: item.id },
+      data: { deletedAt: new Date(), actualizadoPorId: userId },
+    })
+    await recalcularMontosOrden(tx, item.ordenId, userId, companyId)
+    return getOrdenServicioFromTx(tx, item.ordenId)
   })
 }
 
 // ============================================================
-// PAGOS ORDEN (1:N) + MOVIMIENTO_CAJA INGRESO 1:1 UNIQUE
+// PAGOS ORDEN
 // ============================================================
-export async function registrarPagoOrden(request: FastifyRequest, id: string, payload: any) {
+export async function registrarPagoOrden(
+  request: FastifyRequest,
+  id: string,
+  payload: any,
+) {
   const { companyId, branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'pagosOrdenServicio.write')
   const monto = Number(payload.monto || 0)
@@ -843,27 +1239,46 @@ export async function registrarPagoOrden(request: FastifyRequest, id: string, pa
   if (monto <= 0) throw UNAUTH(400, 'monto > 0 es obligatorio.')
   if (!formaPagoId) throw UNAUTH(400, 'formaPagoId es obligatorio.')
   const fechaPago = payload.fechaPago ? new Date(payload.fechaPago) : new Date()
-  return await prisma.$transaction(async (tx) => {
-    const orden = await tx.ordenServicio.findFirst({ where: { id, empresaId: companyId, deletedAt: null } })
+
+  return await prisma.$transaction(async (tx: any) => {
+    const orden = await tx.ordenServicio.findFirst({
+      where: { id, empresaId: companyId, deletedAt: null },
+    })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
-    const fp = await tx.formaPago.findFirst({ where: { id: formaPagoId, empresaId: companyId, deletedAt: null, activo: true } })
+    const fp = await tx.formaPago.findFirst({
+      where: { id: formaPagoId, empresaId: companyId, deletedAt: null, activo: true },
+    })
     if (!fp) throw UNAUTH(404, 'Forma de pago no existe.')
-    // Determinar apertura caja vigente en sucursal
-    // Requisito: debe haber una apertura de caja abierta.
     const apertura = await tx.aperturaCaja.findFirst({
-      where: { deletedAt: null, caja: { sucursalId: branchId, empresaId: companyId, activo: true }, estado: 'ABIERTA' as any },
+      where: {
+        deletedAt: null,
+        caja: { sucursalId: branchId, empresaId: companyId, activo: true },
+        estado: 'ABIERTA',
+      },
       orderBy: { fechaApertura: 'desc' },
     })
-    if (!apertura) throw UNAUTH(409, 'No hay una caja abierta en la sucursal. Abre caja antes de registrar pagos.')
-    const totalActual = decimalToNumber(orden.total)
-    const pagadoActual = (await tx.ordenServicioPago.aggregate({ _sum: { monto: true }, where: { ordenServicioId: id, deletedAt: null } }))._sum.monto
-    const totalPagado = decimalToNumber(pagadoActual)
+    if (!apertura)
+      throw UNAUTH(409, 'No hay una caja abierta en la sucursal. Abre caja antes de registrar pagos.')
+
+    const totalActual = decimalToNumber(orden.totalOrden)
+    const sum = (
+      await tx.ordenServicioPago.aggregate({
+        _sum: { monto: true },
+        where: { ordenId: id, deletedAt: null },
+      })
+    )._sum.monto
+    const totalPagado = decimalToNumber(sum)
     const saldo = Math.max(0, roundMoney(totalActual - totalPagado))
-    if (monto - saldo > 0.005) throw UNAUTH(409, `Monto S/ ${monto.toFixed(2)} excede saldo pendiente S/ ${saldo.toFixed(2)}.`)
+    if (monto - saldo > 0.005)
+      throw UNAUTH(
+        409,
+        `Monto S/ ${monto.toFixed(2)} excede saldo pendiente S/ ${saldo.toFixed(2)}.`,
+      )
+
     const mov = await tx.movimientoCaja.create({
       data: {
         aperturaCajaId: apertura.id,
-        tipo: TipoMovimientoCaja.SERVICIO_TECNICO,
+        tipo: TipoMovimientoCaja.INGRESO,
         operacion: OperacionCaja.INGRESO,
         monto: toDecimal(monto, 2),
         fechaMovimiento: fechaPago,
@@ -874,24 +1289,35 @@ export async function registrarPagoOrden(request: FastifyRequest, id: string, pa
         updatedById: userId,
       },
     })
+
     const pago = await tx.ordenServicioPago.create({
       data: {
-        ordenServicioId: id,
+        ordenId: id,
         formaPagoId: fp.id,
         monto: toDecimal(monto, 2),
         fechaPago,
+        referencia: toOptionalString(payload.referencia),
         observaciones: toOptionalString(payload.observaciones),
-        movimientoCajaId: mov.id, // UNIQUE constraint garantiza 1:1
+        movimientoCajaId: mov.id,
         empresaId: companyId,
         sucursalId: branchId,
         createdById: userId,
         updatedById: userId,
       },
     })
-    const nuevoPagado = totalPagado + monto
-    const nuevoSaldo = Math.max(0, roundMoney(totalActual - nuevoPagado))
-    await tx.ordenServicio.update({ where: { id }, data: { saldoPendiente: toDecimal(nuevoSaldo, 2), updatedById: userId } })
-    return { pago, orden: await tx.ordenServicio.findFirst({ where: { id }, select: ordenSelect }) }
+
+    const nuevoTotalPagado = totalPagado + monto
+    const nuevoSaldo = Math.max(0, roundMoney(totalActual - nuevoTotalPagado))
+    await tx.ordenServicio.update({
+      where: { id },
+      data: {
+        totalPagado: toDecimal(nuevoTotalPagado, 2),
+        saldoPendiente: toDecimal(nuevoSaldo, 2),
+        updatedById: userId,
+      },
+    })
+
+    return { pago, ...(await getOrdenServicioFromTx(tx, id)) }
   })
 }
 
@@ -899,103 +1325,141 @@ export async function registrarPagoOrden(request: FastifyRequest, id: string, pa
 // HELPERS INTERNOS
 // ============================================================
 function addDays(d: Date, n: number): Date {
-  const r = new Date(d); r.setDate(r.getDate() + (Number(n) || 0)); return r
+  const r = new Date(d)
+  r.setDate(r.getDate() + (Number(n) || 0))
+  return r
 }
+
 async function clientIgvDefault(empresaId: string): Promise<number> {
   try {
-    const emp = await prisma.empresa.findFirst({ where: { id: empresaId }, select: { igvPorDefecto: true } })
-    return Number(emp?.igvPorDefecto || 18)
-  } catch { return 18 }
-}
-function calcMontosDesdeItems(items: any[], igvPorc: number) {
-  if (!items || !items.length) return { totalManoObra: 0, totalRepuestos: 0, totalServicios: 0, subTotal: 0 }
-  let mo = 0, rep = 0, ser = 0, sub = 0
-  for (const it of items) {
-    const tipo: TipoItemOrdenServicio = it.tipo || TipoItemOrdenServicio.MANO_OBRA
-    const qty = Math.max(0, Number(it.cantidad || 1) || 1)
-    const pu = Math.max(0, Number(it.precioUnitario || 0) || 0)
-    const totalLinea = roundMoney(qty * pu)
-    if (tipo === TipoItemOrdenServicio.MANO_OBRA) mo += totalLinea
-    else if (tipo === TipoItemOrdenServicio.REPUESTO) rep += totalLinea
-    else ser += totalLinea
-    sub += totalLinea
+    const emp = await prisma.empresa.findFirst({
+      where: { id: empresaId },
+      select: { igvPorDefecto: true } as any,
+    })
+    return Number((emp as any)?.igvPorDefecto || 18)
+  } catch {
+    return 18
   }
-  return { totalManoObra: mo, totalRepuestos: rep, totalServicios: ser, subTotal: roundMoney(sub) }
 }
 
 async function addOrdenItemInternal(
-  tx: Prisma.TransactionClient,
+  tx: any,
   orden: { id: string; empresaId: string; sucursalId: string; numeroOrden: string },
   payload: any,
   userId: string,
   companyId: string,
   branchId: string,
 ) {
-  const tipo: TipoItemOrdenServicio = payload.tipo || TipoItemOrdenServicio.MANO_OBRA
+  const tipo: TipoItemOrdenServicio =
+    payload.tipo || TipoItemOrdenServicio.MANO_OBRA
   const qty = Math.max(0, Number(payload.cantidad || 1) || 1)
   const pu = Math.max(0, Number(payload.precioUnitario || 0) || 0)
-  const totalLinea = roundMoney(qty * pu)
+  const descto = Math.max(0, Number(payload.descuentoItem || 0) || 0)
+  const baseLinea = roundMoney(qty * pu)
+  const totalLinea = roundMoney(Math.max(0, baseLinea - descto))
+  const igvItem = roundMoney((Number(payload.igvItem ?? 0)) || 0)
   const dataLinea: any = {
-    ordenServicioId: orden.id,
+    ordenId: orden.id,
     tipo,
-    descripcion: toOptionalString(payload.descripcion) || (tipo === TipoItemOrdenServicio.MANO_OBRA ? 'Mano de obra' : tipo === TipoItemOrdenServicio.REPUESTO ? 'Repuesto' : tipo === TipoItemOrdenServicio.SERVICIO_ADICIONAL ? 'Servicio Adicional' : 'Accesorio entregado'),
-    cantidad: toDecimal(qty, 4) as any,
+    descripcion:
+      toOptionalString(payload.descripcion) ||
+      (tipo === TipoItemOrdenServicio.MANO_OBRA
+        ? 'Mano de obra'
+        : tipo === TipoItemOrdenServicio.REPUESTO
+          ? 'Repuesto'
+          : tipo === TipoItemOrdenServicio.SERVICIO_ADICIONAL
+            ? 'Servicio adicional'
+            : 'Accesorio entregado'),
+    cantidad: toDecimal(qty, 4),
     precioUnitario: toDecimal(pu, 2),
+    descuentoItem: toDecimal(descto, 2),
+    impuestoItem: toDecimal(igvItem, 2),
     subtotal: toDecimal(totalLinea, 2),
-    estado: 'PENDIENTE',
+    horasTrabajadas: payload.horasTrabajadas
+      ? toDecimal(payload.horasTrabajadas, 2)
+      : undefined,
+    fechaRealizacion: payload.fechaRealizacion
+      ? new Date(payload.fechaRealizacion)
+      : undefined,
     observaciones: toOptionalString(payload.observaciones),
-    empresaId: companyId,
-    sucursalId: branchId,
-    createdById: userId,
-    updatedById: userId,
-    tecnicoAsignadoId: toOptionalString(payload.tecnicoAsignadoId),
-    garantiaDias: Number(payload.garantiaDias || 0) || 0,
+    activo: true,
+    creadoPorId: userId,
+    actualizadoPorId: userId,
+    tecnicoId: toOptionalString(payload.tecnicoAsignadoId || payload.tecnicoId),
+    tipoServicioId: toOptionalString(payload.tipoServicioId),
   }
+
   if (tipo === TipoItemOrdenServicio.REPUESTO) {
-    // Requiere productoId + loteId (solo lotes existentes, stock actualiza).
     const productoId = String(payload.productoId || '').trim()
-    const loteId = String(payload.loteId || '').trim()
+    const loteId = toOptionalString(payload.loteId)
     if (!productoId) throw UNAUTH(400, 'Item tipo REPUESTO requiere productoId.')
-    const prod = await tx.producto.findFirst({ where: { id: productoId, empresaId: companyId, deletedAt: null } })
+    const prod = await tx.producto.findFirst({
+      where: { id: productoId, empresaId: companyId, deletedAt: null },
+    })
     if (!prod) throw UNAUTH(404, 'Producto (repuesto) no existe.')
-    // Rechazar si el uso del producto no permite servicio técnico
     const uso: any = (prod as any).usoServicioTecnico || 'AMBOS'
-    if (uso === 'SOLO_VENTA') throw UNAUTH(409, 'Producto está marcado como SOLO_VENTA, no puede ser repuesto.')
-    let costoUnitario = prod.costoUnitarioPromedio
+    if (uso === 'SOLO_VENTA')
+      throw UNAUTH(409, 'Producto está marcado como SOLO_VENTA, no puede ser repuesto.')
+    let costoUnitario = decimalToNumber((loteId ? null : null) as any)
     let nextStockLote = 0
     let stockAnteriorLote = 0
     let lote: any = null
     if (loteId) {
-      lote = await tx.lote.findFirst({ where: { id: loteId, productoId, empresaId: companyId, deletedAt: null } })
+      lote = await tx.lote.findFirst({
+        where: { id: loteId, productoId, empresaId: companyId, deletedAt: null },
+      })
       if (!lote) throw UNAUTH(404, 'Lote del repuesto no existe.')
       dataLinea.loteId = lote.id
-      costoUnitario = lote.costoUnitario
+      costoUnitario = decimalToNumber(lote.costoUnitario)
       stockAnteriorLote = decimalToNumber(lote.stockDisponible)
-      if (stockAnteriorLote - qty < -0.0001) throw UNAUTH(409, `Stock insuficiente en lote: ${stockAnteriorLote} < ${qty}.`)
+      if (stockAnteriorLote - qty < -0.0001)
+        throw UNAUTH(409, `Stock insuficiente en lote: ${stockAnteriorLote} < ${qty}.`)
       nextStockLote = stockAnteriorLote - qty
-      await tx.lote.update({ where: { id: lote.id }, data: { stockDisponible: toDecimal(nextStockLote, 4), updatedById: userId } })
+      await tx.lote.update({
+        where: { id: lote.id },
+        data: { stockDisponible: toDecimal(nextStockLote, 4), updatedById: userId },
+      })
     }
     dataLinea.productoId = prod.id
-    dataLinea.costoUnitario = costoUnitario
-    // Actualizar producto stock total (si había lote)
-    if (lote) {
-      const stPrev = decimalToNumber((await tx.producto.findFirst({ where: { id: productoId }, select: { stockTotal: true } }))?.stockTotal || 0)
-      await tx.producto.update({ where: { id: productoId }, data: { stockTotal: toDecimal(Math.max(0, stPrev - qty), 4), updatedById: userId } })
+    dataLinea.costoUnitarioRef = costoUnitario
+      ? toDecimal(costoUnitario, 6)
+      : undefined
+
+    if (loteId) {
+      const inv = await tx.inventario.findFirst({
+        where: {
+          productoId: prod.id,
+          sucursalId: branchId,
+          empresaId: companyId,
+          deletedAt: null,
+        },
+      })
+      if (inv) {
+        const invPrev = decimalToNumber(inv.stockActual)
+        await tx.inventario.update({
+          where: { id: inv.id },
+          data: {
+            stockActual: toDecimal(Math.max(0, invPrev - qty), 4),
+            updatedById: userId,
+          },
+        })
+      }
     }
-    // Item lo creamos primero para tener su id y referenciarlo en Kardex
+
     const item = await tx.ordenItemServicio.create({ data: dataLinea })
-    // Generar Kardex SALIDA por el lote, origen SERVICIO_TECNICO_CONSUMO
-    if (lote) {
+    if (loteId) {
       await tx.movimientoInventario.create({
         data: {
-          sucursalId: branchId, productoId: prod.id, loteId: lote.id,
-          motivoId: await getMotivoConsumoIdRT(tx),
+          sucursalId: branchId,
+          productoId: prod.id,
+          loteId: lote!.id,
           tipo: TipoMovimientoInventario.SALIDA,
           origen: OrigenMovimientoInventario.SERVICIO_TECNICO_CONSUMO,
-          cantidad: toDecimal(qty, 4) as any,
-          costoUnitario: costoUnitario,
-          stockResultante: toDecimal(nextStockLote, 4),
-          referencia: `Consumo repuesto OS ${orden.numeroOrden} ${prod.nombre.slice(0, 32)}`,
+          cantidad: toDecimal(qty, 4),
+          costoUnitario: costoUnitario
+            ? toDecimal(costoUnitario, 6)
+            : undefined,
+          referencia: `Consumo repuesto OS ${orden.numeroOrden} ${String(prod.nombre || '').slice(0, 32)}`,
           observaciones: toOptionalString(payload.observacionesKardex),
           ordenServicioId: orden.id,
           itemOrdenServicioId: item.id,
@@ -1006,55 +1470,61 @@ async function addOrdenItemInternal(
     }
     return item
   } else {
-    // MO / SERVICIO_ADICIONAL / ACCESORIO_ENTREGADO no afectan kardex
     return await tx.ordenItemServicio.create({ data: dataLinea })
   }
 }
 
-async function getMotivoConsumoIdRT(tx: Prisma.TransactionClient | PrismaClient): Promise<string | null> {
-  try {
-    const r = await prisma.motivoMovimientoInventario.findFirst({ where: { codigo: 'CONSUMO_ORDEN_SERVICIO' } })
-    return r?.id || null
-  } catch { return null }
-}
-
 async function recalcularMontosOrden(
-  tx: Prisma.TransactionClient,
+  tx: any,
   ordenId: string,
   userId: string,
   empresaId: string,
-  _sucursalId: string,
 ) {
-  const items = await tx.ordenItemServicio.findMany({ where: { ordenServicioId: ordenId, deletedAt: null } })
-  let mo = 0, rep = 0, ser = 0
+  const items = await tx.ordenItemServicio.findMany({
+    where: { ordenId, deletedAt: null },
+  })
+  let mo = 0
+  let rep = 0
+  let ser = 0
+  let desc = 0
   for (const it of items) {
-    const t = Number(it.subTotal || 0)
+    const t = decimalToNumber(it.subtotal)
+    const d = decimalToNumber((it as any).descuentoItem || 0)
+    desc += d
     if (it.tipo === TipoItemOrdenServicio.MANO_OBRA) mo += t
     else if (it.tipo === TipoItemOrdenServicio.REPUESTO) rep += t
     else ser += t
   }
-  const sub = roundMoney(mo + rep + ser)
-  const orden = await tx.ordenServicio.findFirst({ where: { id: ordenId, empresaId } })
+  const sub = roundMoney(Math.max(0, mo + rep + ser))
+  const orden = await tx.ordenServicio.findFirst({
+    where: { id: ordenId, empresaId },
+  })
   if (!orden) throw UNAUTH(404, 'Orden no existe al recalcular.')
-  const igvPorc = decimalToNumber(orden.igvPorcentaje) || 18
-  const igv = roundMoney(sub * (igvPorc / 100))
+  const igvPct =
+    decimalToNumber(orden.impuestoTotal) > 0 ? 18 : Number(process.env.IGV_DEFAULT || 18) || 18
+  const igv = roundMoney(sub * (igvPct / 100))
   const total = roundMoney(sub + igv)
-  // Recalcular saldo pendiente con base a pagos actuales
-  const pagadoSum = (await tx.ordenServicioPago.aggregate({ _sum: { monto: true }, where: { ordenServicioId: ordenId, deletedAt: null } }))._sum.monto
-  const pagado = decimalToNumber(pagadoSum)
+  const pagSum = (
+    await tx.ordenServicioPago.aggregate({
+      _sum: { monto: true },
+      where: { ordenId, deletedAt: null },
+    })
+  )._sum.monto
+  const pagado = decimalToNumber(pagSum)
   const saldo = Math.max(0, roundMoney(total - pagado))
   return await tx.ordenServicio.update({
     where: { id: ordenId },
     data: {
-      montoManoObra: toDecimal(mo, 2),
-      montoRepuestos: toDecimal(rep, 2),
-      montoServicios: toDecimal(ser, 2),
-      subTotal: toDecimal(sub, 2),
-      igvMonto: toDecimal(igv, 2),
-      total: toDecimal(total, 2),
+      subtotalRepuestos: toDecimal(rep, 2),
+      subtotalManoObra: toDecimal(mo, 2),
+      subtotalServiciosAdic: toDecimal(ser, 2),
+      descuentoTotal: toDecimal(desc, 2),
+      impuestoTotal: toDecimal(igv, 2),
+      totalOrden: toDecimal(total, 2),
+      totalPagado: toDecimal(pagado, 2),
       saldoPendiente: toDecimal(saldo, 2),
       updatedById: userId,
     },
-    select: ordenSelect,
+    include: ordenInclude,
   })
 }

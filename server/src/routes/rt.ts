@@ -24,12 +24,12 @@ const FiltersOSList = z.object({
 
 export async function rtRoutes(app: FastifyInstance) {
   // ================ ORDENES SERVICIO ================
-  app.get('/ordenes-servicio', async (req, reply) => {
+  app.get('/ordenes-servicio', async (req, _reply) => {
     const filters = FiltersOSList.parse(req.query || {}) as any
     return listOrdenesServicio(req, filters)
   })
 
-  app.get('/ordenes-servicio/:id', async (req, reply) => {
+  app.get('/ordenes-servicio/:id', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     return getOrdenServicio(req, p.id)
   })
@@ -49,37 +49,37 @@ export async function rtRoutes(app: FastifyInstance) {
     items: z.array(z.any()).optional().default([]),
     descripcionPresupuesto: z.string().optional().nullable(),
   }).strict()
-  app.post('/ordenes-servicio', async (req, reply) => {
+  app.post('/ordenes-servicio', async (req, _reply) => {
     const body = createOSSchema.parse(req.body)
     return createOrdenServicio(req, body)
   })
 
-  app.put('/ordenes-servicio/:id/estado', async (req, reply) => {
+  app.put('/ordenes-servicio/:id/estado', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = z.object({ estado: z.enum(['RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_REPARACION','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','ENTREGADO','RECHAZADO','CANCELADO','EN_GARANTIA']), observaciones: z.string().optional().nullable(), terminosGarantia: z.string().optional().nullable() }).strict().parse(req.body)
     return cambiarEstadoOrden(req, p.id, body)
   })
 
-  app.put('/ordenes-servicio/:id/asignar-tecnico', async (req, reply) => {
+  app.put('/ordenes-servicio/:id/asignar-tecnico', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = z.object({ tecnicoId: uuidP, observaciones: z.string().optional().nullable() }).strict().parse(req.body)
     return asignarTecnicoOrden(req, p.id, body)
   })
 
   // PRESUPUESTOS
-  app.post('/ordenes-servicio/:id/presupuestos', async (req, reply) => {
+  app.post('/ordenes-servicio/:id/presupuestos', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = z.object({ descripcion: z.string().optional().nullable(), montoManoObra: z.number().min(0).optional(), montoRepuestos: z.number().min(0).optional(), montoServicios: z.number().min(0).optional(), subTotal: z.number().min(0).optional(), igvPorcentaje: z.number().min(0).optional() }).strict().parse(req.body)
     return crearVersionPresupuesto(req, p.id, body)
   })
-  app.put('/ordenes-servicio/:id/presupuestos/aprobar', async (req, reply) => {
+  app.put('/ordenes-servicio/:id/presupuestos/aprobar', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = z.object({ version: z.number().int().min(1), accion: z.enum(['APROBAR','RECHAZAR']).default('APROBAR'), comentarios: z.string().optional().nullable() }).strict().parse(req.body)
     return aprobarPresupuestoCliente(req, p.id, body)
   })
 
   // DIAGNOSTICOS
-  app.post('/ordenes-servicio/:id/diagnosticos', async (req, reply) => {
+  app.post('/ordenes-servicio/:id/diagnosticos', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = z.object({ diagnostico: z.string().min(1), recomendaciones: z.string().optional().nullable(), requiereRepuestos: z.boolean().optional(), tecnicoId: uuidP.optional().nullable() }).strict().parse(req.body)
     return addDiagnostico(req, p.id, body)
@@ -98,18 +98,18 @@ export async function rtRoutes(app: FastifyInstance) {
     garantiaDias: z.number().int().min(0).optional(),
     observacionesKardex: z.string().optional().nullable(),
   }).strict()
-  app.post('/ordenes-servicio/:id/items', async (req, reply) => {
+  app.post('/ordenes-servicio/:id/items', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = itemSchema.parse(req.body)
     return addOrdenItem(req, p.id, body)
   })
-  app.delete('/ordenes-servicio/items/:itemId', async (req, reply) => {
+  app.delete('/ordenes-servicio/items/:itemId', async (req, _reply) => {
     const p = z.object({ itemId: uuidP }).parse(req.params)
     return deleteOrdenItem(req, p.itemId)
   })
 
   // PAGOS ORDEN
-  app.post('/ordenes-servicio/:id/pagos', async (req, reply) => {
+  app.post('/ordenes-servicio/:id/pagos', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
     const body = z.object({ monto: z.number().positive(), formaPagoId: uuidP, fechaPago: z.string().optional(), observaciones: z.string().optional().nullable() }).strict().parse(req.body)
     return registrarPagoOrden(req, p.id, body)
