@@ -1150,7 +1150,7 @@ export async function addOrdenItem(
 }
 
 export async function deleteOrdenItem(request: FastifyRequest, itemId: string) {
-  const { companyId, userId, branchId: _branchId } = await requireBranchAuthContext(request)
+  const { companyId, userId, branchId } = await requireBranchAuthContext(request)
   requirePermission(request, 'inventarioServicio.write')
   return await prisma.$transaction(async (tx: any) => {
     const item = await tx.ordenItemServicio.findFirst({
