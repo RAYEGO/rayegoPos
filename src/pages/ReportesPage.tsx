@@ -44,7 +44,7 @@ import type {
   ReportsCategory,
   SalesReportResponse,
 } from '@/types/reports'
-import type { EstadoOrdenServicio, GarantiaOrden, OrdenServicio, Tecnico } from '@/types/rayegotech'
+import type { EstadoOrdenServicio, GarantiaOrden, OrdenServicio } from '@/types/rayegotech'
 
 type ReportPayload =
   | SalesReportResponse
@@ -418,18 +418,12 @@ export function ReportesPage() {
       let tecnicoNombre = 'Sin asignar'
       if (o.tecnicoAsignado?.usuario) {
         const u = o.tecnicoAsignado.usuario
-        tecnicoNombre =
-          'nombres' in u
-            ? `${u.nombres} ${u.apellidos}`.trim()
-            : `${u.firstName} ${u.lastName}`.trim()
+        tecnicoNombre = `${u.nombres} ${u.apellidos}`.trim()
       } else if (o.asignacionesTecnico?.length) {
         const a = o.asignacionesTecnico[0]
         const u = a.tecnico?.usuario
         if (u) {
-          tecnicoNombre =
-            'nombres' in u
-              ? `${u.nombres} ${u.apellidos}`.trim()
-              : `${u.firstName} ${u.lastName}`.trim()
+          tecnicoNombre = `${u.nombres} ${u.apellidos}`.trim()
         }
       }
       const current = porTecnico.get(tecnicoId) ?? {
@@ -1397,7 +1391,7 @@ export function ReportesPage() {
                         type="button"
                         size="xl"
                         variant="outline"
-                        onClick={() => void Promise.all([loadOrdenesRT(), loadTecnicosRT()])}
+                        onClick={() => void loadOrdenesRT()}
                       >
                         <BarChart3 className="mr-2 h-5 w-5" />
                         Actualizar

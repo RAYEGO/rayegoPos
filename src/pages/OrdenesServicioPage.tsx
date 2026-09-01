@@ -739,27 +739,27 @@ export function OrdenesServicioPage() {
                                   <div>
                                     <p className="text-muted-foreground">Mano obra</p>
                                     <p className="font-medium">
-                                      {formatMoneda(p.costoManoObra)}
+                                      {formatMoneda(p.montoManoObra)}
                                     </p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground">Repuestos est.</p>
                                     <p className="font-medium">
-                                      {formatMoneda(p.costoRepuestosEstimado)}
+                                      {formatMoneda(p.montoRepuestos)}
                                     </p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground">Total</p>
                                     <p className="font-semibold">
-                                      {formatMoneda(p.costoTotal)}
+                                      {formatMoneda(p.total)}
                                     </p>
                                   </div>
                                 </div>
-                                {p.detalleTrabajo ? (
+                                {p.descripcion ? (
                                   <Textarea
                                     readOnly
                                     className="min-h-[70px] bg-muted/30"
-                                    value={p.detalleTrabajo}
+                                    value={p.descripcion}
                                   />
                                 ) : null}
                               </div>
@@ -796,10 +796,10 @@ export function OrdenesServicioPage() {
                                 {(selectedOrden.items as OrdenItem[]).map((it) => (
                                   <TableRow key={it.id}>
                                     <TableCell>
-                                      <Badge variant="outline">{it.tipoItem}</Badge>
+                                      <Badge variant="outline">{it.tipo}</Badge>
                                     </TableCell>
                                     <TableCell>
-                                      {it.nombreProducto ||
+                                      {it.producto?.nombre ||
                                         it.descripcion ||
                                         'Concepto'}
                                     </TableCell>
@@ -849,7 +849,7 @@ export function OrdenesServicioPage() {
                                     <TableCell className="text-xs text-muted-foreground">
                                       {formatFecha(p.fechaPago)}
                                     </TableCell>
-                                    <TableCell>{p.metodoPago || '—'}</TableCell>
+                                    <TableCell>{p.formaPago?.nombre || p.formaPagoId || '—'}</TableCell>
                                     <TableCell>{p.referencia || '—'}</TableCell>
                                     <TableCell className="text-right font-semibold text-emerald-600">
                                       {formatMoneda(p.monto)}
