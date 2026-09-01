@@ -824,7 +824,7 @@ export async function cambiarEstadoOrden(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.cambioEstado')
   const estadoNuevo: EstadoOrdenServicio | undefined = payload?.estado
   if (!estadoNuevo) throw UNAUTH(400, 'Parámetro estado es obligatorio.')
@@ -841,9 +841,9 @@ export async function cambiarEstadoOrden(
     }
     if (
       estadoAnterior === EstadoOrdenServicio.ENTREGADO &&
-      estadoNuevo !== EstadoOrdenServicio.EN_GARANTÍA
+      estadoNuevo !== EstadoOrdenServicio.EN_GARANTIA
     ) {
-      throw UNAUTH(409, 'Orden ENTREGADA solo puede ir a EN_GARANTÍA.')
+      throw UNAUTH(409, 'Orden ENTREGADA solo puede ir a EN_GARANTIA.')
     }
     if (estadoNuevo === EstadoOrdenServicio.ENTREGADO) {
       const saldo = decimalToNumber(orden.saldoPendiente)
@@ -851,10 +851,10 @@ export async function cambiarEstadoOrden(
         throw UNAUTH(409, `No se puede ENTREGAR. Saldo pendiente S/ ${saldo.toFixed(2)}.`)
     }
     if (
-      estadoNuevo === EstadoOrdenServicio.EN_GARANTÍA &&
+      estadoNuevo === EstadoOrdenServicio.EN_GARANTIA &&
       estadoAnterior !== EstadoOrdenServicio.ENTREGADO
     ) {
-      throw UNAUTH(409, 'EN_GARANTÍA solo aplica después de ENTREGADO.')
+      throw UNAUTH(409, 'EN_GARANTIA solo aplica después de ENTREGADO.')
     }
 
     if (estadoNuevo === EstadoOrdenServicio.ENTREGADO) {
@@ -903,7 +903,7 @@ export async function asignarTecnicoOrden(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.cambioEstado')
   const tecnicoId = String(payload.tecnicoId || '').trim()
   if (!tecnicoId) throw UNAUTH(400, 'tecnicoId es obligatorio.')
@@ -950,7 +950,7 @@ export async function crearVersionPresupuesto(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
   return await prisma.$transaction(async (tx: any) => {
     const orden = await tx.ordenServicio.findFirst({
@@ -987,21 +987,21 @@ export async function crearVersionPresupuesto(
     })
     const estadosCambioPend = [
       EstadoOrdenServicio.RECIBIDO,
-      EstadoOrdenServicio.DIAGNÓSTICO,
+      EstadoOrdenServicio.DIAGNOSTICO,
       EstadoOrdenServicio.PRESUPUESTO,
     ]
     if (estadosCambioPend.includes(orden.estadoActual)) {
       await tx.ordenServicio.update({
         where: { id },
         data: {
-          estadoActual: EstadoOrdenServicio.ESPERANDO_APROBACIÓN,
+          estadoActual: EstadoOrdenServicio.ESPERANDO_APROBACION,
           updatedById: userId,
         },
       })
       await tx.ordenEstadoHistorial.create({
         data: {
           ordenId: id,
-          estado: EstadoOrdenServicio.ESPERANDO_APROBACIÓN,
+          estado: EstadoOrdenServicio.ESPERANDO_APROBACION,
           observaciones: `Se creó presupuesto v${version}.`,
           fecha: new Date(),
           realizadoPorId: userId,
@@ -1017,7 +1017,7 @@ export async function aprobarPresupuestoCliente(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.aprobar')
   const version = Number(payload.version) || 0
   const accion = String(payload.accion || 'APROBAR').toUpperCase()
@@ -1090,7 +1090,7 @@ export async function addDiagnostico(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
   const texto = String(payload.diagnostico || payload.detalle || '').trim()
   if (!texto) throw UNAUTH(400, 'diagnostico es obligatorio.')
@@ -1111,12 +1111,12 @@ export async function addDiagnostico(
     if (orden.estadoActual === EstadoOrdenServicio.RECIBIDO) {
       await tx.ordenServicio.update({
         where: { id },
-        data: { estadoActual: EstadoOrdenServicio.DIAGNÓSTICO, updatedById: userId },
+        data: { estadoActual: EstadoOrdenServicio.DIAGNOSTICO, updatedById: userId },
       })
       await tx.ordenEstadoHistorial.create({
         data: {
           ordenId: id,
-          estado: EstadoOrdenServicio.DIAGNÓSTICO,
+          estado: EstadoOrdenServicio.DIAGNOSTICO,
           observaciones: 'Diagnóstico inicial registrado.',
           fecha: new Date(),
           realizadoPorId: userId,
@@ -1150,7 +1150,7 @@ export async function addOrdenItem(
 }
 
 export async function deleteOrdenItem(request: FastifyRequest, itemId: string) {
-  const { companyId, userId, branchId } = await requireBranchAuthContext(request)
+  const { companyId, userId, branchId: _branchId } = await requireBranchAuthContext(request)
   requirePermission(request, 'inventarioServicio.write')
   return await prisma.$transaction(async (tx: any) => {
     const item = await tx.ordenItemServicio.findFirst({
