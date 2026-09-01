@@ -94,7 +94,7 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.ordenesServicio,
     component: OrdenesServicioPage,
-    navLabel: 'Órdenes Servicio',
+    navLabel: 'Servicio Técnico',
     navIcon: ClipboardCheck,
     navSection: 'Operaciones',
     access: {
