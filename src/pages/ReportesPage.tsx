@@ -7,6 +7,7 @@ import {
   SlidersHorizontal,
   Users,
   WalletCards,
+  Wrench,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,10 +29,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { useAuth } from '@/hooks/useAuth'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { reportsService } from '@/services/reportsService'
+import { rtService } from '@/services/rtService'
 import type {
   CashierReportResponse,
   InventoryReportResponse,
@@ -40,6 +44,7 @@ import type {
   ReportsCategory,
   SalesReportResponse,
 } from '@/types/reports'
+import type { EstadoOrdenServicio, GarantiaOrden, OrdenServicio, Tecnico } from '@/types/rayegotech'
 
 type ReportPayload =
   | SalesReportResponse
@@ -147,6 +152,15 @@ export function ReportesPage() {
   )
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  type TabPrincipal = 'ventas' | 'compras' | 'inventario' | 'caja' | 'servicio-tecnico'
+  type TabRT = 'ordenes-servicio' | 'rendimiento-tecnicos' | 'garantias'
+  const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('ventas')
+  const [tabRT, setTabRT] = useState<TabRT>('ordenes-servicio')
+  const [ordenesRT, setOrdenesRT] = useState<OrdenServicio[]>([])
+  const [tecnicosRT, setTecnicosRT] = useState<Tecnico[]>([])
+  const [ordenesRTLoading, setOrdenesRTLoading] = useState(false)
+  const [tecnicosRTLoading, setTecnicosRTLoading] = useState(false)
 
   const handleUnauthorized = useHandleUnauthorized('ReportesPage')
 
@@ -334,8 +348,162 @@ export function ReportesPage() {
     }
   }, [category, report])
 
+  useEffect(() => {
+    const mapa: Record<TabPrincipal, ReportsCategory> = {
+      ventas: 'VENTAS',
+      compras: 'COMPRAS',
+      inventario: 'INVENTARIO',
+      caja: 'CAJA',
+      'servicio-tecnico': 'VENTAS',
+    }
+    const nextCategory = mapa[tabPrincipal]
+    if (nextCategory !== category) {
+      setCategory(nextCategory)
+    }
+  }, [tabPrincipal, category])
+
+  useEffect(() => {
+    const mapa: Record<ReportsCategory, TabPrincipal> = {
+      VENTAS: 'ventas',
+      COMPRAS: 'compras',
+      INVENTARIO: 'inventario',
+      CAJA: 'caja',
+      USUARIOS: 'ventas',
+    }
+    if (mapa[category] && mapa[category] !== tabPrincipal) {
+      setTabPrincipal(mapa[category])
+    }
+  }, [category, tabPrincipal])
+
+  const loadOrdenesRT = useCallback(async () => {
+    if (!accessToken) return
+    setOrdenesRTLoading(true)
+    try {
+      const response = await rtService.listOrdenesServicio()
+      setOrdenesRT(response?.items ?? [])
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setOrdenesRT([])
+    } finally {
+      setOrdenesRTLoading(false)
+    }
+  }, [accessToken, handleUnauthorized])
+
+  const loadTecnicosRT = useCallback(async () => {
+    if (!accessToken) return
+    setTecnicosRTLoading(true)
+    try {
+      const response = await rtService.listTecnicos()
+      setTecnicosRT(response?.items ?? [])
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setTecnicosRT([])
+    } finally {
+      setTecnicosRTLoading(false)
+    }
+  }, [accessToken, handleUnauthorized])
+
+  useEffect(() => {
+    if (tabPrincipal === 'servicio-tecnico') {
+      void Promise.all([loadOrdenesRT(), loadTecnicosRT()])
+    }
+  }, [tabPrincipal, loadOrdenesRT, loadTecnicosRT])
+
+  const rtStats = useMemo(() => {
+    const ordenes = ordenesRT
+    const total = ordenes.length
+    const porEstado = new Map<string, number>()
+    const porTecnico = new Map<string, { nombre: string; total: number; entregadas: number; dias: number[]; totalMonto: number }>()
+    const garantiasActivas: Array<{ ordenNumero: string; vence: string | null; estado: 'ACTIVA' | 'VENCIDA' | 'SIN_GARANTIA' }> = []
+    const totalEntregadas = ordenes.filter((o) => o.estado === 'ENTREGADO').length
+    const entregadasConGarantia = ordenes.filter((o) => o.estado === 'ENTREGADO' && o.garantia).length
+    const montoTotalCerradas = ordenes
+      .filter((o) => ['ENTREGADO', 'EN_GARANTÍA', 'RECHAZADO', 'CANCELADO'].includes(o.estado))
+      .reduce((s, o) => s + (o.totalFinal ?? o.subtotal ?? 0), 0)
+
+    for (const o of ordenes) {
+      porEstado.set(o.estado, (porEstado.get(o.estado) ?? 0) + 1)
+      const tecnicoId = o.tecnicoId ?? ''
+      const tecnicoNombre = o.tecnico?.nombres ?? (tecnicoId ? 'Sin asignar' : 'Sin asignar')
+      const current = porTecnico.get(tecnicoId) ?? { nombre: tecnicoNombre, total: 0, entregadas: 0, dias: [], totalMonto: 0 }
+      current.total += 1
+      if (['ENTREGADO', 'EN_GARANTÍA'].includes(o.estado)) {
+        current.entregadas += 1
+        current.totalMonto += o.totalFinal ?? o.subtotal ?? 0
+        if (o.createdAt && o.fechaEntrega) {
+          const dias = Math.max(
+            0,
+            Math.ceil(
+              (new Date(String(o.fechaEntrega)).getTime() - new Date(String(o.createdAt)).getTime()) / 86400000,
+            ),
+          )
+          current.dias.push(dias)
+        }
+      }
+      porTecnico.set(tecnicoId, current)
+      if (o.garantia) {
+        const g: GarantiaOrden = o.garantia as GarantiaOrden
+        const vence = g.fechaFin
+        let estado: 'ACTIVA' | 'VENCIDA' | 'SIN_GARANTIA' = 'ACTIVA'
+        if (vence && new Date(String(vence)).getTime() < Date.now()) {
+          estado = 'VENCIDA'
+        }
+        garantiasActivas.push({ ordenNumero: o.numeroOrden ?? '—', vence: vence ? String(vence) : null, estado })
+      }
+    }
+
+    return {
+      total,
+      porEstado: Array.from(porEstado.entries()).map(([estado, cantidad]) => ({ estado, cantidad })),
+      porTecnico: Array.from(porTecnico.values()).map((t) => ({
+        nombre: t.nombre,
+        total: t.total,
+        entregadas: t.entregadas,
+        promedioDias: t.dias.length ? t.dias.reduce((s, n) => s + n, 0) / t.dias.length : 0,
+        totalMonto: t.totalMonto,
+      })),
+      garantiasActivas,
+      totalEntregadas,
+      entregadasConGarantia,
+      coberturaGarantia: totalEntregadas > 0 ? entregadasConGarantia / totalEntregadas : 0,
+      montoTotalCerradas,
+    }
+  }, [ordenesRT])
+
   return (
     <div className="space-y-4 p-4">
+      <Tabs value={tabPrincipal} onValueChange={(v) => setTabPrincipal(v as TabPrincipal)}>
+        <TabsList className="grid w-full grid-cols-3 sm:w-fit sm:grid-cols-5">
+          <TabsTrigger value="ventas" className="gap-2">
+            <ShoppingCart className="h-4 w-4" />
+            <span className="hidden sm:inline">Ventas</span>
+          </TabsTrigger>
+          <TabsTrigger value="compras" className="gap-2">
+            <WalletCards className="h-4 w-4" />
+            <span className="hidden sm:inline">Compras</span>
+          </TabsTrigger>
+          <TabsTrigger value="inventario" className="gap-2">
+            <Boxes className="h-4 w-4" />
+            <span className="hidden sm:inline">Inventario</span>
+          </TabsTrigger>
+          <TabsTrigger value="caja" className="gap-2">
+            <Users className="h-4 w-4" />
+            <span className="hidden sm:inline">Caja</span>
+          </TabsTrigger>
+          <TabsTrigger value="servicio-tecnico" className="gap-2 col-span-3 sm:col-span-1">
+            <Wrench className="h-4 w-4" />
+            <span className="hidden sm:inline">Servicio Técnico</span>
+            <span className="sm:hidden">Técnico</span>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
       {category === 'VENTAS' ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1202,10 +1370,382 @@ export function ReportesPage() {
                   </CardHeader>
                 </Card>
               ) : null}
+
+              {tabPrincipal === 'servicio-tecnico' ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Wrench className="h-5 w-5 text-primary" aria-hidden />
+                        <h1 className="text-2xl font-bold text-foreground tracking-tight">
+                          Reporte Servicio Técnico
+                        </h1>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Estadísticas de órdenes, rendimiento de técnicos y cobertura de garantías.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="xl"
+                        variant="outline"
+                        onClick={() => void Promise.all([loadOrdenesRT(), loadTecnicosRT()])}
+                      >
+                        <BarChart3 className="mr-2 h-5 w-5" />
+                        Actualizar
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Tabs value={tabRT} onValueChange={(v) => setTabRT(v as TabRT)} className="mt-6">
+                    <TabsList className="grid w-full grid-cols-2 sm:w-fit sm:grid-cols-3">
+                      <TabsTrigger value="ordenes-servicio">Órdenes Servicio</TabsTrigger>
+                      <TabsTrigger value="rendimiento-tecnicos">Rendimiento Técnicos</TabsTrigger>
+                      <TabsTrigger value="garantias">Garantías</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="ordenes-servicio" className="space-y-4 pt-4">
+                      <AuthorizationGate permission="ordenesServicio.read">
+                        {{
+                          granted: (
+                            <>
+                              {ordenesRTLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                  <Loader className="h-10 w-10" />
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="grid gap-3 sm:grid-cols-3">
+                                    <Card className="p-4">
+                                      <p className="text-xs text-muted-foreground">Total Órdenes</p>
+                                      <p className="mt-2 text-2xl font-bold text-foreground">
+                                        {rtStats.total}
+                                      </p>
+                                    </Card>
+                                    <Card className="p-4">
+                                      <p className="text-xs text-muted-foreground">Órdenes Entregadas</p>
+                                      <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
+                                        {rtStats.totalEntregadas}
+                                      </p>
+                                    </Card>
+                                    <Card className="p-4">
+                                      <p className="text-xs text-muted-foreground">Monto Total Cerradas</p>
+                                      <p className="mt-2 text-2xl font-bold text-foreground">
+                                        {formatCurrency(rtStats.montoTotalCerradas)}
+                                      </p>
+                                    </Card>
+                                  </div>
+
+                                  <Card>
+                                    <CardHeader>
+                                      <CardTitle>Órdenes por Estado</CardTitle>
+                                      <CardDescription>
+                                        Distribución actual de las órdenes de servicio
+                                      </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                      {rtStats.porEstado.length === 0 ? (
+                                        <p className="text-sm text-muted-foreground text-center py-4">
+                                          Sin órdenes registradas
+                                        </p>
+                                      ) : (
+                                        <div className="grid gap-2">
+                                          {rtStats.porEstado.map((row) => (
+                                            <div
+                                              key={row.estado}
+                                              className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                                            >
+                                              <div className="flex items-center gap-3">
+                                                <Badge variant={estadoBadgeVariant(row.estado as EstadoOrdenServicio) as any}>
+                                                  {estadoLabel(row.estado as EstadoOrdenServicio)}
+                                                </Badge>
+                                              </div>
+                                              <p className="font-bold text-foreground text-lg">{row.cantidad}</p>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </CardContent>
+                                  </Card>
+                                </>
+                              )}
+                            </>
+                          ),
+                          denied: (
+                            <Card>
+                              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                                No tienes permiso para ver los reportes de órdenes de servicio.
+                              </CardContent>
+                            </Card>
+                          ),
+                        }}
+                      </AuthorizationGate>
+                    </TabsContent>
+
+                    <TabsContent value="rendimiento-tecnicos" className="space-y-4 pt-4">
+                      <AuthorizationGate permission="tecnicos.read">
+                        {{
+                          granted: (
+                            <>
+                              {tecnicosRTLoading || ordenesRTLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                  <Loader className="h-10 w-10" />
+                                </div>
+                              ) : (
+                                <Card>
+                                  <CardHeader>
+                                    <CardTitle>Rendimiento por Técnico</CardTitle>
+                                    <CardDescription>
+                                      Cantidad de órdenes atendidas, entregadas y promedio de días
+                                    </CardDescription>
+                                  </CardHeader>
+                                  <CardContent>
+                                    {rtStats.porTecnico.length === 0 ? (
+                                      <p className="text-sm text-muted-foreground text-center py-4">
+                                        Sin datos de rendimiento de técnicos
+                                      </p>
+                                    ) : (
+                                      <div className="hidden md:block">
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow>
+                                              <TableHead>Técnico</TableHead>
+                                              <TableHead className="text-right">Órdenes Asignadas</TableHead>
+                                              <TableHead className="text-right">Entregadas</TableHead>
+                                              <TableHead className="text-right">Promedio Días</TableHead>
+                                              <TableHead className="text-right">Monto Total Entregadas</TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {rtStats.porTecnico.map((t) => (
+                                              <TableRow key={t.nombre}>
+                                                <TableCell className="font-medium text-foreground">{t.nombre}</TableCell>
+                                                <TableCell className="text-right">{t.total}</TableCell>
+                                                <TableCell className="text-right">
+                                                  <Badge variant="success">{t.entregadas}</Badge>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                  {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
+                                                </TableCell>
+                                                <TableCell className="text-right font-semibold text-foreground">
+                                                  {formatCurrency(t.totalMonto)}
+                                                </TableCell>
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                      </div>
+                                    )}
+                                    {rtStats.porTecnico.length > 0 ? (
+                                      <div className="md:hidden space-y-3 mt-4">
+                                        {rtStats.porTecnico.map((t) => (
+                                          <Card key={t.nombre} className="p-4">
+                                            <p className="font-medium text-foreground">{t.nombre}</p>
+                                            <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                                              <div>
+                                                <p className="text-muted-foreground">Asignadas</p>
+                                                <p className="text-base font-bold">{t.total}</p>
+                                              </div>
+                                              <div>
+                                                <p className="text-muted-foreground">Entregadas</p>
+                                                <p className="text-base font-bold text-emerald-600 dark:text-emerald-500">{t.entregadas}</p>
+                                              </div>
+                                              <div>
+                                                <p className="text-muted-foreground">Promedio días</p>
+                                                <p className="text-base font-semibold">
+                                                  {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
+                                                </p>
+                                              </div>
+                                              <div>
+                                                <p className="text-muted-foreground">Monto entregadas</p>
+                                                <p className="text-base font-semibold">{formatCurrency(t.totalMonto)}</p>
+                                              </div>
+                                            </div>
+                                          </Card>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </CardContent>
+                                </Card>
+                              )}
+                            </>
+                          ),
+                          denied: (
+                            <Card>
+                              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                                No tienes permiso para ver el rendimiento de técnicos.
+                              </CardContent>
+                            </Card>
+                          ),
+                        }}
+                      </AuthorizationGate>
+                    </TabsContent>
+
+                    <TabsContent value="garantias" className="space-y-4 pt-4">
+                      <AuthorizationGate permission="garantias.read">
+                        {{
+                          granted: (
+                            <>
+                              {ordenesRTLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                  <Loader className="h-10 w-10" />
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="grid gap-3 sm:grid-cols-3">
+                                    <Card className="p-4">
+                                      <p className="text-xs text-muted-foreground">Garantías Activas</p>
+                                      <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
+                                        {rtStats.garantiasActivas.filter((g) => g.estado === 'ACTIVA').length}
+                                      </p>
+                                    </Card>
+                                    <Card className="p-4">
+                                      <p className="text-xs text-muted-foreground">Garantías Vencidas</p>
+                                      <p className="mt-2 text-2xl font-bold text-destructive">
+                                        {rtStats.garantiasActivas.filter((g) => g.estado === 'VENCIDA').length}
+                                      </p>
+                                    </Card>
+                                    <Card className="p-4">
+                                      <p className="text-xs text-muted-foreground">Cobertura de Órdenes Entregadas</p>
+                                      <p className="mt-2 text-2xl font-bold text-foreground">
+                                        {(rtStats.coberturaGarantia * 100).toFixed(0)}%
+                                      </p>
+                                    </Card>
+                                  </div>
+
+                                  <Card>
+                                    <CardHeader>
+                                      <CardTitle>Detalle de Garantías</CardTitle>
+                                      <CardDescription>
+                                        {rtStats.totalEntregadas > 0
+                                          ? `${rtStats.entregadasConGarantia} de ${rtStats.totalEntregadas} órdenes entregadas con garantía`
+                                          : 'Sin órdenes entregadas aún'}
+                                      </CardDescription>
+                                    </CardHeader>
+                                    <CardContent>
+                                      {rtStats.garantiasActivas.length === 0 ? (
+                                        <p className="text-sm text-muted-foreground text-center py-4">
+                                          Sin garantías registradas aún
+                                        </p>
+                                      ) : (
+                                        <div className="hidden md:block">
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead>N° OS</TableHead>
+                                                <TableHead>Vence</TableHead>
+                                                <TableHead>Estado</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {rtStats.garantiasActivas.map((g, idx) => (
+                                                <TableRow key={`${g.ordenNumero}-${idx}`}>
+                                                  <TableCell className="font-medium text-foreground">{g.ordenNumero}</TableCell>
+                                                  <TableCell className="text-muted-foreground">{g.vence ? fmtDate(g.vence) : '—'}</TableCell>
+                                                  <TableCell>
+                                                    <Badge
+                                                      variant={
+                                                        g.estado === 'ACTIVA' ? 'success' : 'destructive'
+                                                      }
+                                                    >
+                                                      {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
+                                                    </Badge>
+                                                  </TableCell>
+                                                </TableRow>
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      )}
+                                      {rtStats.garantiasActivas.length > 0 ? (
+                                        <div className="md:hidden space-y-3 mt-4">
+                                          {rtStats.garantiasActivas.map((g, idx) => (
+                                            <Card key={`${g.ordenNumero}-${idx}`} className="p-4">
+                                              <div className="flex items-center justify-between gap-3">
+                                                <p className="font-medium text-foreground">{g.ordenNumero}</p>
+                                                <Badge
+                                                  variant={
+                                                    g.estado === 'ACTIVA' ? 'success' : 'destructive'
+                                                  }
+                                                >
+                                                  {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
+                                                </Badge>
+                                              </div>
+                                              <p className="mt-2 text-xs text-muted-foreground">
+                                                Vence: {g.vence ? fmtDate(g.vence) : 'Sin fecha'}
+                                              </p>
+                                            </Card>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                    </CardContent>
+                                  </Card>
+                                </>
+                              )}
+                            </>
+                          ),
+                          denied: (
+                            <Card>
+                              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                                No tienes permiso para ver las garantías.
+                              </CardContent>
+                            </Card>
+                          ),
+                        }}
+                      </AuthorizationGate>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>
       </div>
     </div>
   )
+}
+
+function estadoLabel(estado: EstadoOrdenServicio | string): string {
+  const mapa: Record<string, string> = {
+    RECIBIDO: 'Recibido',
+    DIAGNÓSTICO: 'Diagnóstico',
+    PRESUPUESTO: 'Presupuesto',
+    ESPERANDO_APROBACIÓN: 'Esperando Aprobación',
+    APROBADO: 'Aprobado',
+    EN_REPARACIÓN: 'En Reparación',
+    EN_PRUEBAS: 'En Pruebas',
+    LISTO_PARA_ENTREGA: 'Listo para Entrega',
+    PENDIENTE_RETIRO: 'Pendiente Retiro',
+    ENTREGADO: 'Entregado',
+    RECHAZADO: 'Rechazado',
+    CANCELADO: 'Cancelado',
+    'EN_GARANTÍA': 'En Garantía',
+  }
+  return mapa[estado] ?? estado
+}
+
+function estadoBadgeVariant(
+  estado: EstadoOrdenServicio | string,
+): 'default' | 'success' | 'warning' | 'info' | 'destructive' | 'outline' {
+  switch (estado) {
+    case 'ENTREGADO':
+    case 'EN_GARANTÍA':
+      return 'success'
+    case 'RECIBIDO':
+    case 'DIAGNÓSTICO':
+    case 'PRESUPUESTO':
+    case 'ESPERANDO_APROBACIÓN':
+    case 'APROBADO':
+    case 'EN_REPARACIÓN':
+    case 'EN_PRUEBAS':
+    case 'LISTO_PARA_ENTREGA':
+    case 'PENDIENTE_RETIRO':
+      return 'warning'
+    case 'RECHAZADO':
+    case 'CANCELADO':
+      return 'destructive'
+    default:
+      return 'default'
+  }
 }

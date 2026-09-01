@@ -56,6 +56,8 @@ export function AppRoutes() {
       <Route path="/configuracion" element={<Navigate to={paths.configuracion} replace />} />
       <Route path="/usuarios" element={<Navigate to={paths.usuarios} replace />} />
       <Route path="/reportes" element={<Navigate to={paths.reportes} replace />} />
+      <Route path="/ordenes-servicio" element={<Navigate to={paths.ordenesServicio} replace />} />
+      <Route path="/tecnicos" element={<Navigate to={paths.tecnicos} replace />} />
       <Route path="/403" element={<Navigate to={paths.forbidden} replace />} />
 
       <Route path="*" element={<NotFoundRedirect />} />

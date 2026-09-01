@@ -4,17 +4,18 @@ import {
   BarChart3,
   Building2,
   Boxes,
-  ClipboardList,
+  ClipboardCheck,
   CreditCard,
   LayoutDashboard,
   Layers,
-  Package,
   Settings,
   Shield,
   ShoppingCart,
   Store,
   Truck,
   Users,
+  Wrench,
+  Package,
 } from 'lucide-react'
 import { CajaPage } from '@/pages/CajaPage'
 import { ClientesPage } from '@/pages/ClientesPage'
@@ -34,6 +35,8 @@ import { ReportesPage } from '@/pages/ReportesPage'
 import { UsuariosPage } from '@/pages/UsuariosPage'
 import { VentasPage } from '@/pages/VentasPage'
 import { TiposEmpresaPage } from '@/pages/TiposEmpresaPage'
+import { OrdenesServicioPage } from '@/pages/OrdenesServicioPage'
+import { TecnicosPage } from '@/pages/TecnicosPage'
 import { RegisterPage } from '@/public/register/RegisterPage'
 import { paths } from '@/routes/paths'
 import type { RouteAccess } from '@/routes/access-control'
@@ -74,11 +77,12 @@ export const authRoutes: AppRouteDefinition[] = [
 ]
 
 export const privateRoutes: AppRouteDefinition[] = [
+  // ==================== 8 MÓDULOS PRINCIPALES (SIDEBAR MENU) ====================
   {
     path: paths.dashboard,
     component: DashboardPage,
     index: true,
-    navLabel: 'Dashboard',
+    navLabel: 'Inicio',
     navIcon: LayoutDashboard,
     navSection: 'Operaciones',
     access: {
@@ -88,51 +92,15 @@ export const privateRoutes: AppRouteDefinition[] = [
     },
   },
   {
-    path: paths.ventas,
-    component: VentasPage,
-    navLabel: 'Ventas',
-    navIcon: ShoppingCart,
+    path: paths.ordenesServicio,
+    component: OrdenesServicioPage,
+    navLabel: 'Órdenes Servicio',
+    navIcon: ClipboardCheck,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
-      allowedPermissions: ['ventas.read'],
-      moduleCode: 'ventas',
-    },
-  },
-  {
-    path: paths.productos,
-    component: ProductosPage,
-    navLabel: 'Productos',
-    navIcon: Package,
-    navSection: 'Operaciones',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['productos.read'],
-      moduleCode: 'productos',
-    },
-  },
-  {
-    path: paths.compras,
-    component: ComprasPage,
-    navLabel: 'Compras',
-    navIcon: Truck,
-    navSection: 'Operaciones',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['compras.read'],
-      moduleCode: 'compras',
-    },
-  },
-  {
-    path: paths.inventario,
-    component: InventarioPage,
-    navLabel: 'Inventario',
-    navIcon: Boxes,
-    navSection: 'Operaciones',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['inventario.read'],
-      moduleCode: 'inventario',
+      allowedPermissions: ['ordenesServicio.read'],
+      moduleCode: 'ordenesServicio',
     },
   },
   {
@@ -148,15 +116,27 @@ export const privateRoutes: AppRouteDefinition[] = [
     },
   },
   {
-    path: paths.proveedores,
-    component: ProveedoresPage,
-    navLabel: 'Proveedores',
-    navIcon: Store,
+    path: paths.inventario,
+    component: InventarioPage,
+    navLabel: 'Inventario',
+    navIcon: Boxes,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
-      allowedPermissions: ['proveedores.read'],
-      moduleCode: 'proveedores',
+      allowedPermissions: ['inventario.read'],
+      moduleCode: 'inventario',
+    },
+  },
+  {
+    path: paths.tecnicos,
+    component: TecnicosPage,
+    navLabel: 'Técnicos',
+    navIcon: Wrench,
+    navSection: 'Operaciones',
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['tecnicos.read'],
+      moduleCode: 'tecnicos',
     },
   },
   {
@@ -169,58 +149,6 @@ export const privateRoutes: AppRouteDefinition[] = [
       requiresAuth: true,
       allowedPermissions: ['caja.read'],
       moduleCode: 'caja',
-    },
-  },
-  {
-    path: paths.usuarios,
-    component: UsuariosPage,
-    navLabel: 'Usuarios',
-    navIcon: ClipboardList,
-    navSection: 'Seguridad',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['usuarios.read', 'sesiones.read', 'auditoria.read'],
-      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'],
-      moduleCode: 'usuarios',
-    },
-  },
-  {
-    path: paths.empresas,
-    component: EmpresasPage,
-    navLabel: 'Empresas',
-    navIcon: Building2,
-    navSection: 'Administración POS',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['empresas.read', 'empresas.manage'],
-      allowedRoles: ['ADMIN_POS'],
-      moduleCode: 'empresas',
-    },
-  },
-  {
-    path: paths.administradores,
-    component: AdministradoresPage,
-    navLabel: 'Administradores',
-    navIcon: Shield,
-    navSection: 'Administración POS',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['administradores.manage', 'usuarios.read'],
-      allowedRoles: ['ADMIN_POS'],
-      moduleCode: 'administradores',
-    },
-  },
-  {
-    path: paths.tiposEmpresa,
-    component: TiposEmpresaPage,
-    navLabel: 'Tipos de empresa',
-    navIcon: Layers,
-    navSection: 'Administración POS',
-    access: {
-      requiresAuth: true,
-      allowedPermissions: ['tipos_empresa.manage'],
-      allowedRoles: ['ADMIN_POS'],
-      moduleCode: 'tipos_empresa',
     },
   },
   {
@@ -247,6 +175,85 @@ export const privateRoutes: AppRouteDefinition[] = [
       allowedPermissions: ['configuracion.read'],
       allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA'],
       moduleCode: 'configuracion',
+    },
+  },
+
+  // ==================== RUTAS OCULTAS (SIN MENU, ACCESO POR URL) ====================
+  // Módulos POS antiguos — siguen disponibles por URL pero fuera del menú 8 máx
+  {
+    path: paths.ventas,
+    component: VentasPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['ventas.read'],
+      moduleCode: 'ventas',
+    },
+  },
+  {
+    path: paths.productos,
+    component: ProductosPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['productos.read'],
+      moduleCode: 'productos',
+    },
+  },
+  {
+    path: paths.compras,
+    component: ComprasPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['compras.read'],
+      moduleCode: 'compras',
+    },
+  },
+  {
+    path: paths.proveedores,
+    component: ProveedoresPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['proveedores.read'],
+      moduleCode: 'proveedores',
+    },
+  },
+  {
+    path: paths.usuarios,
+    component: UsuariosPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['usuarios.read', 'sesiones.read', 'auditoria.read'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'],
+      moduleCode: 'usuarios',
+    },
+  },
+  {
+    path: paths.empresas,
+    component: EmpresasPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['empresas.read', 'empresas.manage'],
+      allowedRoles: ['ADMIN_POS'],
+      moduleCode: 'empresas',
+    },
+  },
+  {
+    path: paths.administradores,
+    component: AdministradoresPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['administradores.manage', 'usuarios.read'],
+      allowedRoles: ['ADMIN_POS'],
+      moduleCode: 'administradores',
+    },
+  },
+  {
+    path: paths.tiposEmpresa,
+    component: TiposEmpresaPage,
+    access: {
+      requiresAuth: true,
+      allowedPermissions: ['tipos_empresa.manage'],
+      allowedRoles: ['ADMIN_POS'],
+      moduleCode: 'tipos_empresa',
     },
   },
   {

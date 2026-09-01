@@ -10,7 +10,9 @@ import {
   HandCoins,
   MapPin,
   Printer,
+  RefreshCw,
   Wallet,
+  Wrench,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -38,7 +40,17 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
+import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
+import { rtService } from '@/services/rtService'
+import type { OrdenPago, OrdenServicio } from '@/types/rayegotech'
 import {
   Table,
   TableBody,
@@ -106,14 +118,30 @@ function formatDateTimeDisplay(value: string | null | undefined) {
   }
 }
 
+function pad2(value: number) {
+  return value < 10 ? `0${value}` : `${value}`
+}
+
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  if (iso.length >= 10) {
+    const d = iso.slice(0, 10)
+    const [y, m, day] = d.split('-')
+    if (y && m && day) return `${day}/${m}/${y}`
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10) || '—'
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`
+}
+
 function getDrawerStatusVariant(status: CashDrawerStatus) {
   if (status === 'ABIERTA') return 'success'
   if (status === 'EN_CIERRE') return 'warning'
   return 'outline'
 }
 
-function getMovementVariant(type: CashMovementType) {
-  if (type === 'VENTA' || type === 'INGRESO_MANUAL') return 'success'
+function getMovementVariant(type: CashMovementType | string) {
+  if (type === 'VENTA' || type === 'INGRESO_MANUAL' || type === 'SERVICIO_TECNICO') return 'success'
   if (type === 'CUADRE') return 'info'
   return 'warning'
 }
@@ -164,7 +192,7 @@ export function CajaPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedDrawerId, setSelectedDrawerId] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState<
-    'resumen' | 'movimientos' | 'conciliacion' | 'historial'
+    'resumen' | 'movimientos' | 'conciliacion' | 'historial' | 'pagos-os'
   >('resumen')
 
   const [reconciliationPreview, setReconciliationPreview] =
@@ -178,6 +206,17 @@ export function CajaPage() {
   const [isCashCountsLoading, setIsCashCountsLoading] = useState(false)
   const [cashCountsError, setCashCountsError] = useState<string | null>(null)
   const [digitalCategoryExpanded, setDigitalCategoryExpanded] = useState(true)
+
+  const [movementTypeFilter, setMovementTypeFilter] = useState<
+    'TODOS' | 'SERVICIO_TECNICO' | 'OTROS'
+  >('TODOS')
+  type PagoOSExtendido = OrdenPago & {
+    ordenNumero?: string
+    clienteNombre?: string
+    ordenEstado?: string
+  }
+  const [pagosOS, setPagosOS] = useState<PagoOSExtendido[]>([])
+  const [pagosOSLoading, setPagosOSLoading] = useState(false)
 
   // Forms
   const openDrawerForm = useForm<OpenCashDrawerFormValues>({
@@ -428,6 +467,43 @@ export function CajaPage() {
     [loadCashCounts, loadReconciliationPreview],
   )
 
+  const loadPagosOS = useCallback(async () => {
+    if (!accessToken) return
+    setPagosOSLoading(true)
+    try {
+      const response = await rtService.listOrdenesServicio()
+      const ordenes: OrdenServicio[] = response?.items ?? []
+      const flat: PagoOSExtendido[] = []
+      for (const orden of ordenes) {
+        if (orden.pagos && orden.pagos.length > 0) {
+          for (const pago of orden.pagos) {
+            flat.push({
+              ...pago,
+              ordenNumero: orden.numeroOrden,
+              clienteNombre: orden.cliente?.razonSocial ?? orden.cliente?.nombres ?? '—',
+              ordenEstado: orden.estado,
+            })
+          }
+        }
+      }
+      setPagosOS(flat)
+    } catch (nextError) {
+      if (nextError instanceof ApiError && nextError.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setPagosOS([])
+    } finally {
+      setPagosOSLoading(false)
+    }
+  }, [accessToken, handleUnauthorized])
+
+  useEffect(() => {
+    if (detailTab === 'pagos-os') {
+      void loadPagosOS()
+    }
+  }, [detailTab, loadPagosOS])
+
   const cashDrawers = dashboard?.cashDrawers ?? []
   const cashMovements = dashboard?.cashMovements ?? []
   const movementPaymentMethods = dashboard?.options.paymentMethods ?? []
@@ -436,9 +512,14 @@ export function CajaPage() {
   const selectedDrawer = selectedDrawerId
     ? cashDrawers.find((drawer) => drawer.id === selectedDrawerId) ?? null
     : null
-  const selectedMovements = selectedDrawerId
+  const selectedMovementsBase = selectedDrawerId
     ? cashMovements.filter((movement) => movement.openingId === selectedDrawerId)
     : []
+  const selectedMovements = selectedMovementsBase.filter((m) => {
+    if (movementTypeFilter === 'TODOS') return true
+    if (movementTypeFilter === 'SERVICIO_TECNICO') return String(m.type) === 'SERVICIO_TECNICO'
+    return String(m.type) !== 'SERVICIO_TECNICO'
+  })
   const canOperateSelected = selectedDrawer?.status === 'ABIERTA'
   const summaryDrawer = selectedDrawer ?? activeDrawer ?? null
   const isSummaryClosePending = Boolean(summaryDrawer?.closePending)
@@ -922,11 +1003,15 @@ export function CajaPage() {
           </div>
 
           <Tabs value={detailTab} onValueChange={(value) => setDetailTab(value as any)} className="mt-6">
-            <TabsList className="grid w-full grid-cols-2 sm:w-fit sm:grid-cols-4">
+            <TabsList className="grid w-full grid-cols-3 sm:w-fit sm:grid-cols-5">
               <TabsTrigger value="resumen">Resumen</TabsTrigger>
               <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
               <TabsTrigger value="conciliacion">Conciliación</TabsTrigger>
               <TabsTrigger value="historial">Historial</TabsTrigger>
+              <TabsTrigger value="pagos-os" className="gap-2">
+                <Wrench className="h-4 w-4" />
+                Pagos OS
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="resumen" className="space-y-4 pt-4">
@@ -1259,6 +1344,22 @@ export function CajaPage() {
             </TabsContent>
 
             <TabsContent value="movimientos" className="space-y-4 pt-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-1 md:col-span-1">
+                  <p className="text-xs font-medium text-muted-foreground">Tipo de movimiento</p>
+                  <Select value={movementTypeFilter} onValueChange={(v) => setMovementTypeFilter(v as any)}>
+                    <SelectTrigger className="h-12">
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="TODOS">Todos</SelectItem>
+                      <SelectItem value="SERVICIO_TECNICO">Solo Servicio Técnico</SelectItem>
+                      <SelectItem value="OTROS">Otros (Ventas/Mánuales)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
               {selectedMovements.length === 0 ? (
                 <div className="rounded-2xl border border-dashed p-8 text-center">
                   <p className="text-sm font-medium text-foreground">No hay movimientos registrados</p>
@@ -1579,6 +1680,129 @@ export function CajaPage() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="pagos-os" className="space-y-4 pt-4">
+              <AuthorizationGate permission="pagosOrdenServicio.write">
+                {{
+                  granted: (
+                    <>
+                      <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div className="grid gap-3 md:grid-cols-3 flex-1">
+                          <div className="md:col-span-1" />
+                        </div>
+                        <Button type="button" size="xl" variant="outline" onClick={() => void loadPagosOS()}>
+                          <RefreshCw className="mr-2 h-5 w-5" />
+                          Actualizar
+                        </Button>
+                      </div>
+
+                      {pagosOSLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader className="h-8 w-8" />
+                        </div>
+                      ) : pagosOS.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed p-8 text-center">
+                          <p className="text-sm font-medium text-foreground">No hay pagos de órdenes de servicio</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Los cobros de órdenes de servicio integrados a caja aparecerán aquí
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Pagos OS</p>
+                              <p className="mt-2 text-xl font-bold text-foreground">{pagosOS.length}</p>
+                            </Card>
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Monto total cobrado</p>
+                              <p className="mt-2 text-xl font-bold text-emerald-600 dark:text-emerald-500">
+                                {formatCurrency(pagosOS.reduce((s, p) => s + (p.monto ?? 0), 0))}
+                              </p>
+                            </Card>
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Órdenes con pago</p>
+                              <p className="mt-2 text-xl font-bold text-foreground">
+                                {new Set(pagosOS.map((p) => p.ordenServicioId)).size}
+                              </p>
+                            </Card>
+                          </div>
+
+                          <div className="md:hidden space-y-3">
+                            {pagosOS.map((pago) => (
+                              <Card key={pago.id} className="p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate font-medium text-foreground">{pago.ordenNumero ?? '—'}</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">{pago.clienteNombre ?? '—'}</p>
+                                    <p className="mt-2 text-xs text-muted-foreground">
+                                      {fmtDate(pago.fechaPago)} · {pago.formaPago?.nombre ?? '—'}
+                                    </p>
+                                    {pago.referencia ? (
+                                      <p className="mt-1 text-xs text-muted-foreground">Ref: {pago.referencia}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex flex-col items-end gap-2">
+                                    <Badge variant="outline">{pago.ordenEstado ?? '—'}</Badge>
+                                    <p className="font-medium text-foreground">{formatCurrency(pago.monto)}</p>
+                                  </div>
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+
+                          <div className="hidden md:block">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>N° OS</TableHead>
+                                  <TableHead>Cliente</TableHead>
+                                  <TableHead>Fecha</TableHead>
+                                  <TableHead>Método</TableHead>
+                                  <TableHead className="hidden lg:table-cell">Referencia</TableHead>
+                                  <TableHead>Estado</TableHead>
+                                  <TableHead className="text-right">Monto</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {pagosOS.map((pago) => (
+                                  <TableRow key={pago.id}>
+                                    <TableCell className="font-medium text-foreground">
+                                      {pago.ordenNumero ?? '—'}
+                                    </TableCell>
+                                    <TableCell className="text-muted-foreground">{pago.clienteNombre ?? '—'}</TableCell>
+                                    <TableCell className="text-muted-foreground">{fmtDate(pago.fechaPago)}</TableCell>
+                                    <TableCell>
+                                      <Badge variant="info">{pago.formaPago?.nombre ?? '—'}</Badge>
+                                    </TableCell>
+                                    <TableCell className="hidden lg:table-cell text-muted-foreground">
+                                      {pago.referencia ?? '—'}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline">{pago.ordenEstado ?? '—'}</Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right font-medium text-foreground">
+                                      {formatCurrency(pago.monto)}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  ),
+                  denied: (
+                    <Card>
+                      <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                        No tienes permiso para ver los pagos de órdenes de servicio.
+                      </CardContent>
+                    </Card>
+                  ),
+                }}
+              </AuthorizationGate>
             </TabsContent>
           </Tabs>
         </Card>

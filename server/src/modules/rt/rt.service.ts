@@ -299,7 +299,7 @@ export async function updateEquipo(request: FastifyRequest, id: string, payload:
 // ============================================================
 // ORDENES SERVICIO (módulo CENTRAL)
 // ============================================================
-const ordenSelect = Prisma.validator<Prisma.OrdenServicioSelect>()({
+const ordenSelect = {
   id: true, numeroOrden: true, estado: true, tipoServicioId: true,
   fechaRecepcion: true, fechaPrometida: true, fechaEntregado: true,
   clienteEquipoId: true, clienteId: true, tecnicoAsignadoId: true,
@@ -312,14 +312,14 @@ const ordenSelect = Prisma.validator<Prisma.OrdenServicioSelect>()({
   cliente: { select: { id: true, nombresRazonSocial: true, numeroDocumento: true, telefono: true, email: true } },
   clienteEquipo: { include: { tipoEquipo: true } },
   tecnicoAsignado: { select: { id: true, usuario: { select: { nombres: true, apellidos: true } } } },
-  items: { orderBy: { createdAt: 'asc' }, include: { producto: true, lote: true, tecnicoAsignado: { include: { usuario: { select: { nombres: true, apellidos: true } } } } },
+  items: { orderBy: { createdAt: 'asc' }, include: { producto: true, lote: true, tecnicoAsignado: { include: { usuario: { select: { nombres: true, apellidos: true } } } } } },
   pagos: { orderBy: { fechaPago: 'asc' }, include: { formaPago: true, movimientoCaja: true } },
   historialEstados: { orderBy: { fechaCambio: 'asc' }, include: { usuario: { select: { nombres: true, apellidos: true } } } },
   diagnosticos: { orderBy: { fechaDiagnostico: 'asc' }, include: { usuario: { select: { nombres: true, apellidos: true } } } },
   presupuestos: { orderBy: { version: 'desc' } },
-  asignacionesTecnico: { orderBy: { fechaAsignacion: 'desc' }, include: { tecnico: { include: { usuario: { select: { nombres: true, apellidos: true } } }, usuario: { select: { nombres: true, apellidos: true } } } },
+  asignacionesTecnico: { orderBy: { fechaAsignacion: 'desc' }, include: { tecnico: { include: { usuario: { select: { nombres: true, apellidos: true } } } }, usuario: { select: { nombres: true, apellidos: true } } } },
   garantia: true,
-})
+} as const
 
 type Filters = {
   estado?: EstadoOrdenServicio | EstadoOrdenServicio[]
@@ -802,7 +802,12 @@ export async function deleteOrdenItem(request: FastifyRequest, itemId: string) {
           const prevStock = decimalToNumber(lote.stockDisponible)
           const nextStock = prevStock + qty
           await tx.lote.update({ where: { id: lote.id }, data: { stockDisponible: toDecimal(nextStock, 4), updatedById: userId } })
-          const prodPrev = decimalToNumber((await tx.producto.findFirst({ where: { id: item.productoId, empresaId: companyId } , select: { stockTotal: true } ))?.stockTotal || 0)
+          const prodPrev = decimalToNumber(
+            (await tx.producto.findFirst({
+              where: { id: item.productoId, empresaId: companyId },
+              select: { stockTotal: true },
+            }))?.stockTotal || 0,
+          )
           await tx.producto.update({ where: { id: item.productoId }, data: { stockTotal: toDecimal(prodPrev + qty, 4), updatedById: userId } })
           await tx.movimientoInventario.create({
             data: {

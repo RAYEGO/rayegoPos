@@ -16,7 +16,7 @@ import {
 
 const uuidP = z.string().uuid()
 const FiltersOSList = z.object({
-  estado: z.enum(['RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_REPARACION','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','ENTREGADO','RECHAZADO','CANCELADO','EN_GARANTIA']]).or(z.array(z.any())).optional(),
+  estado: z.enum(['RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_REPARACION','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','ENTREGADO','RECHAZADO','CANCELADO','EN_GARANTIA']).or(z.array(z.any())).optional(),
   desde: z.string().optional(), hasta: z.string().optional(),
   search: z.string().optional(), sucursalId: uuidP.optional(), clienteId: uuidP.optional(),
   tecnicoAsignadoId: uuidP.optional(),

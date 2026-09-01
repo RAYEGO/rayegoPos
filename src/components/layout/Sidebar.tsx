@@ -31,7 +31,7 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
               to={item.href}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors duration-150',
+                  'flex items-center gap-3 rounded-md px-3 py-3 text-sm transition-colors duration-150 min-h-[44px]',
                   isActive ? 'bg-primary-foreground/10 text-primary-foreground' : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground',
                 )
               }

@@ -11,21 +11,18 @@ import {
   History,
   Loader2,
   PackagePlus,
+  RefreshCcw,
   Search,
   ShieldAlert,
   SlidersHorizontal,
   TriangleAlert,
+  Wrench,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
 import {
@@ -55,7 +52,9 @@ import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { inventoryService } from '@/services/inventoryService'
 import { productsService } from '@/services/productsService'
+import { rtService } from '@/services/rtService'
 import type { ProductStatus } from '@/types/products'
+import type { MovimientoInventarioRT, UsoServicioTecnico } from '@/types/rayegotech'
 import type {
   AdjustInventoryLotPayload,
   CreateInventoryLotPayload,
@@ -531,10 +530,18 @@ export function InventarioPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'TODOS' | InventoryLotStatus>('TODOS')
   const [productFilter, setProductFilter] = useState(() => initialProductId ?? 'TODOS')
+  const [usoServicioTecnicoFilter, setUsoServicioTecnicoFilter] = useState<'TODOS' | UsoServicioTecnico>('TODOS')
   const lotCreateInputKeyRef = useRef(0)
   const isCreateDialogPrev = useRef(false)
-  const [activeTab, setActiveTab] = useState<'lotes' | 'movimientos' | 'alertas'>(() => {
-    if (initialTab === 'movimientos' || initialTab === 'alertas' || initialTab === 'lotes') {
+  const [activeTab, setActiveTab] = useState<
+    'lotes' | 'movimientos' | 'alertas' | 'consumo-rt'
+  >(() => {
+    if (
+      initialTab === 'movimientos' ||
+      initialTab === 'alertas' ||
+      initialTab === 'lotes' ||
+      initialTab === 'consumo-rt'
+    ) {
       return initialTab
     }
     return 'lotes'
@@ -549,6 +556,10 @@ export function InventarioPage() {
   const [isMutating, setIsMutating] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
   const [lotsPage, setLotsPage] = useState(1)
+
+  // ================ RayegoTech: Movimientos Consumo RT ================
+  const [movimientosRT, setMovimientosRT] = useState<MovimientoInventarioRT[]>([])
+  const [movimientosRTLoading, setMovimientosRTLoading] = useState(false)
   const lotsPageSize = 8
   const isTransferEnabled = useMemo(() => false, [])
   const isManualLotEnabled = useMemo(() => true, [])
@@ -652,10 +663,27 @@ export function InventarioPage() {
   const canTransferLots = isTransferEnabled && dashboard.options.branches.length > 1
 
   const sortedLots = useMemo(() => {
-    return [...dashboard.lots].sort(
-      (a, b) => parseDateValue(b.receivedAt) - parseDateValue(a.receivedAt),
-    )
-  }, [dashboard.lots])
+    const q = search.trim().toLowerCase()
+    return [...dashboard.lots]
+      .filter((lot) => {
+        if (q) {
+          const haystack = [
+            lot.productName,
+            lot.sku,
+            lot.lotCode,
+            lot.supplierName || '',
+          ].join(' ').toLowerCase()
+          if (!haystack.includes(q)) return false
+        }
+        if (statusFilter !== 'TODOS' && lot.status !== statusFilter) return false
+        if (productFilter !== 'TODOS' && lot.productId !== productFilter) return false
+        if (usoServicioTecnicoFilter !== 'TODOS' && (lot as any).productoUsoServicioTecnico !== usoServicioTecnicoFilter) return false
+        return true
+      })
+      .sort(
+        (a, b) => parseDateValue(b.receivedAt) - parseDateValue(a.receivedAt),
+      )
+  }, [dashboard.lots, search, statusFilter, productFilter, usoServicioTecnicoFilter])
   const lotOptions = useMemo<SearchableOption[]>(
     () =>
       sortedLots.map((lot) => ({
@@ -710,6 +738,29 @@ export function InventarioPage() {
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
+
+  const loadMovimientosRT = useCallback(async () => {
+    if (!accessToken) return
+    try {
+      setMovimientosRTLoading(true)
+      const res = await rtService.listMovimientosInventario({
+        origen: 'SERVICIO_TECNICO',
+      })
+      setMovimientosRT(res.items || [])
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+    } finally {
+      setMovimientosRTLoading(false)
+    }
+  }, [accessToken, handleUnauthorized])
+
+  useEffect(() => {
+    if (activeTab === 'consumo-rt') void loadMovimientosRT()
+  }, [activeTab, loadMovimientosRT])
 
   useEffect(() => {
     if (isCreateDialogOpen && !isCreateDialogPrev.current) {
@@ -933,10 +984,13 @@ export function InventarioPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
-        <TabsList className="grid w-full grid-cols-3 lg:w-fit">
+        <TabsList className="grid w-full grid-cols-4 lg:w-fit">
           <TabsTrigger value="lotes">Stock por lotes</TabsTrigger>
           <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
           <TabsTrigger value="alertas">Alertas y FIFO</TabsTrigger>
+          <TabsTrigger value="consumo-rt">
+            <Wrench className="mr-1 h-4 w-4" /> Consumo ST
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="lotes" className="space-y-6">
@@ -1003,7 +1057,7 @@ export function InventarioPage() {
                 </div>
               ) : null}
 
-              <div className="grid gap-4 xl:grid-cols-[1.1fr_0.45fr_0.7fr]">
+              <div className="grid gap-4 xl:grid-cols-[1.1fr_0.45fr_0.6fr_0.6fr]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -1043,6 +1097,23 @@ export function InventarioPage() {
                         {product.name}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={usoServicioTecnicoFilter}
+                  onValueChange={(value) =>
+                    setUsoServicioTecnicoFilter(value as 'TODOS' | UsoServicioTecnico)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Uso Serv. Técnico" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TODOS">Todos los usos</SelectItem>
+                    <SelectItem value="SOLO_VENTA">Solo venta</SelectItem>
+                    <SelectItem value="SERVICIO_TECNICO">Servicio técnico</SelectItem>
+                    <SelectItem value="AMBOS">Ambos</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1345,6 +1416,120 @@ export function InventarioPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="consumo-rt" className="space-y-6">
+          <AuthorizationGate permission="inventarioServicio.write">
+            <Card>
+              <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Wrench className="h-5 w-5 text-primary" /> Consumo de Repuestos · Servicio Técnico
+                  </CardTitle>
+                  <CardDescription>
+                    Movimientos de inventario asociados a Órdenes de Servicio (Consumo y Devolución).
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="xl"
+                  className="min-h-[48px]"
+                  onClick={() => void loadMovimientosRT()}
+                >
+                  <RefreshCcw className="mr-2 h-5 w-5" /> Actualizar
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {movimientosRTLoading ? (
+                  <div className="flex min-h-56 items-center justify-center rounded-2xl border">
+                    <Loader className="h-7 w-7" />
+                  </div>
+                ) : movimientosRT.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-10 text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      Sin movimientos de consumo/devolución por Órdenes de Servicio.
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Cuando una Orden de Servicio consuma repuestos, quedará registrada aquí con vínculo a la OS.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead>Producto / Lote</TableHead>
+                          <TableHead className="text-right">Cantidad</TableHead>
+                          <TableHead>Orden Servicio</TableHead>
+                          <TableHead>Técnico</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {movimientosRT.map((m) => (
+                          <TableRow key={m.id}>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {typeof m.createdAt === 'string' && m.createdAt
+                                ? new Date(m.createdAt).toLocaleString('es-PE', {
+                                    year: 'numeric',
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })
+                                : '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  m.tipoMovimiento === 'SERVICIO_TECNICO_CONSUMO'
+                                    ? 'default'
+                                    : m.tipoMovimiento === 'SERVICIO_TECNICO_DEVOLUCION'
+                                      ? 'info'
+                                      : 'outline'
+                                }
+                              >
+                                {m.tipoMovimiento === 'SERVICIO_TECNICO_CONSUMO'
+                                  ? 'Consumo OS'
+                                  : m.tipoMovimiento === 'SERVICIO_TECNICO_DEVOLUCION'
+                                    ? 'Devolución OS'
+                                    : (m.tipoMovimiento as string)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-0.5">
+                                <p className="font-medium">{m.productoNombre || '—'}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Lote: {m.loteCodigo || '—'}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {m.cantidadSigno ?? (m.tipoMovimiento === 'SERVICIO_TECNICO_DEVOLUCION' ? '+' : '-')}
+                              {Math.abs(m.cantidad ?? 0)}
+                            </TableCell>
+                            <TableCell>
+                              {m.ordenServicioNumero ? (
+                                <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                  {m.ordenServicioNumero}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {m.tecnicoNombre || '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
         </TabsContent>
       </Tabs>
 

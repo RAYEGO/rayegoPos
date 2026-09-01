@@ -15,6 +15,7 @@ import {
   Server,
   Trash2,
   Upload,
+  Wrench,
   X,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -43,14 +44,18 @@ import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/sid
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { branchesService } from '@/services/branchesService'
 import { implementationService } from '@/services/implementationService'
 import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
 import { systemService, getEnvironmentBadge, type SystemEnvironment } from '@/services/systemService'
+import { rtService } from '@/services/rtService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
 import type { Branch } from '@/types/settings'
+import type { TipoEquipo, TipoServicio } from '@/types/rayegotech'
 import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
@@ -317,7 +322,14 @@ export function ConfiguracionPage() {
   const canEditCompany = authorization.hasRole('ADMIN')
 
   const [activeTab, setActiveTab] = useState<
-    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'entorno' | 'herramientas' | 'catalogos'
+    | 'empresa'
+    | 'sucursales'
+    | 'implementacion'
+    | 'entorno'
+    | 'herramientas'
+    | 'rt-tipos-equipo'
+    | 'rt-tipos-servicio'
+    | 'rt-general'
   >('empresa')
   const [environment, setEnvironment] = useState<SystemEnvironment | null>(null)
   const [isEnvironmentLoading, setIsEnvironmentLoading] = useState(false)
@@ -357,6 +369,31 @@ export function ConfiguracionPage() {
   const [isBranchPanelSubmitting, setIsBranchPanelSubmitting] = useState(false)
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
   const [isBranchesRefreshing, setIsBranchesRefreshing] = useState(false)
+
+  // ================ RayegoTech: estados tabs RT ================
+  const [tiposEquipo, setTiposEquipo] = useState<TipoEquipo[]>([])
+  const [tiposEquipoLoading, setTiposEquipoLoading] = useState(false)
+  const [isTipoEquipoPanelOpen, setIsTipoEquipoPanelOpen] = useState(false)
+  const [isTipoEquipoSaving, setIsTipoEquipoSaving] = useState(false)
+  const [nuevoTipoEquipo, setNuevoTipoEquipo] = useState({
+    nombre: '',
+    descripcion: '',
+    activo: true,
+  })
+
+  const [tiposServicio, setTiposServicio] = useState<TipoServicio[]>([])
+  const [tiposServicioLoading, setTiposServicioLoading] = useState(false)
+  const [isTipoServicioPanelOpen, setIsTipoServicioPanelOpen] = useState(false)
+  const [isTipoServicioSaving, setIsTipoServicioSaving] = useState(false)
+  const [nuevoTipoServicio, setNuevoTipoServicio] = useState({
+    nombre: '',
+    descripcion: '',
+    costoBase: 0,
+    activo: true,
+  })
+
+  const [garantiaDefaultDias, setGarantiaDefaultDias] = useState<number>(30)
+  const [garantiaGuardando, setGarantiaGuardando] = useState(false)
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
@@ -515,11 +552,117 @@ export function ConfiguracionPage() {
     }
   }
 
+  // ================ RayegoTech: catálogos RT ================
+  async function loadTiposEquipo() {
+    if (!accessToken) return
+    try {
+      setTiposEquipoLoading(true)
+      const res = await rtService.listTiposEquipo()
+      setTiposEquipo(res.items || [])
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+    } finally {
+      setTiposEquipoLoading(false)
+    }
+  }
+  async function guardarTipoEquipo() {
+    const nombre = nuevoTipoEquipo.nombre.trim()
+    if (!nombre) {
+      toast.error('Ingresa un nombre para el tipo de equipo.')
+      return
+    }
+    try {
+      setIsTipoEquipoSaving(true)
+      await rtService.createTipoEquipo({
+        nombre,
+        descripcion: nuevoTipoEquipo.descripcion.trim() || null,
+        activo: nuevoTipoEquipo.activo,
+      })
+      toast.success('Tipo de equipo creado.')
+      setNuevoTipoEquipo({ nombre: '', descripcion: '', activo: true })
+      setIsTipoEquipoPanelOpen(false)
+      await loadTiposEquipo()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsTipoEquipoSaving(false)
+    }
+  }
+
+  async function loadTiposServicio() {
+    if (!accessToken) return
+    try {
+      setTiposServicioLoading(true)
+      const res = await rtService.listTiposServicio()
+      setTiposServicio(res.items || [])
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+    } finally {
+      setTiposServicioLoading(false)
+    }
+  }
+  async function guardarTipoServicio() {
+    const nombre = nuevoTipoServicio.nombre.trim()
+    if (!nombre) {
+      toast.error('Ingresa un nombre para el tipo de servicio.')
+      return
+    }
+    const costo = Number(nuevoTipoServicio.costoBase || 0)
+    if (costo < 0) {
+      toast.error('El costo base no puede ser negativo.')
+      return
+    }
+    try {
+      setIsTipoServicioSaving(true)
+      await rtService.createTipoServicio({
+        nombre,
+        descripcion: nuevoTipoServicio.descripcion.trim() || null,
+        costoBase: costo,
+        activo: nuevoTipoServicio.activo,
+      })
+      toast.success('Tipo de servicio creado.')
+      setNuevoTipoServicio({ nombre: '', descripcion: '', costoBase: 0, activo: true })
+      setIsTipoServicioPanelOpen(false)
+      await loadTiposServicio()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsTipoServicioSaving(false)
+    }
+  }
+
+  async function guardarConfigGarantia() {
+    const dias = Number(garantiaDefaultDias || 0)
+    if (!Number.isInteger(dias) || dias < 0) {
+      toast.error('Los días de garantía deben ser un número entero ≥ 0.')
+      return
+    }
+    toast.info(`Guardar ${dias} días garantía: endpoint /configuracion próximamente.`)
+  }
+
   useEffect(() => {
     void loadInitialInventoryLoads()
     void loadCompanyProfile()
     void loadBranches()
     void loadEnvironment()
+    void loadTiposEquipo()
+    void loadTiposServicio()
   }, [accessToken])
 
   function openCreateBranchPanel() {
@@ -1734,16 +1877,19 @@ export function ConfiguracionPage() {
         <TabsList>
           <TabsTrigger value="empresa">Empresa</TabsTrigger>
           <TabsTrigger value="sucursales">Sucursales</TabsTrigger>
-          <TabsTrigger value="comprobantes" disabled>
-            Comprobantes
-          </TabsTrigger>
           <TabsTrigger value="implementacion">Implementación</TabsTrigger>
           <TabsTrigger value="entorno">Entorno</TabsTrigger>
           <TabsTrigger value="herramientas" disabled={!company || !isImplementationMode}>
             Herramientas del sistema
           </TabsTrigger>
-          <TabsTrigger value="catalogos" disabled>
-            Catálogos
+          <TabsTrigger value="rt-tipos-equipo">
+            <Wrench className="mr-1 h-4 w-4" /> Tipos de equipo
+          </TabsTrigger>
+          <TabsTrigger value="rt-tipos-servicio">
+            <Wrench className="mr-1 h-4 w-4" /> Tipos de servicio
+          </TabsTrigger>
+          <TabsTrigger value="rt-general">
+            <Wrench className="mr-1 h-4 w-4" /> Servicio Técnico
           </TabsTrigger>
         </TabsList>
 
@@ -2173,38 +2319,327 @@ export function ConfiguracionPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="comprobantes" className="pt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Comprobantes</CardTitle>
-              <CardDescription>Disponible próximamente.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Esta sección se habilitará luego de cerrar Empresa y Sucursales.
-                </p>
+        <TabsContent value="rt-tipos-equipo" className="space-y-4 pt-4">
+          <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Tipos de equipo</CardTitle>
+                    <CardDescription>
+                      Catálogo de equipos del Servicio Técnico (Celular, PC, Laptop, Impresora, Audio, etc.).
+                    </CardDescription>
+                  </div>
+                  <AuthorizationGate permission="configuracion.manage" fallback={null}>
+                    <Button
+                      size="xl"
+                      className="min-h-[48px]"
+                      onClick={() => {
+                        setNuevoTipoEquipo({ nombre: '', descripcion: '', activo: true })
+                        setIsTipoEquipoPanelOpen(true)
+                      }}
+                    >
+                      <Plus className="mr-2 h-5 w-5" /> Nuevo tipo de equipo
+                    </Button>
+                  </AuthorizationGate>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tiposEquipoLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader className="h-7 w-7" />
+                  </div>
+                ) : tiposEquipo.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-8 text-center">
+                    <p className="text-sm font-medium text-foreground">Sin tipos de equipo registrados</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Crea el primero desde el botón superior.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead>Estado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {tiposEquipo.map((t) => (
+                          <TableRow key={t.id}>
+                            <TableCell className="font-medium">{t.nombre}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {t.descripcion || '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={t.activo ? 'success' : 'outline'}>
+                                {t.activo ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
+
+          <SidePanel open={isTipoEquipoPanelOpen} onOpenChange={setIsTipoEquipoPanelOpen}>
+            <SidePanelContent>
+              <div className="flex flex-col gap-6 p-4 sm:p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Nuevo tipo de equipo</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Registra una categoría de equipo para el Servicio Técnico.
+                    </p>
+                  </div>
+                  <SidePanelClose asChild>
+                    <Button variant="ghost" size="icon-xl" className="rounded-xl">
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </SidePanelClose>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Nombre *</label>
+                    <Input
+                      className="h-12 text-base"
+                      placeholder="Ej: Celular"
+                      value={nuevoTipoEquipo.nombre}
+                      onChange={(e) => setNuevoTipoEquipo({ ...nuevoTipoEquipo, nombre: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Descripción</label>
+                    <Textarea
+                      className="min-h-[88px]"
+                      placeholder="Detalles opcionales sobre esta categoría"
+                      value={nuevoTipoEquipo.descripcion}
+                      onChange={(e) => setNuevoTipoEquipo({ ...nuevoTipoEquipo, descripcion: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex h-12 items-center justify-between rounded-xl border px-4">
+                    <span className="text-sm font-medium">Activo</span>
+                    <Switch
+                      checked={nuevoTipoEquipo.activo}
+                      onCheckedChange={(v) => setNuevoTipoEquipo({ ...nuevoTipoEquipo, activo: v })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <SidePanelClose asChild>
+                    <Button variant="secondary" size="xl" className="w-full sm:w-auto">
+                      Cancelar
+                    </Button>
+                  </SidePanelClose>
+                  <Button size="xl" className="w-full sm:w-auto" onClick={() => void guardarTipoEquipo()} disabled={isTipoEquipoSaving}>
+                    {isTipoEquipoSaving ? <Loader className="mr-2 h-5 w-5" /> : null} Guardar
+                  </Button>
+                </div>
               </div>
-            </CardContent>
-          </Card>
+            </SidePanelContent>
+          </SidePanel>
         </TabsContent>
 
-        <TabsContent value="catalogos" className="pt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Catálogos</CardTitle>
-              <CardDescription>Disponible próximamente.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Esta sección se habilitará en una fase posterior.
-                </p>
+        <TabsContent value="rt-tipos-servicio" className="space-y-4 pt-4">
+          <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Tipos de servicio</CardTitle>
+                    <CardDescription>
+                      Catálogo de servicios del taller con costo base referencial.
+                    </CardDescription>
+                  </div>
+                  <AuthorizationGate permission="configuracion.manage" fallback={null}>
+                    <Button
+                      size="xl"
+                      className="min-h-[48px]"
+                      onClick={() => {
+                        setNuevoTipoServicio({ nombre: '', descripcion: '', costoBase: 0, activo: true })
+                        setIsTipoServicioPanelOpen(true)
+                      }}
+                    >
+                      <Plus className="mr-2 h-5 w-5" /> Nuevo tipo de servicio
+                    </Button>
+                  </AuthorizationGate>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tiposServicioLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader className="h-7 w-7" />
+                  </div>
+                ) : tiposServicio.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-8 text-center">
+                    <p className="text-sm font-medium text-foreground">Sin tipos de servicio registrados</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Crea el primero desde el botón superior.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead className="text-right">Costo base</TableHead>
+                          <TableHead>Estado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {tiposServicio.map((t) => (
+                          <TableRow key={t.id}>
+                            <TableCell className="font-medium">{t.nombre}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {t.descripcion || '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              S/ {Number(t.costoBase || 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={t.activo ? 'success' : 'outline'}>
+                                {t.activo ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
+
+          <SidePanel open={isTipoServicioPanelOpen} onOpenChange={setIsTipoServicioPanelOpen}>
+            <SidePanelContent>
+              <div className="flex flex-col gap-6 p-4 sm:p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Nuevo tipo de servicio</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Define un servicio con costo base referencial.
+                    </p>
+                  </div>
+                  <SidePanelClose asChild>
+                    <Button variant="ghost" size="icon-xl" className="rounded-xl">
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </SidePanelClose>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Nombre *</label>
+                    <Input
+                      className="h-12 text-base"
+                      placeholder="Ej: Diagnóstico"
+                      value={nuevoTipoServicio.nombre}
+                      onChange={(e) => setNuevoTipoServicio({ ...nuevoTipoServicio, nombre: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Descripción</label>
+                    <Textarea
+                      className="min-h-[88px]"
+                      placeholder="Detalle opcional del servicio"
+                      value={nuevoTipoServicio.descripcion}
+                      onChange={(e) => setNuevoTipoServicio({ ...nuevoTipoServicio, descripcion: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Costo base (S/) *</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="h-12 text-base"
+                      placeholder="0.00"
+                      value={nuevoTipoServicio.costoBase}
+                      onChange={(e) => setNuevoTipoServicio({ ...nuevoTipoServicio, costoBase: Number(e.target.value || 0) })}
+                    />
+                  </div>
+                  <div className="flex h-12 items-center justify-between rounded-xl border px-4">
+                    <span className="text-sm font-medium">Activo</span>
+                    <Switch
+                      checked={nuevoTipoServicio.activo}
+                      onCheckedChange={(v) => setNuevoTipoServicio({ ...nuevoTipoServicio, activo: v })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <SidePanelClose asChild>
+                    <Button variant="secondary" size="xl" className="w-full sm:w-auto">
+                      Cancelar
+                    </Button>
+                  </SidePanelClose>
+                  <Button size="xl" className="w-full sm:w-auto" onClick={() => void guardarTipoServicio()} disabled={isTipoServicioSaving}>
+                    {isTipoServicioSaving ? <Loader className="mr-2 h-5 w-5" /> : null} Guardar
+                  </Button>
+                </div>
               </div>
-            </CardContent>
-          </Card>
+            </SidePanelContent>
+          </SidePanel>
+        </TabsContent>
+
+        <TabsContent value="rt-general" className="space-y-4 pt-4">
+          <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader>
+                <CardTitle>Configuración General · Servicio Técnico</CardTitle>
+                <CardDescription>
+                  Ajustes generales aplicados a Órdenes de Servicio y Garantías.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <AuthorizationGate permission="configuracion.manage">
+                  <div className="rounded-xl border p-4 sm:p-6">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-semibold">Días de garantía por defecto</label>
+                      <p className="text-xs text-muted-foreground">
+                        Garantía asignada automáticamente a las Órdenes de Servicio al marcar Entregada.
+                      </p>
+                      <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div className="w-full sm:max-w-[220px] space-y-2">
+                          <label className="text-xs text-muted-foreground">Número de días</label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            className="h-12 text-base"
+                            value={garantiaDefaultDias}
+                            onChange={(e) => setGarantiaDefaultDias(Number(e.target.value || 0))}
+                          />
+                        </div>
+                        <Button size="xl" className="min-h-[48px]" onClick={() => void guardarConfigGarantia()} disabled={garantiaGuardando}>
+                          {garantiaGuardando ? <Loader className="mr-2 h-5 w-5" /> : null} Guardar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </AuthorizationGate>
+
+                <div className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">Información del sistema</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-4">
+                    <li>Los cambios aquí se aplicarán a nivel sucursal para nuevas Órdenes de Servicio.</li>
+                    <li>La persistencia de configuración requiere endpoint <code className="rounded bg-muted px-1.5 py-0.5">/configuracion</code> (próximamente).</li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
         </TabsContent>
 
         <TabsContent value="entorno" className="space-y-4 pt-4">
