@@ -1727,13 +1727,13 @@ export function ClientesPage() {
                         <TableCell>
                           <Badge
                             variant={
-                              o.estado === 'ENTREGADO'
+                              (o.estado as string) === 'ENTREGADO' || (o.estado as string) === 'CERRADO'
                                 ? 'success'
-                                : o.estado === 'CANCELADO' || o.estado === 'RECHAZADO'
+                                : (o.estado as string) === 'CANCELADO' || (o.estado as string) === 'RECHAZADO' || (o.estado as string) === 'DEVUELTO'
                                   ? 'destructive'
-                                  : o.estado === 'DIAGNOSTICO' || o.estado === 'RECHAZADO'
+                                  : (o.estado as string) === 'DIAGNOSTICO' || (o.estado as string) === 'PRESUPUESTO'
                                     ? 'warning'
-                                    : o.estado === 'ESPERANDO_APROBACION'
+                                    : (o.estado as string) === 'ESPERANDO_APROBACION'
                                       ? 'info'
                                       : 'default'
                             }
