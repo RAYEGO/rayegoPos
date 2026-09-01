@@ -157,7 +157,7 @@ export const roleDefinitions: RoleDefinition[] = [
   {
     key: 'ADMIN_EMPRESA',
     label: 'Administrador de Empresa',
-    description: 'Administra su empresa, sucursales, usuarios y configuración.',
+    description: 'Administra su empresa, sucursales, usuarios, módulos operativos y servicio técnico.',
     badgeVariant: 'info',
     permissions: [
       'dashboard.read',
@@ -175,12 +175,24 @@ export const roleDefinitions: RoleDefinition[] = [
       'auditoria.read',
       'reportes.read',
       'configuracion.read',
+      // RT / Servicio Técnico
+      'ordenesServicio.read',
+      'ordenesServicio.write',
+      'ordenesServicio.cambioEstado',
+      'tecnicos.read',
+      'tecnicos.write',
+      'equiposCliente.read',
+      'equiposCliente.write',
+      'presupuestosOrdenServicio.write',
+      'pagosOrdenServicio.write',
+      'consumoInventarioRT.write',
+      'garantiasOrdenServicio.read',
     ],
   },
   {
     key: 'ADMIN',
     label: 'Administrador (Legacy)',
-    description: 'Rol legacy (compatibilidad).',
+    description: 'Rol legacy (compatibilidad). Equivale a ADMIN_EMPRESA.',
     badgeVariant: 'outline',
     permissions: [
       'dashboard.read',
@@ -198,6 +210,18 @@ export const roleDefinitions: RoleDefinition[] = [
       'auditoria.read',
       'reportes.read',
       'configuracion.read',
+      // RT / Servicio Técnico
+      'ordenesServicio.read',
+      'ordenesServicio.write',
+      'ordenesServicio.cambioEstado',
+      'tecnicos.read',
+      'tecnicos.write',
+      'equiposCliente.read',
+      'equiposCliente.write',
+      'presupuestosOrdenServicio.write',
+      'pagosOrdenServicio.write',
+      'consumoInventarioRT.write',
+      'garantiasOrdenServicio.read',
     ],
   },
   {
