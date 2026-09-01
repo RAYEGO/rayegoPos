@@ -68,17 +68,55 @@ export const DropdownMenuItem = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean
   }
->(({ className, inset, ...props }, ref) => (
-  <DropdownMenuPrimitive.Item
-    ref={ref}
-    className={cn(
-      'relative flex cursor-default select-none items-center rounded-md px-2 py-1.5 text-sm outline-none transition-colors focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
-      inset && 'pl-8',
-      className,
-    )}
-    {...props}
-  />
-))
+>(({ className, inset, onClick, onSelect, ...props }, ref) => {
+  const ranOnceRef = React.useRef(false)
+  const runConsumerHandler = React.useCallback(() => {
+    if (ranOnceRef.current) return
+    ranOnceRef.current = true
+    try {
+      if (typeof onSelect === 'function') {
+        ;(onSelect as any)()
+      } else if (typeof onClick === 'function') {
+        ;(onClick as any)({
+          type: 'click',
+          currentTarget: null,
+          target: null,
+          preventDefault: () => {},
+          stopPropagation: () => {},
+        })
+      }
+    } finally {
+      requestAnimationFrame(() => {
+        ranOnceRef.current = false
+      })
+    }
+  }, [onClick, onSelect])
+  const wrappedSelect = React.useCallback(
+    (event?: Event) => {
+      requestAnimationFrame(() => requestAnimationFrame(runConsumerHandler))
+      if (event) {
+        try {
+          event.preventDefault()
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [runConsumerHandler],
+  )
+  return (
+    <DropdownMenuPrimitive.Item
+      ref={ref}
+      className={cn(
+        'relative flex cursor-default select-none items-center rounded-md px-2 py-1.5 text-sm outline-none transition-colors focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        inset && 'pl-8',
+        className,
+      )}
+      onSelect={wrappedSelect as any}
+      {...props}
+    />
+  )
+})
 
 DropdownMenuItem.displayName = 'DropdownMenuItem'
 

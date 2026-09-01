@@ -1473,6 +1473,10 @@ export function ProductosPage() {
     setSelectedProductDetail(product)
     setIsDetailDialogOpen(true)
   }
+  function openEditDialog(product: ProductCatalogItem) {
+    setEditingProduct(product)
+    setIsCreateDialogOpen(true)
+  }
 
   const handleSkuBlur = useCallback(
     async (value: string) => {
