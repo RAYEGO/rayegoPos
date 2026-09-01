@@ -80,13 +80,61 @@ function getEspecialidadesBadges(especialidades: EspecialidadTecnico[]) {
   )
 }
 
+type TecnicoUsuarioMixed =
+  | { id: string; nombres: string; apellidos: string; email: string; numeroDocumento: string; activo: boolean }
+  | UsersModuleUserRecord
+
+function uNombre(u: TecnicoUsuarioMixed | null | undefined): string {
+  if (!u) return ''
+  if ('nombres' in u) return `${u.nombres} ${u.apellidos}`.trim()
+  return `${u.firstName} ${u.lastName}`.trim()
+}
+function uUsername(u: TecnicoUsuarioMixed | null | undefined): string {
+  if (!u) return ''
+  if ('username' in u) return u.username || ''
+  return (u.email || '').split('@')[0] || ''
+}
+function uDocumento(u: TecnicoUsuarioMixed | null | undefined): string {
+  if (!u) return ''
+  if ('numeroDocumento' in u) return u.numeroDocumento || ''
+  return u.documentId || ''
+}
+function uEmail(u: TecnicoUsuarioMixed | null | undefined): string {
+  return u && u.email ? u.email : ''
+}
+function uPhone(u: TecnicoUsuarioMixed | null | undefined): string {
+  if (!u) return ''
+  if ('phone' in u) return (u.phone as string | null) || ''
+  return ''
+}
+
+function errorStatus(err: unknown): number {
+  if (!err) return 500
+  if (typeof err === 'object') {
+    const o = err as Record<string, unknown>
+    if (typeof o.status === 'number') return o.status
+    if (typeof o.statusCode === 'number') return o.statusCode
+    if (typeof (o as any).response?.status === 'number') return (o as any).response.status
+  }
+  return 500
+}
+function errorMessage(err: unknown): string {
+  if (!err) return 'Ocurrió un error inesperado.'
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object') {
+    const o = err as Record<string, unknown>
+    if (typeof o.message === 'string') return o.message
+  }
+  return String(err)
+}
+
 export function TecnicosPage() {
   useEffect(() => {
     document.title = 'Técnicos · RayegoTech'
   }, [])
 
   const { session } = useAuth()
-  const handleUnauthorized = useHandleUnauthorized()
+  const handleUnauthorized = useHandleUnauthorized('TecnicosPage')
   const accessToken = session?.accessToken ?? ''
 
   const [loading, setLoading] = useState(false)
@@ -114,7 +162,7 @@ export function TecnicosPage() {
       const res = await rtService.listTecnicos(includeInactive)
       setItems(res.items || [])
     } catch (err) {
-      handleUnauthorized(err)
+      await handleUnauthorized(errorStatus(err), errorMessage(err), 'rtService.listTecnicos')
       if (!(err instanceof ApiError) && !(err instanceof ApiNetworkError)) throw err
     } finally {
       setLoading(false)
@@ -127,7 +175,7 @@ export function TecnicosPage() {
       const list = await usersService.list(accessToken)
       setUsuarios(list || [])
     } catch (err) {
-      handleUnauthorized(err)
+      await handleUnauthorized(errorStatus(err), errorMessage(err), 'usersService.list')
       if (!(err instanceof ApiError) && !(err instanceof ApiNetworkError)) throw err
     }
   }, [accessToken, handleUnauthorized])
@@ -160,12 +208,11 @@ export function TecnicosPage() {
         const q = search.trim().toLowerCase()
         const u = t._usuario
         const full = [
-          u?.firstName,
-          u?.lastName,
-          u?.username,
-          u?.documentId,
-          u?.email,
-          u?.phone,
+          uNombre(u),
+          uUsername(u),
+          uDocumento(u),
+          uEmail(u),
+          uPhone(u),
         ]
           .filter(Boolean)
           .join(' ')
@@ -216,7 +263,7 @@ export function TecnicosPage() {
       setDrawerOpen(false)
       await fetchTecnicos()
     } catch (err) {
-      handleUnauthorized(err)
+      await handleUnauthorized(errorStatus(err), errorMessage(err), 'rtService.update/createTecnico')
       if (err instanceof ApiError || err instanceof ApiNetworkError) {
         toast.error(err.message)
       } else {
@@ -235,7 +282,7 @@ export function TecnicosPage() {
       setDeleteConfirmId(null)
       await fetchTecnicos()
     } catch (err) {
-      handleUnauthorized(err)
+      await handleUnauthorized(errorStatus(err), errorMessage(err), 'rtService.deleteTecnico')
       if (err instanceof ApiError || err instanceof ApiNetworkError) {
         toast.error(err.message)
       } else {
@@ -343,23 +390,20 @@ export function TecnicosPage() {
                   <TableBody>
                     {filtrados.map((t) => {
                       const u = t._usuario
+                      const nom = uNombre(u)
                       return (
                         <TableRow key={t.id}>
                           <TableCell className="min-w-[220px]">
                             <div className="font-medium">
-                              {u ? `${u.firstName} ${u.lastName}` : `Usuario #${t.usuarioId.slice(0, 8)}`}
+                              {nom || `Usuario #${t.usuarioId.slice(0, 8)}`}
                             </div>
                             <div className="text-xs text-muted-foreground">
-                              {u?.email || 'Sin correo'} · {u?.phone || 'Sin teléfono'}
+                              {uEmail(u) || 'Sin correo'} · {uPhone(u) || 'Sin teléfono'}
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="text-sm font-medium">
-                              {u && 'username' in u ? u.username : (u && 'email' in u ? (u.email?.split('@')[0] || '—') : '—')}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              DNI {u && 'documentId' in u ? u.documentId : (u && 'numeroDocumento' in u ? u.numeroDocumento : '—')}
-                            </div>
+                            <div className="text-sm font-medium">{uUsername(u) || '—'}</div>
+                            <div className="text-xs text-muted-foreground">DNI {uDocumento(u) || '—'}</div>
                           </TableCell>
                           <TableCell>{getEspecialidadesBadges(t.especialidades)}</TableCell>
                           <TableCell>
