@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 
 export type SidePanelProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
 export function SidePanel({ modal = false, ...props }: SidePanelProps) {
-  return <DialogPrimitive.Root modal={modal} {...props} />
+  return <DialogPrimitive.Root data-side-panel-root="true" modal={modal} {...props} />
 }
 
 export const SidePanelTrigger = DialogPrimitive.Trigger

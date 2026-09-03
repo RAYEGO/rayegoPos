@@ -51,13 +51,40 @@ export function Combobox({
   }, [options, search])
 
   React.useEffect(() => {
+    const pointerTargetIsInOverlayOrPortal = (target: HTMLElement) => {
+      const portalOrOverlay = target.closest<HTMLElement>(
+        '[data-radix-dialog-overlay], [data-radix-dialog-content], [data-radix-popper-content-wrapper], [data-radix-dropdown-menu-content], [data-radix-tooltip-content], [data-radix-popover-content], [data-radix-hover-card-content], [data-side-panel-content], [data-radix-select-content], [data-radix-select-viewport]',
+      )
+      if (portalOrOverlay) return true
+      const isFixedTopLevel = (el: HTMLElement) => {
+        let n: HTMLElement | null = el
+        for (let i = 0; i < 6 && n; i++) {
+          const cs = window.getComputedStyle(n)
+          if ((cs.position === 'fixed' || cs.position === 'absolute') && Number(cs.zIndex) >= 40) {
+            return true
+          }
+          n = n.parentElement
+        }
+        return false
+      }
+      return isFixedTopLevel(target)
+    }
     function handlePointerDown(event: PointerEvent) {
+      const tgt = event.target as HTMLElement | null
       if (!wrapperRef.current) return
-      if (wrapperRef.current.contains(event.target as Node)) return
+      if (tgt && wrapperRef.current.contains(tgt)) return
+      if (tgt && pointerTargetIsInOverlayOrPortal(tgt)) return
       setOpen(false)
       setSearch('')
     }
     function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null
+      if (target) {
+        const inTemporaryOverlay = target.closest<HTMLElement>(
+          '[data-radix-popper-content-wrapper], [data-side-panel-content], [data-radix-dialog-content]',
+        )
+        if (inTemporaryOverlay && event.key === 'Escape') return
+      }
       if (event.key === 'Escape') {
         setOpen(false)
         setSearch('')

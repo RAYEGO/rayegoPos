@@ -60,10 +60,33 @@ export function SearchableSelect({
   }, [searchTerm, selectedOption, showAsSelected])
 
   React.useEffect(() => {
+    const pointerTargetIsInOverlayOrPortal = (target: HTMLElement) => {
+      const portalOrOverlay = target.closest<HTMLElement>(
+        '[data-radix-dialog-overlay], [data-radix-dialog-content], [data-radix-popper-content-wrapper], [data-radix-dropdown-menu-content], [data-radix-tooltip-content], [data-radix-popover-content], [data-radix-hover-card-content], [data-side-panel-content], [data-radix-select-content], [data-radix-select-viewport]',
+      )
+      if (portalOrOverlay) return true
+      if (target.classList && typeof target.classList.contains === 'function') {
+        if (target.classList.contains('fixed') && target.classList.contains('z-[')) return true
+      }
+      const isFixedTopLevel = (el: HTMLElement) => {
+        let n: HTMLElement | null = el
+        for (let i = 0; i < 6 && n; i++) {
+          const cs = window.getComputedStyle(n)
+          if ((cs.position === 'fixed' || cs.position === 'absolute') && Number(cs.zIndex) >= 40) {
+            return true
+          }
+          n = n.parentElement
+        }
+        return false
+      }
+      return isFixedTopLevel(target)
+    }
     function handlePointerDown(event: PointerEvent) {
+      const tgt = event.target as HTMLElement | null
       if (!wrapperRef.current) return
-      if (wrapperRef.current.contains(event.target as Node)) return
+      if (tgt && wrapperRef.current.contains(tgt)) return
       if (!open) return
+      if (tgt && pointerTargetIsInOverlayOrPortal(tgt)) return
       setOpen(false)
       setSearchTerm('')
       activeIndexRef.current = -1
