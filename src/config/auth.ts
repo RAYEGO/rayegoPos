@@ -23,4 +23,4 @@ if (explicitBase) {
 
 export const API_BASE_URL = resolvedBase
 
-export const AUTH_ALLOW_MOCKS = false
+export const AUTH_ALLOW_MOCKS = true

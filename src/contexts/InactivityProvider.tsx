@@ -5,11 +5,17 @@ import { authService } from '@/services/authService'
 import {
   readSecurityTimeouts,
   readPendingOperation,
+  INACTIVITY_STORAGE_KEY,
   type PendingOperationSnapshot,
   type SecurityTimeoutSettings,
 } from '@/config/security'
+
+const INACTIVITY_STORAGE_PREFIX = INACTIVITY_STORAGE_KEY.replace(/\.inactivity-state$/, '')
 import { isAccessTokenValid, isRefreshTokenValid } from '@/utils/jwt'
 import type { AuthSession } from '@/types/auth'
+
+const AUTH_SESSION_UPDATED_EVENT = 'rayego-auth-session-updated'
+const AUTH_SESSION_CLEARED_EVENT = 'rayego-auth-session-cleared'
 
 const ACTIVITY_EVENTS = [
   'mousedown',
@@ -58,7 +64,7 @@ const [InactivityContext, useInactivityContext] = createSafeContext<InactivityCo
 export { useInactivityContext }
 
 export function InactivityProvider({ children }: { children: React.ReactNode }) {
-  const { session, isAuthenticated, logout } = useAuth()
+  const { session, isAuthenticated, logout, syncSessionFromStorage } = useAuth()
 
   const [settings, setSettings] = useState<SecurityTimeoutSettings>(() =>
     readSecurityTimeouts(),
@@ -108,13 +114,26 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const reportActivity = () => {
     const now = Date.now()
+    idleDeadlineRef.current = now + settings.idleTimeoutMs
     if (now - lastReportAtRef.current < ACTIVITY_REPORT_COOLDOWN_MS) {
-      idleDeadlineRef.current = now + settings.idleTimeoutMs
+      try {
+        const lastSync =
+          Number(window.localStorage.getItem(INACTIVITY_STORAGE_PREFIX + '.lastSync') ?? '0') || 0
+        if (now - lastSync >= ACTIVITY_REPORT_COOLDOWN_MS) {
+          window.localStorage.setItem(INACTIVITY_STORAGE_PREFIX + '.lastSync', String(now))
+        }
+      } catch {
+        /* ignore */
+      }
       return
     }
     lastReportAtRef.current = now
     setLastActivityAt(now)
-    idleDeadlineRef.current = now + settings.idleTimeoutMs
+    try {
+      window.localStorage.setItem(INACTIVITY_STORAGE_PREFIX + '.lastSync', String(now))
+    } catch {
+      /* ignore */
+    }
     setIdleTimeLeftMs(settings.idleTimeoutMs)
 
     if (statusRef.current !== 'active') {
@@ -166,6 +185,13 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     setStatus('expired')
     clearWarningInterval()
     clearTickInterval()
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT))
+      } catch {
+        /* ignore */
+      }
+    }
     void logout(details.message)
   }
 
@@ -213,6 +239,21 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
     tickIntervalRef.current = window.setInterval(() => {
       if (statusRef.current === 'expired') return
+      try {
+        const otherLastSyncRaw =
+          window.localStorage.getItem(INACTIVITY_STORAGE_PREFIX + '.lastSync') ?? null
+        const otherLastSync = otherLastSyncRaw
+          ? Number(otherLastSyncRaw) || 0
+          : 0
+        if (otherLastSync > 0) {
+          const newDeadline = otherLastSync + settings.idleTimeoutMs
+          if (newDeadline - idleDeadlineRef.current > 2000) {
+            idleDeadlineRef.current = newDeadline
+          }
+        }
+      } catch {
+        /* ignore */
+      }
       const left = idleDeadlineRef.current - Date.now()
       const clampedLeft = left < 0 ? 0 : left
       const inWarningWindow =
@@ -242,6 +283,11 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
             const refreshRes = await authService.refreshSession()
             if (refreshRes.ok) {
               sessionRef.current = refreshRes.session
+              try {
+                syncSessionFromStorage()
+              } catch {
+                /* ignore */
+              }
             }
           })()
         }
@@ -250,8 +296,9 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
     return () => {
       clearTickInterval()
+      clearWarningInterval()
     }
-  }, [isAuthenticated, settings.idleTimeoutMs, settings.warningCountdownMs, settings.accessTokenExpiryBufferMs])
+  }, [isAuthenticated, settings.idleTimeoutMs, settings.warningCountdownMs, settings.accessTokenExpiryBufferMs, syncSessionFromStorage])
 
   useEffect(() => {
     if (!isAuthenticated) return

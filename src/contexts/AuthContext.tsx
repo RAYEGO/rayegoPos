@@ -90,10 +90,15 @@ function sessionTokensEqual(a: AuthSession | null, b: AuthSession | null): boole
   return a.accessToken === b.accessToken && a.refreshToken === b.refreshToken
 }
 
+const AUTH_SESSION_UPDATED_EVENT = 'rayego-auth-session-updated'
+const AUTH_SESSION_CLEARED_EVENT = 'rayego-auth-session-cleared'
+const AUTH_401_EVENT = 'rayego-auth-401'
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<AuthSession | null>(null)
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const sessionRef = useRef<AuthSession | null>(null)
+  const lastHandled401Ref = useRef<number>(0)
 
   const setSession = useCallback((next: AuthSession | null) => {
     sessionRef.current = next
@@ -177,15 +182,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('storage', onStorage)
 
+    const onSessionCleared = () => {
+      const prev = sessionRef.current
+      if (prev !== null) {
+        setSession(null)
+      }
+    }
+    window.addEventListener(AUTH_SESSION_CLEARED_EVENT, onSessionCleared)
+
+    const onSessionUpdated = () => {
+      syncSessionFromStorage()
+    }
+    window.addEventListener(AUTH_SESSION_UPDATED_EVENT, onSessionUpdated)
+
+    const onAuth401 = (event: Event) => {
+      const now = Date.now()
+      if (now - lastHandled401Ref.current < 2500) return
+      lastHandled401Ref.current = now
+      const detail = (event as CustomEvent).detail
+      const message =
+        detail && typeof detail === 'object' && typeof (detail as any).message === 'string'
+          ? (detail as any).message as string
+          : 'Tu sesión ha expirado. Inicia sesión nuevamente para continuar.'
+      const prev = sessionRef.current
+      if (prev !== null) {
+        void logout(message).catch(() => {})
+      } else {
+        clearStoredSession()
+        setSession(null)
+      }
+    }
+    window.addEventListener(AUTH_401_EVENT, onAuth401)
+
     const interval = window.setInterval(() => {
       syncSessionFromStorage()
     }, 2000)
 
     return () => {
       window.removeEventListener('storage', onStorage)
+      window.removeEventListener(AUTH_SESSION_CLEARED_EVENT, onSessionCleared)
+      window.removeEventListener(AUTH_SESSION_UPDATED_EVENT, onSessionUpdated)
+      window.removeEventListener(AUTH_401_EVENT, onAuth401)
       window.clearInterval(interval)
     }
-  }, [syncSessionFromStorage])
+  }, [syncSessionFromStorage, logout])
 
   const login = useCallback(async (payload: LoginPayload) => {
     console.debug(

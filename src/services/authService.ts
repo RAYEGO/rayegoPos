@@ -25,7 +25,7 @@ function shouldFallbackToMock(
   void error
   void endpoint
   void loginPayload
-  return false
+  return AUTH_ALLOW_MOCKS
 }
 
 export class BranchSelectionRequiredError extends Error {

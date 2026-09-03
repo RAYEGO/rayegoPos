@@ -13,6 +13,7 @@ export type AuthPermission =
   | 'dashboard.read'
   | 'ventas.read'
   | 'productos.read'
+  | 'productos.manage'
   | 'compras.read'
   | 'inventario.read'
   | 'clientes.read'
