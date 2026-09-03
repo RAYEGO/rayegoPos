@@ -2071,8 +2071,16 @@ export function ProductosPage() {
         <SidePanel
           open={isCreateDialogOpen}
           onOpenChange={(open) => {
-            if (!open && anyChildGracePeriodRef.current && !isExplicitCreateDialogClosingRef.current) {
-              return
+            const anyChildOpen = isPackagingDialogOpen || isPackagingGuideOpen || masterDialogOpen
+            if (!open) {
+              if (anyChildOpen || (anyChildGracePeriodRef.current && !isExplicitCreateDialogClosingRef.current)) {
+                if (anyChildOpen) {
+                  if (!isExplicitCreateDialogClosingRef.current) {
+                    queueMicrotask(() => setIsCreateDialogOpen(true))
+                  }
+                }
+                return
+              }
             }
             isExplicitCreateDialogClosingRef.current = false
             setIsCreateDialogOpen(open)
@@ -2099,11 +2107,14 @@ export function ProductosPage() {
                   size="icon"
                   className="h-9 w-9"
                   onClick={() => {
+                    const anyChildOpen = isPackagingDialogOpen || isPackagingGuideOpen || masterDialogOpen
+                    if (anyChildOpen) return
                     isExplicitCreateDialogClosingRef.current = true
                     setIsCreateDialogOpen(false)
                     setEditingProduct(null)
                     form.reset(defaultFormValues)
                   }}
+                  disabled={isPackagingDialogOpen || isPackagingGuideOpen || masterDialogOpen || isSubmitting}
                 >
                   <X className="h-4 w-4" />
                   <span className="sr-only">Cerrar</span>
@@ -2417,23 +2428,10 @@ export function ProductosPage() {
             </div>
           </form>
 
-          {masterDialogOpen ? (
-            <Dialog
-              open={masterDialogOpen}
-              modal={false}
-              onOpenChange={(open) => {
-                if (!open) {
-                  resetMasterDialogState()
-                  return
-                }
-                setMasterDialogOpen(open)
-              }}
-            >
-            <DialogContent
-              onInteractOutside={(event) => event.preventDefault()}
-              onEscapeKeyDown={(event) => event.preventDefault()}
-              className="max-h-[88vh] overflow-y-auto sm:max-w-xl"
-            >
+          </SidePanelContent>
+        </SidePanel>
+      ) : null}
+
 
       {isPackagingDialogOpen ? (
         <Dialog
@@ -2451,7 +2449,8 @@ export function ProductosPage() {
         <DialogContent
           onInteractOutside={(event) => event.preventDefault()}
           onEscapeKeyDown={(event) => event.preventDefault()}
-          className="bottom-0 left-0 top-auto flex h-[94vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-3 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[86vh] sm:max-h-[86vh] sm:w-[92vw] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-4">
+          className="bottom-0 left-0 top-auto flex h-[94vh] w-full max-w-none translate-x-0 translate-y-0 flex-col overflow-hidden rounded-t-2xl rounded-b-none p-3 sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:h-[86vh] sm:max-h-[86vh] sm:w-[92vw] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-4"
+        >
           <DialogHeader className="shrink-0 space-y-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -3594,10 +3593,6 @@ export function ProductosPage() {
           ) : null}
         </DialogContent>
         </Dialog>
-      ) : null}
-
-          </SidePanelContent>
-        </SidePanel>
       ) : null}
 
     </div>
