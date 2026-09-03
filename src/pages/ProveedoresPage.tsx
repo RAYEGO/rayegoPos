@@ -5,7 +5,6 @@ import { z } from 'zod'
 import {
   ChevronDown,
   Edit,
-  History,
   Loader2,
   MoreVertical,
   Plus,

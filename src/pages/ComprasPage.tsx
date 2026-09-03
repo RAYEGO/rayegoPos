@@ -4468,6 +4468,13 @@ export function ComprasPage() {
       <SidePanel
         open={Boolean(selectedViewOrderId)}
         onOpenChange={(open) => {
+          const anyChildOpen =
+            isOrderReceiveDialogOpen ||
+            isPaymentDialogOpen ||
+            isOrderSummaryDialogOpen ||
+            isCashShortageDialogOpen ||
+            isMissingCashDrawerDialogOpen
+          if (!open && anyChildOpen) return
           if (!open) {
             setSelectedViewOrderId(null)
           }
@@ -4537,20 +4544,41 @@ export function ComprasPage() {
                   </Badge>
                 ) : null}
                 {selectedOrderDetail ? (
-                  <Badge
-                    variant={
-                      Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0
-                        ? 'warning'
-                        : 'info'
-                    }
-                    className="font-normal"
-                    title="Estado de recepción"
-                  >
-                    Recepción ·{' '}
-                    {Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0
-                      ? 'PENDIENTE DE PAGO'
-                      : selectedOrderDetail.order.logisticsStatus ?? 'PENDIENTE'}
-                  </Badge>
+                  (() => {
+                    const hasPending = selectedOrderDetail.items.some(
+                      (i) => Number(i.baseQuantity - i.receivedBaseUnits) > 0,
+                    )
+                    const logistics = selectedOrderDetail.order.logisticsStatus ?? null
+                    const receptionBadgeVariant: 'success' | 'info' | 'warning' | 'default' =
+                      logistics === 'RECEPCION_COMPLETA'
+                        ? 'success'
+                        : logistics === 'RECEPCION_PARCIAL' || logistics === 'EN_RECEPCION'
+                          ? 'info'
+                          : logistics === 'REGISTRADA'
+                            ? 'warning'
+                            : hasPending
+                              ? 'warning'
+                              : 'success'
+                    const receptionBadgeLabel =
+                      logistics === 'RECEPCION_COMPLETA'
+                        ? 'COMPLETA'
+                        : logistics === 'RECEPCION_PARCIAL'
+                          ? 'PARCIAL'
+                          : logistics === 'EN_RECEPCION'
+                            ? 'EN RECEPCIÓN'
+                            : hasPending
+                              ? 'PENDIENTE'
+                              : 'COMPLETA'
+                    return (
+                      <Badge
+                        variant={receptionBadgeVariant as any}
+                        className="font-normal"
+                        title="Estado de recepción"
+                      >
+                        Recepción · {receptionBadgeLabel}
+                      </Badge>
+                    )
+                  })()
                 ) : null}
                 {selectedOrderDetail ? (
                   <Badge variant="default" className="font-normal" title="Estado de pago">
@@ -4713,19 +4741,12 @@ export function ComprasPage() {
                 disabled={
                   !selectedOrderDetail ||
                   selectedOrderDetail.order.logisticsStatus === 'RECEPCION_COMPLETA' ||
-                  Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0 ||
                   !selectedOrderDetail.items.some(
                     (item) => item.baseQuantity - item.receivedBaseUnits > 0,
                   )
                 }
                 onClick={() => {
                   if (!selectedOrderDetail) return
-                  if (Number(selectedOrderDetail.order.adjustedPendingAmount ?? 0) > 0) {
-                    toast.warning(
-                      'Completa el pago de la orden para habilitar la recepción.',
-                    )
-                    return
-                  }
                   const hasPending = selectedOrderDetail.items.some(
                     (item) => item.baseQuantity - item.receivedBaseUnits > 0,
                   )
@@ -4740,11 +4761,9 @@ export function ComprasPage() {
                   openOrderReceiveDialog(selectedOrderDetail.order.id)
                 }}
                 title={
-                  Number(selectedOrderDetail?.order.adjustedPendingAmount ?? 0) > 0
-                    ? 'Completa el pago de la orden para habilitar la recepción.'
-                    : selectedOrderDetail?.order.logisticsStatus === 'RECEPCION_COMPLETA'
-                      ? 'La orden ya está completamente recibida.'
-                      : 'Registrar cantidades, lotes y vencimientos recibidos del proveedor.'
+                  selectedOrderDetail?.order.logisticsStatus === 'RECEPCION_COMPLETA'
+                    ? 'La orden ya está completamente recibida.'
+                    : 'Registrar cantidades, lotes y vencimientos recibidos del proveedor.'
                 }
               >
                 <PackageOpen className="h-4 w-4 mr-1" />
