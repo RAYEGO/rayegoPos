@@ -640,7 +640,7 @@ export function ProductosPage() {
 
   const canCreateProduct =
     authorization.can('*') ||
-    authorization.can('productos.manage') ||
+    (authorization.permissions as string[]).includes('productos.manage') ||
     authorization.hasAnyRole(['ADMIN_EMPRESA', 'ADMIN', 'SUPERVISOR'])
 
   const handleUnauthorized = useHandleUnauthorized('ProductosPage')
