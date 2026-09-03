@@ -561,7 +561,7 @@ export function ProductosPage() {
       }
     }
 
-    const anyChildOpen = isPackagingDialogOpen || isPackagingGuideOpen
+    const anyChildOpen = isPackagingDialogOpen || isPackagingGuideOpen || masterDialogOpen
 
     if (anyChildOpen) {
       stopGraceTimer()
@@ -2416,9 +2416,24 @@ export function ProductosPage() {
               </div>
             </div>
           </form>
-          </SidePanelContent>
-        </SidePanel>
-      ) : null}
+
+          {masterDialogOpen ? (
+            <Dialog
+              open={masterDialogOpen}
+              modal={false}
+              onOpenChange={(open) => {
+                if (!open) {
+                  resetMasterDialogState()
+                  return
+                }
+                setMasterDialogOpen(open)
+              }}
+            >
+            <DialogContent
+              onInteractOutside={(event) => event.preventDefault()}
+              onEscapeKeyDown={(event) => event.preventDefault()}
+              className="max-h-[88vh] overflow-y-auto sm:max-w-xl"
+            >
 
       {isPackagingDialogOpen ? (
         <Dialog
@@ -3580,6 +3595,12 @@ export function ProductosPage() {
         </DialogContent>
         </Dialog>
       ) : null}
+
+          </SidePanelContent>
+        </SidePanel>
+      ) : null}
+
     </div>
   )
 }
+
