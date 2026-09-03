@@ -1,7 +1,74 @@
 import { jsPDF } from 'jspdf'
 import type { SaleReceiptResponse } from '@/types/sales'
 
-export function createReceiptPdf(receipt: SaleReceiptResponse) {
+type DataUrlInfo = {
+  format: 'PNG' | 'JPEG' | 'JPG'
+  dataUrl: string
+}
+
+function inferDataUrlFormatFromMime(dataUrl: string): 'PNG' | 'JPEG' {
+  const header = dataUrl.slice(0, 64).toLowerCase()
+  if (header.includes('image/jpeg') || header.includes('image/jpg')) return 'JPEG'
+  return 'PNG'
+}
+
+async function logoToCompatiblePdfImage(
+  logoUrl: string,
+  timeoutMs = 6000,
+): Promise<DataUrlInfo | null> {
+  if (!logoUrl) return null
+  const isDataUrl = /^data:image\//i.test(logoUrl.trim())
+  if (isDataUrl) {
+    const format = inferDataUrlFormatFromMime(logoUrl)
+    return { format, dataUrl: logoUrl }
+  }
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      window.setTimeout(() => reject(new Error('timeout-logo-load')), timeoutMs)
+    })
+    const imgPromise = new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => resolve(img)
+      img.onerror = () => {
+        const fallback = new Image()
+        fallback.onload = () => resolve(fallback)
+        fallback.onerror = () => reject(new Error('no-logo-load'))
+        fallback.src = logoUrl
+      }
+      img.src = logoUrl
+    })
+    const img = await Promise.race([imgPromise, timeoutPromise])
+    const naturalW = Number.isFinite(img.naturalWidth) ? img.naturalWidth : 0
+    const naturalH = Number.isFinite(img.naturalHeight) ? img.naturalHeight : 0
+    if (!naturalW || !naturalH) return null
+    const maxPxW = 240
+    const maxPxH = 96
+    let w = naturalW
+    let h = naturalH
+    const rW = maxPxW / w
+    const rH = maxPxH / h
+    const ratio = Math.min(1, rW, rH)
+    w = Math.max(1, Math.round(w * ratio))
+    h = Math.max(1, Math.round(h * ratio))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, w, h)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(img, 0, 0, w, h)
+    const png = canvas.toDataURL('image/png')
+    return { format: 'PNG', dataUrl: png }
+  } catch {
+    return null
+  }
+}
+
+export async function createReceiptPdf(receipt: SaleReceiptResponse) {
   const pageHeight = 297
   const doc = new jsPDF({
     unit: 'mm',
@@ -62,6 +129,32 @@ export function createReceiptPdf(receipt: SaleReceiptResponse) {
     doc.setLineWidth(0.2)
     doc.line(marginX, y, rightX, y)
     y += 4
+  }
+
+  if (receipt.company.logoUrl) {
+    try {
+      const logoImg = await logoToCompatiblePdfImage(receipt.company.logoUrl, 6000)
+      if (logoImg) {
+        const maxLogoW = 60
+        const maxLogoH = 12
+        const dims =
+          typeof (doc as any).getImageProperties === 'function'
+            ? ((doc as any).getImageProperties(logoImg.dataUrl) as { width: number; height: number })
+            : null
+        let w = dims?.width ?? maxLogoW
+        let h = dims?.height ?? maxLogoH
+        const rW = maxLogoW / w
+        const rH = maxLogoH / h
+        const ratio = Math.min(1, rW, rH)
+        w = Math.max(1, w * ratio)
+        h = Math.max(1, h * ratio)
+        const x = 40 - w / 2
+        doc.addImage(logoImg.dataUrl, logoImg.format, x, y, w, h, undefined, 'FAST')
+        y += h + 1
+      }
+    } catch {
+      /* ignore: render sin logo */
+    }
   }
 
   addLine(receipt.company.nombreComercial ?? receipt.company.razonSocial, {

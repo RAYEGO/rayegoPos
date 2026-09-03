@@ -149,6 +149,8 @@ export type SaleReceiptResponse = {
     ruc: string
     direccion: string | null
     telefono: string | null
+    logoUrl: string | null
+    email: string | null
   }
   branch: {
     id: string
