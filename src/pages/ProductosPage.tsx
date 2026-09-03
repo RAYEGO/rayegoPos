@@ -454,7 +454,7 @@ export function ProductosPage() {
     activePrinciples: [],
   })
   const [isCatalogLoading, setIsCatalogLoading] = useState(true)
-  const [isOptionsLoading, setIsOptionsLoading] = useState(true)
+  const [isOptionsLoading, setIsOptionsLoading] = useState(false)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -636,7 +636,12 @@ export function ProductosPage() {
   })
 
   const canManageMasters =
-    authorization.can('*') || authorization.hasAnyRole(['ADMIN', 'SUPERVISOR'])
+    authorization.can('*') || authorization.hasAnyRole(['ADMIN_EMPRESA', 'ADMIN', 'SUPERVISOR'])
+
+  const canCreateProduct =
+    authorization.can('*') ||
+    authorization.can('productos.manage') ||
+    authorization.hasAnyRole(['ADMIN_EMPRESA', 'ADMIN', 'SUPERVISOR'])
 
   const handleUnauthorized = useHandleUnauthorized('ProductosPage')
   const handleUnauthorizedRef = useRef(handleUnauthorized)
@@ -745,9 +750,6 @@ export function ProductosPage() {
     }),
     [summary],
   )
-
-  const masterDataReady =
-    options.categories.length > 0 && options.units.length > 0
 
   const presentationNameById = useMemo(
     () => new Map(options.presentations.map((presentation) => [presentation.id, presentation.name])),
@@ -1662,7 +1664,7 @@ export function ProductosPage() {
             <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
             <TabsTrigger value="maestros">Maestros</TabsTrigger>
           </TabsList>
-          <Button size="sm" onClick={openCreateDialog} disabled={!masterDataReady || isOptionsLoading}>
+          <Button size="sm" onClick={openCreateDialog} disabled={isOptionsLoading || !canCreateProduct}>
             <Plus className="h-4 w-4 mr-1" />
             Nuevo Producto
           </Button>
