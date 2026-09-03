@@ -1070,22 +1070,6 @@ export function ClientesPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedCustomerId(customer.id)
-                              setActiveTab('historial-compras')
-                            }}
-                          >
-                            Historial de compras
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedCustomerId(customer.id)
-                              setActiveTab('estado-cuenta')
-                            }}
-                          >
-                            Estado de cuenta
-                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openEditDialog(customer)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar
@@ -1186,22 +1170,6 @@ export function ClientesPage() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedCustomerId(customer.id)
-                                      setActiveTab('historial-compras')
-                                    }}
-                                  >
-                                    Historial de compras
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedCustomerId(customer.id)
-                                      setActiveTab('estado-cuenta')
-                                    }}
-                                  >
-                                    Estado de cuenta
-                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => openEditDialog(customer)}>
                                     <Edit className="mr-2 h-4 w-4" />
                                     Editar
