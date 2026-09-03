@@ -34,7 +34,24 @@ export const SidePanelContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean
   }
->(({ className, children, showCloseButton = false, ...props }, ref) => (
+>(({ className, children, showCloseButton = false, onPointerDownOutside, onEscapeKeyDown, ...props }, ref) => {
+  const hasAnyOpenNestedDialog = React.useCallback(() => {
+    if (typeof document === 'undefined') return false
+    const candidateRoots = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-radix-dialog-root][data-state="open"], [role="dialog"][data-state="open"]',
+      ),
+    )
+    const container = document.body
+    for (const el of candidateRoots) {
+      if (!container.contains(el)) continue
+      if (el.hasAttribute('data-side-panel-root')) continue
+      return true
+    }
+    return false
+  }, [])
+
+  return (
   <SidePanelPortal>
     <SidePanelOverlay />
     <DialogPrimitive.Content
@@ -43,6 +60,20 @@ export const SidePanelContent = React.forwardRef<
         'fixed inset-y-0 right-0 z-[50] flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
         className,
       )}
+      onPointerDownOutside={(event) => {
+        if (hasAnyOpenNestedDialog()) {
+          event.preventDefault()
+          return
+        }
+        if (typeof onPointerDownOutside === 'function') onPointerDownOutside(event)
+      }}
+      onEscapeKeyDown={(event) => {
+        if (hasAnyOpenNestedDialog()) {
+          event.preventDefault()
+          return
+        }
+        if (typeof onEscapeKeyDown === 'function') onEscapeKeyDown(event)
+      }}
       onOpenAutoFocus={(event) => {
         const root = event.currentTarget as HTMLElement | null
         if (!root) return
@@ -114,6 +145,7 @@ export const SidePanelContent = React.forwardRef<
       ) : null}
     </DialogPrimitive.Content>
   </SidePanelPortal>
-))
+  )
+})
 
 SidePanelContent.displayName = 'SidePanelContent'

@@ -99,19 +99,9 @@ export const DropdownMenuItem = React.forwardRef<
     },
     [onClick, onSelect],
   )
-  const wrappedHandler = React.useCallback(
+  const wrappedSelectHandler = React.useCallback(
     (event?: Event) => {
-      const ev = event ?? new Event('dropdown-select')
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => runConsumerHandlers(ev)),
-      )
-      if (event) {
-        try {
-          event.preventDefault()
-        } catch {
-          // ignore
-        }
-      }
+      runConsumerHandlers(event ?? new Event('dropdown-select'))
     },
     [runConsumerHandlers],
   )
@@ -124,8 +114,7 @@ export const DropdownMenuItem = React.forwardRef<
         inset && 'pl-8',
         className,
       )}
-      onSelect={wrappedHandler as any}
-      onClick={wrappedHandler as any}
+      onSelect={wrappedSelectHandler as any}
     />
   )
 })
