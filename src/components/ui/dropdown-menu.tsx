@@ -101,7 +101,8 @@ export const DropdownMenuItem = React.forwardRef<
   )
   const wrappedSelectHandler = React.useCallback(
     (event?: Event) => {
-      runConsumerHandlers(event ?? new Event('dropdown-select'))
+      const ev = event ?? new Event('dropdown-select')
+      requestAnimationFrame(() => runConsumerHandlers(ev))
     },
     [runConsumerHandlers],
   )
