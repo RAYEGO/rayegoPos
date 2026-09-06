@@ -8,7 +8,10 @@ import type {
   ResetPasswordPayload,
 } from '@/types/auth'
 import { apiRequest, ApiError, ApiNetworkError } from '@/services/apiClient'
-import { authMockService } from '@/services/authMockService'
+import {
+  authMockService,
+  isDemoAccountCredentials,
+} from '@/services/authMockService'
 import {
   overwriteStoredSession,
   peekStoredSession,
@@ -29,7 +32,7 @@ function shouldFallbackToMock(
   // el error NO es 401/400 de credenciales inválidas REALES (es decir solo
   // si hay fallo de conectividad).
   if (endpoint === 'login' && loginPayload) {
-    if (authMockService.isDemoAccountCredentials(loginPayload.email, loginPayload.password)) {
+    if (isDemoAccountCredentials(loginPayload.email, loginPayload.password)) {
       const errStatus = error instanceof ApiError ? error.status : null
       // 401/400 reales de la API = credenciales malas, NO silenciar con demo.
       if (errStatus === 401 || errStatus === 400) return false
