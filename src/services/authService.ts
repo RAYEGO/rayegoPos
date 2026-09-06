@@ -22,10 +22,29 @@ function shouldFallbackToMock(
   endpoint: 'login' | 'restoreSession' | 'logout' | 'requestPasswordReset' | 'resetPassword' | 'refreshSession' = 'restoreSession',
   loginPayload?: LoginPayload,
 ) {
-  void error
-  void endpoint
-  void loginPayload
-  return AUTH_ALLOW_MOCKS
+  // Política: modo demo NUNCA se activa automáticamente si VITE_AUTH_ALLOW_MOCKS=false.
+  if (!AUTH_ALLOW_MOCKS) return false
+
+  // Credenciales conocidas de demo (admin@demo.pe / etc.): fallback solo si
+  // el error NO es 401/400 de credenciales inválidas REALES (es decir solo
+  // si hay fallo de conectividad).
+  if (endpoint === 'login' && loginPayload) {
+    if (authMockService.isDemoAccountCredentials(loginPayload.email, loginPayload.password)) {
+      const errStatus = error instanceof ApiError ? error.status : null
+      // 401/400 reales de la API = credenciales malas, NO silenciar con demo.
+      if (errStatus === 401 || errStatus === 400) return false
+      // Si no hubo respuesta (network / 5xx + demo creds) -> fallback demo.
+      if (error instanceof ApiNetworkError) return true
+      if (error instanceof ApiError && error.status >= 500) return true
+      return false
+    }
+  }
+
+  // Endpoints sin demo-creds específicas: fallback demo exclusivamente en
+  // NetworkError o 5xx, NO en 401/400/403/422/otros (que el usuario debe ver).
+  if (error instanceof ApiNetworkError) return true
+  if (error instanceof ApiError && error.status >= 500) return true
+  return false
 }
 
 export class BranchSelectionRequiredError extends Error {
