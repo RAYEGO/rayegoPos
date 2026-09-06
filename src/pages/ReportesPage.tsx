@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ErrorInfo, ReactNode } from 'react'
 import {
   BarChart3,
   Boxes,
@@ -120,15 +121,74 @@ function getApiErrorMessage(error: unknown) {
   return 'No fue posible cargar los reportes.'
 }
 
+class ReportContentErrorBoundary extends Component<
+  { children: ReactNode; onRetry?: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode; onRetry?: () => void }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error('[ReportContentErrorBoundary]', error, errorInfo)
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null })
+    this.props.onRetry?.()
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card className="border-rose-200 dark:border-rose-900/60">
+          <CardHeader>
+            <CardTitle className="text-rose-700 dark:text-rose-400">
+              No se pudo cargar este reporte
+            </CardTitle>
+            <CardDescription>
+              Se produjo un error al mostrar la información.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground mb-3">
+              {this.state.error?.message ?? 'Error inesperado.'}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="primary" onClick={this.handleReset}>
+                Reintentar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => window.location.reload()}
+              >
+                Recargar página
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )
+    }
+    return this.props.children
+  }
+}
+
 const categories: Array<{
   key: ReportsCategory
   label: string
   Icon: typeof BarChart3
 }> = [
+  { key: 'CAJA', label: 'Caja', Icon: WalletCards },
   { key: 'VENTAS', label: 'Ventas', Icon: ShoppingCart },
   { key: 'COMPRAS', label: 'Compras', Icon: BarChart3 },
   { key: 'INVENTARIO', label: 'Inventario', Icon: Boxes },
-  { key: 'CAJA', label: 'Caja', Icon: WalletCards },
   { key: 'CLIENTES', label: 'Clientes', Icon: Users },
   { key: 'PRODUCTOS', label: 'Productos', Icon: Boxes },
   { key: 'UTILIDADES', label: 'Utilidades', Icon: BarChart3 },
@@ -138,7 +198,7 @@ export function ReportesPage() {
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
 
-  const [category, setCategory] = useState<ReportsCategory>('VENTAS')
+  const [category, setCategory] = useState<ReportsCategory>('CAJA')
   const [branchId, setBranchId] = useState<string>('all')
   const [from, setFrom] = useState<string>('')
   const [to, setTo] = useState<string>('')
@@ -155,7 +215,7 @@ export function ReportesPage() {
 
   type TabPrincipal = 'ventas' | 'compras' | 'inventario' | 'caja' | 'servicio-tecnico'
   type TabRT = 'ordenes-servicio' | 'rendimiento-tecnicos' | 'garantias'
-  const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('ventas')
+  const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('caja')
   const [tabRT, setTabRT] = useState<TabRT>('ordenes-servicio')
   const [ordenesRT, setOrdenesRT] = useState<OrdenServicio[]>([])
   const [ordenesRTLoading, setOrdenesRTLoading] = useState(false)
@@ -242,7 +302,11 @@ export function ReportesPage() {
       })()
 
       setReport(response)
-      setBranches(response.options.branches)
+      setBranches(
+        Array.isArray((response as ReportPayload | null)?.options?.branches)
+          ? (response as ReportPayload).options.branches
+          : [],
+      )
     } catch (nextError) {
       if (nextError instanceof ApiError && nextError.status === 401) {
         await handleUnauthorized()
@@ -257,7 +321,6 @@ export function ReportesPage() {
   }, [accessToken, branchId, category, from, handleUnauthorized, to])
 
   useEffect(() => {
-    if (category !== 'VENTAS') return
     if (salesPeriodPresetRef.current === 'CUSTOM') return
     const preset = salesPeriodPresetRef.current
     const today = startOfDay(new Date())
@@ -290,7 +353,6 @@ export function ReportesPage() {
   }, [category, from, to])
 
   useEffect(() => {
-    if (category !== 'VENTAS') return
     if (salesPeriodPresetRef.current === 'CUSTOM') return
     setSalesPeriodPreset('CUSTOM')
     salesPeriodPresetRef.current = 'CUSTOM'
@@ -336,15 +398,102 @@ export function ReportesPage() {
     }
     const summary = (report as SalesReportResponse).summary
     const recent = (report as SalesReportResponse).recent
-    const unitsSold = recent.reduce((acc, s) => acc + (s.itemCount ?? 0), 0)
+    if (!summary || !Array.isArray(recent)) return null
+    const unitsSold = recent.reduce((acc, s) => acc + (s?.itemCount ?? 0), 0)
     return {
-      salesTotal: summary.salesTotal,
-      salesCount: summary.salesCount,
-      averageTicket: summary.averageTicket,
+      salesTotal: Number(summary.salesTotal) || 0,
+      salesCount: Number(summary.salesCount) || 0,
+      averageTicket: Number(summary.averageTicket) || 0,
       unitsSold,
-      methods: (report as SalesReportResponse).charts?.byPaymentMethod ?? [],
+      methods:
+        Array.isArray((report as SalesReportResponse).charts?.byPaymentMethod)
+          ? (report as SalesReportResponse).charts.byPaymentMethod
+          : [],
     }
   }, [category, report])
+
+  const purchasesView = useMemo(() => {
+    if (category !== 'COMPRAS' || !report || typeof report !== 'object') return null
+    if (!('rows' in report) || !Array.isArray((report as PurchasesReportResponse).rows)) return null
+    const rows = (report as PurchasesReportResponse).rows
+    const summary = (report as PurchasesReportResponse).summary
+    return {
+      rows,
+      summary: {
+        purchasesTotal: Number(summary?.purchasesTotal) || 0,
+        purchasesCount: Number(summary?.purchasesCount) || 0,
+        purchasesOutstanding: Number(summary?.purchasesOutstanding) || 0,
+      },
+      period: (report as PurchasesReportResponse).period ?? null,
+    }
+  }, [category, report])
+
+  const inventoryView = useMemo(() => {
+    if (category !== 'INVENTARIO' || !report || typeof report !== 'object') return null
+    if (!('rows' in report) || !('horizon' in report)) return null
+    const rep = report as InventoryReportResponse
+    const expiringLots = Array.isArray(rep.rows?.expiringLots) ? rep.rows.expiringLots : []
+    const lowStockProducts = Array.isArray(rep.rows?.lowStockProducts) ? rep.rows.lowStockProducts : []
+    return {
+      expiringLots,
+      lowStockProducts,
+      summary: {
+        expiringLotsCount: Number(rep.summary?.expiringLotsCount) || expiringLots.length,
+        lowStockProductsCount: Number(rep.summary?.lowStockProductsCount) || lowStockProducts.length,
+      },
+      horizon: {
+        until: rep.horizon?.until ?? '—',
+        days: Number(rep.horizon?.days) || 0,
+      },
+    }
+  }, [category, report])
+
+  const cashierView = useMemo(() => {
+    if (category !== 'CAJA' || !report || typeof report !== 'object') return null
+    if (!('rows' in report) || !('summary' in report)) return null
+    const rep = report as CashierReportResponse
+    const turnover = rep.summary?.turnover ?? null
+    const rows = rep.rows ?? {}
+    return {
+      summary: {
+        inflows: Number(rep.summary?.inflows) || 0,
+        outflows: Number(rep.summary?.outflows) || 0,
+        net: Number(rep.summary?.net) || 0,
+        openingsCount: Number(rep.summary?.openingsCount) || 0,
+        cashCountsCount: Number(rep.summary?.cashCountsCount) || 0,
+        turnover: turnover
+          ? {
+              openingCash: Number(turnover.openingCash) || 0,
+              salesCashNet: Number(turnover.salesCashNet) || 0,
+              manualIncomes: Number(turnover.manualIncomes) || 0,
+              manualExpenses: Number(turnover.manualExpenses) || 0,
+              expectedCash: Number(turnover.expectedCash) || 0,
+              countedCash: Number(turnover.countedCash) || 0,
+              difference: Number(turnover.difference) || 0,
+              totalSales: Number(turnover.totalSales) || 0,
+            }
+          : {
+              openingCash: 0, salesCashNet: 0, manualIncomes: 0, manualExpenses: 0,
+              expectedCash: 0, countedCash: 0, difference: 0, totalSales: 0,
+            },
+      },
+      rows: {
+        salesByPaymentMethod: Array.isArray(rows.salesByPaymentMethod) ? rows.salesByPaymentMethod : [],
+        openings: Array.isArray(rows.openings) ? rows.openings : [],
+        cashCounts: Array.isArray(rows.cashCounts) ? rows.cashCounts : [],
+        byPaymentMethod: Array.isArray(rows.byPaymentMethod) ? rows.byPaymentMethod : [],
+      },
+      period: (rep as CashierReportResponse).period ?? null,
+    }
+  }, [category, report])
+
+  const hasReportContent = useMemo(() => {
+    if (category === 'VENTAS') return !!salesMetrics
+    if (category === 'COMPRAS') return !!purchasesView
+    if (category === 'INVENTARIO') return !!inventoryView
+    if (category === 'CAJA') return !!cashierView
+    return report != null
+  }, [category, salesMetrics, purchasesView, inventoryView, cashierView, report])
 
   useEffect(() => {
     const mapa: Record<TabPrincipal, ReportsCategory> = {
@@ -632,7 +781,8 @@ export function ReportesPage() {
           </Card>
         </div>
 
-        <div className="space-y-4">
+        <ReportContentErrorBoundary onRetry={() => void loadReport()}>
+          <div className="space-y-4">
           {showFilters ? (
             <Card className="p-4">
               <div className="grid gap-3 md:grid-cols-[220px_220px_220px_1fr]">
@@ -829,27 +979,25 @@ export function ReportesPage() {
                 </>
               ) : null}
 
-              {category === 'COMPRAS' && 'rows' in report && 'period' in report ? (
+              {category === 'COMPRAS' && purchasesView ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Total</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as PurchasesReportResponse).summary.purchasesTotal)}
+                        {formatCurrency(purchasesView.summary.purchasesTotal)}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Pendiente</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency(
-                          (report as PurchasesReportResponse).summary.purchasesOutstanding,
-                        )}
+                        {formatCurrency(purchasesView.summary.purchasesOutstanding)}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Compras</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as PurchasesReportResponse).summary.purchasesCount}
+                        {purchasesView.summary.purchasesCount}
                       </p>
                     </Card>
                   </div>
@@ -860,92 +1008,111 @@ export function ReportesPage() {
                       <CardDescription>Últimas órdenes registradas.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      <div className="md:hidden space-y-3">
-                        {(report as PurchasesReportResponse).rows.map((purchase) => (
-                          <div key={purchase.id} className="rounded-2xl border p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate font-medium text-foreground">
-                                  {purchase.supplierName}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {purchase.issuedAt.slice(0, 10)} · {purchase.status}
-                                </p>
+                      {purchasesView.rows.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed p-6 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            No existen registros para el período seleccionado.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="md:hidden space-y-3">
+                            {purchasesView.rows.map((purchase) => (
+                              <div key={purchase.id} className="rounded-2xl border p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate font-medium text-foreground">
+                                      {purchase.supplierName}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {(purchase.issuedAt ?? '').slice(0, 10) || '—'} · {purchase.status}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="font-medium text-foreground">
+                                      {formatCurrency(purchase.total)}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      pend. {formatCurrency(purchase.pending)}
+                                    </p>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="text-right">
-                                <p className="font-medium text-foreground">
-                                  {formatCurrency(purchase.total)}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  pend. {formatCurrency(purchase.pending)}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="hidden md:block">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Proveedor</TableHead>
-                              <TableHead>Fecha</TableHead>
-                              <TableHead>Total</TableHead>
-                              <TableHead>Pendiente</TableHead>
-                              <TableHead>Estado</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {(report as PurchasesReportResponse).rows.map((purchase) => (
-                              <TableRow key={purchase.id}>
-                                <TableCell className="font-medium text-foreground">
-                                  {purchase.supplierName}
-                                </TableCell>
-                                <TableCell className="text-muted-foreground">
-                                  {purchase.issuedAt.slice(0, 10)}
-                                </TableCell>
-                                <TableCell className="font-medium text-foreground">
-                                  {formatCurrency(purchase.total)}
-                                </TableCell>
-                                <TableCell className="font-medium text-foreground">
-                                  {formatCurrency(purchase.pending)}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">{purchase.status}</Badge>
-                                </TableCell>
-                              </TableRow>
                             ))}
-                          </TableBody>
-                        </Table>
-                      </div>
+                          </div>
+
+                          <div className="hidden md:block">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Proveedor</TableHead>
+                                  <TableHead>Fecha</TableHead>
+                                  <TableHead className="text-right">Total</TableHead>
+                                  <TableHead className="text-right">Pendiente</TableHead>
+                                  <TableHead>Estado</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {purchasesView.rows.map((purchase) => (
+                                  <TableRow key={purchase.id}>
+                                    <TableCell className="font-medium text-foreground">
+                                      {purchase.supplierName}
+                                    </TableCell>
+                                    <TableCell className="text-muted-foreground">
+                                      {(purchase.issuedAt ?? '').slice(0, 10) || '—'}
+                                    </TableCell>
+                                    <TableCell className="font-medium text-right text-foreground">
+                                      {formatCurrency(purchase.total)}
+                                    </TableCell>
+                                    <TableCell className="font-medium text-right text-foreground">
+                                      {formatCurrency(purchase.pending)}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline">{purchase.status}</Badge>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </>
+                      )}
                     </CardContent>
                   </Card>
                 </>
+              ) : category === 'COMPRAS' && !isLoading ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Sin información</CardTitle>
+                    <CardDescription>
+                      No existen registros de compras para el período seleccionado.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
               ) : null}
 
-              {category === 'INVENTARIO' && 'horizon' in report && 'rows' in report ? (
+              {category === 'INVENTARIO' && inventoryView ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Por vencer</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as InventoryReportResponse).summary.expiringLotsCount}
+                        {inventoryView.summary.expiringLotsCount}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        hasta {(report as InventoryReportResponse).horizon.until}
+                        hasta {inventoryView.horizon.until}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Bajo stock</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as InventoryReportResponse).summary.lowStockProductsCount}
+                        {inventoryView.summary.lowStockProductsCount}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Horizonte</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as InventoryReportResponse).horizon.days} días
+                        {inventoryView.horizon.days} días
                       </p>
                     </Card>
                   </div>
@@ -958,23 +1125,23 @@ export function ReportesPage() {
                     <CardContent className="space-y-6">
                       <div className="space-y-3">
                         <p className="text-sm font-medium text-foreground">Lotes por vencer</p>
-                        {(report as InventoryReportResponse).rows.expiringLots.length === 0 ? (
+                        {inventoryView.expiringLots.length === 0 ? (
                           <div className="rounded-2xl border border-dashed p-6 text-center">
                             <p className="text-sm text-muted-foreground">Sin lotes por vencer.</p>
                           </div>
                         ) : (
                           <div className="space-y-2">
-                            {(report as InventoryReportResponse).rows.expiringLots.slice(0, 12).map((lot) => (
-                              <div key={lot.id} className="rounded-2xl border p-4">
+                            {inventoryView.expiringLots.slice(0, 12).map((lot) => (
+                              <div key={lot.id ?? `${lot.productName}-${lot.lotCode}`} className="rounded-2xl border p-4">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
-                                    <p className="truncate font-medium text-foreground">{lot.productName}</p>
+                                    <p className="truncate font-medium text-foreground">{lot.productName ?? '—'}</p>
                                     <p className="text-xs text-muted-foreground">
-                                      {lot.branchName} · {lot.lotCode} · vence {lot.expiryDate}
+                                      {lot.branchName ?? '—'} · {lot.lotCode ?? '—'} · vence {lot.expiryDate ?? '—'}
                                     </p>
                                   </div>
                                   <p className="font-medium text-foreground">
-                                    {Math.round(lot.availableUnits)} {lot.unitSymbol}
+                                    {Math.round(Number(lot.availableUnits) || 0)} {lot.unitSymbol ?? ''}
                                   </p>
                                 </div>
                               </div>
@@ -985,21 +1152,21 @@ export function ReportesPage() {
 
                       <div className="space-y-3">
                         <p className="text-sm font-medium text-foreground">Productos con bajo stock</p>
-                        {(report as InventoryReportResponse).rows.lowStockProducts.length === 0 ? (
+                        {inventoryView.lowStockProducts.length === 0 ? (
                           <div className="rounded-2xl border border-dashed p-6 text-center">
                             <p className="text-sm text-muted-foreground">Sin productos bajo stock.</p>
                           </div>
                         ) : (
                           <div className="space-y-2">
-                            {(report as InventoryReportResponse).rows.lowStockProducts.slice(0, 12).map((row) => (
-                              <div key={row.productId} className="rounded-2xl border p-4">
+                            {inventoryView.lowStockProducts.slice(0, 12).map((row) => (
+                              <div key={row.productId ?? row.sku ?? row.name} className="rounded-2xl border p-4">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
-                                    <p className="truncate font-medium text-foreground">{row.name}</p>
-                                    <p className="text-xs text-muted-foreground">{row.sku}</p>
+                                    <p className="truncate font-medium text-foreground">{row.name ?? '—'}</p>
+                                    <p className="text-xs text-muted-foreground">{row.sku ?? '—'}</p>
                                   </div>
                                   <p className="font-medium text-foreground">
-                                    {Math.round(row.stockUnits)} / {Math.round(row.threshold)} {row.unitSymbol}
+                                    {Math.round(Number(row.stockUnits) || 0)} / {Math.round(Number(row.threshold) || 0)} {row.unitSymbol ?? ''}
                                   </p>
                                 </div>
                               </div>
@@ -1010,9 +1177,18 @@ export function ReportesPage() {
                     </CardContent>
                   </Card>
                 </>
+              ) : category === 'INVENTARIO' && !isLoading ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Sin información</CardTitle>
+                    <CardDescription>
+                      No existen registros de inventario para el período seleccionado.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
               ) : null}
 
-              {category === 'CAJA' && 'rows' in report && 'period' in report ? (
+              {category === 'CAJA' && cashierView ? (
                 <>
                   <Card>
                     <CardHeader>
@@ -1026,52 +1202,40 @@ export function ReportesPage() {
                         <div className="rounded-2xl border p-4">
                           <p className="text-xs text-muted-foreground">Apertura</p>
                           <p className="mt-2 text-xl font-bold text-foreground">
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.openingCash,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.openingCash)}
                           </p>
                         </div>
                         <div className="rounded-2xl border p-4">
                           <p className="text-xs text-muted-foreground">Ventas en efectivo</p>
                           <p className="mt-2 text-xl font-bold text-emerald-600 dark:text-emerald-500">
                             +{' '}
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.salesCashNet,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.salesCashNet)}
                           </p>
                         </div>
                         <div className="rounded-2xl border p-4">
                           <p className="text-xs text-muted-foreground">Ingresos adicionales</p>
                           <p className="mt-2 text-xl font-bold text-sky-600 dark:text-sky-500">
                             +{' '}
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.manualIncomes,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.manualIncomes)}
                           </p>
                         </div>
                         <div className="rounded-2xl border p-4">
                           <p className="text-xs text-muted-foreground">Egresos / retiros</p>
                           <p className="mt-2 text-xl font-bold text-rose-600 dark:text-rose-500">
                             −{' '}
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.manualExpenses,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.manualExpenses)}
                           </p>
                         </div>
                         <div className="rounded-2xl border p-4 bg-muted/40">
                           <p className="text-xs text-muted-foreground">Efectivo esperado</p>
                           <p className="mt-2 text-xl font-bold text-foreground">
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.expectedCash,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.expectedCash)}
                           </p>
                         </div>
                         <div className="rounded-2xl border p-4 bg-muted/40">
                           <p className="text-xs text-muted-foreground">Efectivo contado</p>
                           <p className="mt-2 text-xl font-bold text-foreground">
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.countedCash,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.countedCash)}
                           </p>
                         </div>
                         <div className="rounded-2xl border p-4">
@@ -1079,16 +1243,13 @@ export function ReportesPage() {
                           <p className="mt-2">
                             <Badge
                               variant={
-                                (report as CashierReportResponse).summary.turnover.difference ===
-                                0
+                                cashierView.summary.turnover.difference === 0
                                   ? 'success'
                                   : 'warning'
                               }
                               className="text-base px-3 py-1 rounded-xl"
                             >
-                              {formatCurrency(
-                                (report as CashierReportResponse).summary.turnover.difference,
-                              )}
+                              {formatCurrency(cashierView.summary.turnover.difference)}
                             </Badge>
                           </p>
                         </div>
@@ -1103,16 +1264,13 @@ export function ReportesPage() {
                         <CardDescription>
                           Importe neto vendido por cada método. Total del período:{' '}
                           <span className="font-semibold text-foreground">
-                            {formatCurrency(
-                              (report as CashierReportResponse).summary.turnover.totalSales,
-                            )}
+                            {formatCurrency(cashierView.summary.turnover.totalSales)}
                           </span>
                           .
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        {(report as CashierReportResponse).rows.salesByPaymentMethod.length ===
-                        0 ? (
+                        {cashierView.rows.salesByPaymentMethod.length === 0 ? (
                           <div className="rounded-2xl border border-dashed p-6 text-center">
                             <p className="text-sm text-muted-foreground">Sin ventas en el período.</p>
                           </div>
@@ -1126,35 +1284,29 @@ export function ReportesPage() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {(report as CashierReportResponse).rows.salesByPaymentMethod.map(
-                                (row) => (
-                                  <TableRow key={row.method}>
-                                    <TableCell>
-                                      <Badge variant="outline">{titleCaseMethod(row.method)}</Badge>
-                                    </TableCell>
-                                    <TableCell className="text-right text-muted-foreground">
-                                      {row.operations}
-                                    </TableCell>
-                                    <TableCell className="text-right font-medium text-foreground">
-                                      {formatCurrency(row.soldAmount)}
-                                    </TableCell>
-                                  </TableRow>
-                                ),
-                              )}
+                              {cashierView.rows.salesByPaymentMethod.map((row) => (
+                                <TableRow key={row.method}>
+                                  <TableCell>
+                                    <Badge variant="outline">{titleCaseMethod(row.method)}</Badge>
+                                  </TableCell>
+                                  <TableCell className="text-right text-muted-foreground">
+                                    {Number(row.operations) || 0}
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium text-foreground">
+                                    {formatCurrency(Number(row.soldAmount) || 0)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
                               <TableRow className="bg-muted/40 font-semibold">
                                 <TableCell>Total</TableCell>
                                 <TableCell className="text-right text-muted-foreground">
-                                  {(
-                                    report as CashierReportResponse
-                                  ).rows.salesByPaymentMethod.reduce(
-                                    (sum, r) => sum + r.operations,
+                                  {cashierView.rows.salesByPaymentMethod.reduce(
+                                    (sum, r) => sum + (Number(r.operations) || 0),
                                     0,
                                   )}
                                 </TableCell>
                                 <TableCell className="text-right text-foreground">
-                                  {formatCurrency(
-                                    (report as CashierReportResponse).summary.turnover.totalSales,
-                                  )}
+                                  {formatCurrency(cashierView.summary.turnover.totalSales)}
                                 </TableCell>
                               </TableRow>
                             </TableBody>
@@ -1169,61 +1321,83 @@ export function ReportesPage() {
                         <CardDescription>Aperturas del periodo.</CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-3">
-                        <div className="md:hidden space-y-3">
-                          {(report as CashierReportResponse).rows.openings.map((opening) => (
-                            <div key={opening.id} className="rounded-2xl border p-4">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium text-foreground">
-                                    {opening.cashDrawerCode} · {opening.branchName}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {opening.openedAt.slice(0, 10)} · {opening.cashierName}
-                                  </p>
-                                  <p className="mt-2 text-xs text-muted-foreground">
-                                    fondo {formatCurrency(opening.openingCash)}
-                                  </p>
+                        {cashierView.rows.openings.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed p-6 text-center">
+                            <p className="text-sm text-muted-foreground">
+                              Sin aperturas de caja en el período.
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="md:hidden space-y-3">
+                              {cashierView.rows.openings.map((opening) => (
+                                <div
+                                  key={opening.id ?? `${opening.cashDrawerCode}-${opening.openedAt}`}
+                                  className="rounded-2xl border p-4"
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="truncate font-medium text-foreground">
+                                        {opening.cashDrawerCode ?? '—'} · {opening.branchName ?? '—'}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {(opening.openedAt ?? '').slice(0, 10) || '—'} ·{' '}
+                                        {opening.cashierName ?? '—'}
+                                      </p>
+                                      <p className="mt-2 text-xs text-muted-foreground">
+                                        fondo{' '}
+                                        {formatCurrency(Number(opening.openingCash) || 0)}
+                                      </p>
+                                    </div>
+                                    <Badge variant="outline">{opening.status ?? '—'}</Badge>
+                                  </div>
                                 </div>
-                                <Badge variant="outline">{opening.status}</Badge>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="hidden md:block">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Caja</TableHead>
-                                <TableHead>Sucursal</TableHead>
-                                <TableHead>Fecha</TableHead>
-                                <TableHead>Responsable</TableHead>
-                                <TableHead>Estado</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {(report as CashierReportResponse).rows.openings.map((opening) => (
-                                <TableRow key={opening.id}>
-                                  <TableCell className="font-medium text-foreground">
-                                    {opening.cashDrawerCode}
-                                  </TableCell>
-                                  <TableCell className="text-muted-foreground">
-                                    {opening.branchName}
-                                  </TableCell>
-                                  <TableCell className="text-muted-foreground">
-                                    {opening.openedAt.slice(0, 10)}
-                                  </TableCell>
-                                  <TableCell className="text-muted-foreground">
-                                    {opening.cashierName}
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge variant="outline">{opening.status}</Badge>
-                                  </TableCell>
-                                </TableRow>
                               ))}
-                            </TableBody>
-                          </Table>
-                        </div>
+                            </div>
+
+                            <div className="hidden md:block">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Caja</TableHead>
+                                    <TableHead>Sucursal</TableHead>
+                                    <TableHead>Fecha</TableHead>
+                                    <TableHead>Responsable</TableHead>
+                                    <TableHead>Estado</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {cashierView.rows.openings.map((opening) => (
+                                    <TableRow
+                                      key={
+                                        opening.id ??
+                                        `${opening.cashDrawerCode}-${opening.openedAt}`
+                                      }
+                                    >
+                                      <TableCell className="font-medium text-foreground">
+                                        {opening.cashDrawerCode ?? '—'}
+                                      </TableCell>
+                                      <TableCell className="text-muted-foreground">
+                                        {opening.branchName ?? '—'}
+                                      </TableCell>
+                                      <TableCell className="text-muted-foreground">
+                                        {(opening.openedAt ?? '').slice(0, 10) || '—'}
+                                      </TableCell>
+                                      <TableCell className="text-muted-foreground">
+                                        {opening.cashierName ?? '—'}
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge variant="outline">
+                                          {opening.status ?? '—'}
+                                        </Badge>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </>
+                        )}
                       </CardContent>
                     </Card>
                   </div>
@@ -1232,31 +1406,31 @@ export function ReportesPage() {
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Ingreso</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as CashierReportResponse).summary.inflows)}
+                        {formatCurrency(cashierView.summary.inflows)}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Egreso</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as CashierReportResponse).summary.outflows)}
+                        {formatCurrency(cashierView.summary.outflows)}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Neto</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {formatCurrency((report as CashierReportResponse).summary.net)}
+                        {formatCurrency(cashierView.summary.net)}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Turnos</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as CashierReportResponse).summary.openingsCount}
+                        {cashierView.summary.openingsCount}
                       </p>
                     </Card>
                     <Card className="p-4">
                       <p className="text-xs text-muted-foreground">Arqueos</p>
                       <p className="mt-2 text-xl font-bold text-foreground">
-                        {(report as CashierReportResponse).summary.cashCountsCount}
+                        {cashierView.summary.cashCountsCount}
                       </p>
                     </Card>
                   </div>
@@ -1269,26 +1443,34 @@ export function ReportesPage() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      {(report as CashierReportResponse).rows.cashCounts.length === 0 ? (
+                      {cashierView.rows.cashCounts.length === 0 ? (
                         <div className="rounded-2xl border border-dashed p-6 text-center">
                           <p className="text-sm text-muted-foreground">Sin arqueos en el periodo.</p>
                         </div>
                       ) : (
                         <>
                           <div className="md:hidden space-y-3">
-                            {(report as CashierReportResponse).rows.cashCounts.map((row) => (
-                              <div key={row.id} className="rounded-2xl border p-4">
+                            {cashierView.rows.cashCounts.map((row) => (
+                              <div
+                                key={row.id ?? `${row.cashDrawerCode}-${row.createdAt}`}
+                                className="rounded-2xl border p-4"
+                              >
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
                                     <p className="truncate font-medium text-foreground">
-                                      {row.cashDrawerCode} · {row.branchName}
+                                      {row.cashDrawerCode ?? '—'} · {row.branchName ?? '—'}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
-                                      {row.createdAt.slice(0, 10)} · {row.actorName}
+                                      {(row.createdAt ?? '').slice(0, 10) || '—'} ·{' '}
+                                      {row.actorName ?? row.cashierName ?? '—'}
                                     </p>
                                     <p className="mt-2 text-xs text-muted-foreground">
-                                      esperado {formatCurrency(row.expectedCashAmount)} · contado{' '}
-                                      {formatCurrency(row.countedCashAmount)}
+                                      esperado{' '}
+                                      {formatCurrency(
+                                        Number(row.expectedCashAmount) || 0,
+                                      )}{' '}
+                                      · contado{' '}
+                                      {formatCurrency(Number(row.countedCashAmount) || 0)}
                                     </p>
                                     {row.observations ? (
                                       <p className="mt-2 text-xs text-muted-foreground">
@@ -1298,10 +1480,14 @@ export function ReportesPage() {
                                   </div>
                                   <Badge
                                     variant={
-                                      row.differenceCashAmount === 0 ? 'success' : 'warning'
+                                      Number(row.differenceCashAmount) === 0
+                                        ? 'success'
+                                        : 'warning'
                                     }
                                   >
-                                    {formatCurrency(row.differenceCashAmount)}
+                                    {formatCurrency(
+                                      Number(row.differenceCashAmount) || 0,
+                                    )}
                                   </Badge>
                                 </div>
                               </div>
@@ -1322,33 +1508,41 @@ export function ReportesPage() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {(report as CashierReportResponse).rows.cashCounts.map((row) => (
-                                  <TableRow key={row.id}>
+                                {cashierView.rows.cashCounts.map((row) => (
+                                  <TableRow
+                                    key={row.id ?? `${row.cashDrawerCode}-${row.createdAt}`}
+                                  >
                                     <TableCell className="text-muted-foreground">
-                                      {row.createdAt.slice(0, 10)}
+                                      {(row.createdAt ?? '').slice(0, 10) || '—'}
                                     </TableCell>
                                     <TableCell className="font-medium text-foreground">
-                                      {row.cashDrawerCode}
+                                      {row.cashDrawerCode ?? '—'}
                                     </TableCell>
                                     <TableCell className="text-muted-foreground">
-                                      {row.branchName}
+                                      {row.branchName ?? '—'}
                                     </TableCell>
                                     <TableCell className="text-muted-foreground">
-                                      {row.cashierName}
+                                      {row.cashierName ?? row.actorName ?? '—'}
                                     </TableCell>
                                     <TableCell className="text-right font-medium text-foreground">
-                                      {formatCurrency(row.expectedCashAmount)}
+                                      {formatCurrency(
+                                        Number(row.expectedCashAmount) || 0,
+                                      )}
                                     </TableCell>
                                     <TableCell className="text-right font-medium text-foreground">
-                                      {formatCurrency(row.countedCashAmount)}
+                                      {formatCurrency(Number(row.countedCashAmount) || 0)}
                                     </TableCell>
                                     <TableCell className="text-right">
                                       <Badge
                                         variant={
-                                          row.differenceCashAmount === 0 ? 'success' : 'warning'
+                                          Number(row.differenceCashAmount) === 0
+                                            ? 'success'
+                                            : 'warning'
                                         }
                                       >
-                                        {formatCurrency(row.differenceCashAmount)}
+                                        {formatCurrency(
+                                          Number(row.differenceCashAmount) || 0,
+                                        )}
                                       </Badge>
                                     </TableCell>
                                   </TableRow>
@@ -1361,6 +1555,15 @@ export function ReportesPage() {
                     </CardContent>
                   </Card>
                 </>
+              ) : category === 'CAJA' && !isLoading ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Sin información</CardTitle>
+                    <CardDescription>
+                      No existen movimientos de caja para el período seleccionado.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
               ) : null}
 
               {category === 'CLIENTES' || category === 'PRODUCTOS' || category === 'UTILIDADES' ? (
@@ -1691,7 +1894,8 @@ export function ReportesPage() {
               ) : null}
             </>
           ) : null}
-        </div>
+          </div>
+        </ReportContentErrorBoundary>
       </div>
     </div>
   )

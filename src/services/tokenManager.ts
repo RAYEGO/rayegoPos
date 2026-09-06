@@ -1,4 +1,8 @@
 import { AUTH_STORAGE_KEY } from '@/config/auth'
+import {
+  AUTH_SESSION_CLEARED_EVENT,
+  AUTH_SESSION_UPDATED_EVENT,
+} from '@/config/auth'
 import type { AuthSession } from '@/types/auth'
 import {
   decodeJwtPayload,
@@ -43,9 +47,6 @@ export function setSessionStorageTarget(session: AuthSession, target: SessionWri
   const storage = target === 'local' ? window.localStorage : window.sessionStorage
   storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
 }
-
-const AUTH_SESSION_CLEARED_EVENT = 'rayego-auth-session-cleared'
-const AUTH_SESSION_UPDATED_EVENT = 'rayego-auth-session-updated'
 
 function broadcastAuthSessionCleared() {
   if (typeof window === 'undefined') return

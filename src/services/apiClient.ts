@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/config/auth'
+import { API_BASE_URL, AUTH_401_EVENT, AUTH_SESSION_CLEARED_EVENT } from '@/config/auth'
 import { authMockService } from '@/services/authMockService'
 import {
   clearAllSessionStorage,
@@ -6,9 +6,6 @@ import {
   peekStoredSession,
 } from '@/services/tokenManager'
 import { isAccessTokenValid } from '@/utils/jwt'
-
-const AUTH_SESSION_CLEARED_EVENT = 'rayego-auth-session-cleared'
-const AUTH_401_EVENT = 'rayego-auth-401'
 
 function broadcastAuthSessionCleared(detail?: { endpoint?: string; viaRefresh?: boolean }) {
   if (typeof window === 'undefined') return

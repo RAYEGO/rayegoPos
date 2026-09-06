@@ -2878,61 +2878,71 @@ export function ConfiguracionPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 space-y-0.5">
-                  <p className="text-sm font-medium text-foreground">
-                    {stockAlertEnabled ? 'Alertas de stock activadas' : 'Alertas de stock desactivadas'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {stockAlertEnabled
-                      ? 'Se muestran colores y filtros de stock en todo el sistema.'
-                      : 'Todo stock se muestra como Normal sin resaltar alertas.'}
-                  </p>
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {stockAlertEnabled ? 'Alertas de stock activadas' : 'Alertas de stock desactivadas'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {stockAlertEnabled
+                        ? 'Se muestran colores y filtros de stock en todo el sistema.'
+                        : 'Todo stock se muestra como Normal sin resaltar alertas.'}
+                    </p>
+                  </div>
+                  <div className="grid gap-3 w-full sm:w-[340px]">
+                    <div className="space-y-1.5">
+                      <div className="space-y-0.5">
+                        <label className="text-xs font-medium text-foreground">Alcance</label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Define dónde se aplican estos niveles de alerta.
+                        </p>
+                      </div>
+                      <Select
+                        value={stockAlertScope}
+                        onValueChange={(next: 'company' | 'branch') => {
+                          setStockAlertScope(next)
+                          if (next === 'company') setStockAlertBranchId(null)
+                          else if (next === 'branch' && branches.at(0)) setStockAlertBranchId(branches[0].id)
+                        }}
+                        disabled={!canEditCompany}
+                      >
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Seleccionar alcance" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="company">Empresa (por defecto para todas las sucursales)</SelectItem>
+                          <SelectItem value="branch">Sucursal (personalizado)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {stockAlertScope === 'branch' ? (
+                      <div className="space-y-1.5">
+                        <div className="space-y-0.5">
+                          <label className="text-xs font-medium text-foreground">Sucursal</label>
+                          <p className="text-[11px] text-muted-foreground">
+                            Los límites se aplicarán solo a esta sucursal.
+                          </p>
+                        </div>
+                        <Select
+                          value={stockAlertBranchId ?? userBranchId ?? '__none'}
+                          onValueChange={(next) => setStockAlertBranchId(next === '__none' ? null : next)}
+                          disabled={!canEditCompany || branches.length === 0}
+                        >
+                          <SelectTrigger className="h-9 w-full">
+                            <SelectValue placeholder="Seleccionar sucursal" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {branches.map((b) => (
+                              <SelectItem key={b.id} value={b.id}>
+                                {b.codigo} · {b.nombre}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="flex flex-col items-start gap-2 sm:items-end">
-                  <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-xs font-medium text-muted-foreground">Alcance</label>
-                  <Select
-                    value={stockAlertScope}
-                    onValueChange={(next: 'company' | 'branch') => {
-                      setStockAlertScope(next)
-                      if (next === 'company') setStockAlertBranchId(null)
-                      else if (next === 'branch' && branches.at(0)) setStockAlertBranchId(branches[0].id)
-                    }}
-                    disabled={!canEditCompany}
-                  >
-                    <SelectTrigger className="w-[190px] h-9">
-                      <SelectValue placeholder="Seleccionar alcance" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="company">Empresa (por defecto para todas las sucursales)</SelectItem>
-                      <SelectItem value="branch">Sucursal (personalizado)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {stockAlertScope === 'branch' ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-xs font-medium text-muted-foreground">Sucursal</label>
-                  <Select
-                    value={stockAlertBranchId ?? userBranchId ?? '__none'}
-                    onValueChange={(next) => setStockAlertBranchId(next === '__none' ? null : next)}
-                    disabled={!canEditCompany || branches.length === 0}
-                  >
-                    <SelectTrigger className="w-[260px] h-9">
-                      <SelectValue placeholder="Seleccionar sucursal" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.codigo} · {b.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                ) : null}
-              </div>
-            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">

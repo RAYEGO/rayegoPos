@@ -1,4 +1,9 @@
 export const AUTH_STORAGE_KEY = 'rayego-pos.auth.session'
+
+export const AUTH_SESSION_UPDATED_EVENT = 'rayego-auth-session-updated'
+export const AUTH_SESSION_CLEARED_EVENT = 'rayego-auth-session-cleared'
+export const AUTH_401_EVENT = 'rayego-auth-401'
+
 const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api-production-1693.up.railway.app'
 const DEFAULT_DEVELOPMENT_API_BASE_URL = 'https://api-dev-dev-27e4.up.railway.app'
 

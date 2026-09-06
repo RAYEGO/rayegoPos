@@ -6,7 +6,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { AUTH_STORAGE_KEY } from '@/config/auth'
+import {
+  AUTH_401_EVENT,
+  AUTH_SESSION_CLEARED_EVENT,
+  AUTH_SESSION_UPDATED_EVENT,
+  AUTH_STORAGE_KEY,
+} from '@/config/auth'
 import { AuthContext, type AuthContextValue } from '@/contexts/auth-context'
 import { authService } from '@/services/authService'
 import type {
@@ -89,10 +94,6 @@ function sessionTokensEqual(a: AuthSession | null, b: AuthSession | null): boole
   if (!a || !b) return false
   return a.accessToken === b.accessToken && a.refreshToken === b.refreshToken
 }
-
-const AUTH_SESSION_UPDATED_EVENT = 'rayego-auth-session-updated'
-const AUTH_SESSION_CLEARED_EVENT = 'rayego-auth-session-cleared'
-const AUTH_401_EVENT = 'rayego-auth-401'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<AuthSession | null>(null)
