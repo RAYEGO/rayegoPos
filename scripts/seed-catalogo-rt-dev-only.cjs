@@ -58,7 +58,7 @@ const LOG_OK = (tit, det = '') => console.log(`  ✅ ${tit}` + (det ? ' → ' + 
 const LOG_SKIP = (tit, det = '') => console.log(`  ⏭️  ${tit} — ya existe` + (det ? ' → ' + det : ''))
 const LOG_INS = (tit, det = '') => console.log(`  ➕ ${tit} — insertado OK` + (det ? ' → ' + det : ''))
 
-const sqlGetEmpresaDev = `SELECT id, razon_social, ruc FROM empresas ORDER BY created_at LIMIT 1;`
+const sqlGetEmpresaDev = `SELECT id, razon_social, numero_documento AS ruc FROM empresas ORDER BY created_at LIMIT 1;`
 
 async function main () {
   let empresa = null
@@ -103,13 +103,12 @@ async function main () {
     LOG_SKIP(`Motivo ${motCod}`)
   } else {
     await prisma.$queryRawUnsafe(`
-      INSERT INTO motivos_movimiento (id, codigo, nombre, descripcion, tipo, activo, created_at, updated_at, empresa_id)
-      VALUES (gen_random_uuid(), $1::varchar, $2::varchar, $3::varchar, 'SALIDA', true, NOW(), NOW(), $4::uuid);
+      INSERT INTO motivos_movimiento (id, codigo, nombre, descripcion, tipo, activo, created_at, updated_at)
+      VALUES (gen_random_uuid(), $1::varchar, $2::varchar, $3::varchar, 'SALIDA', true, NOW(), NOW());
     `,
       motCod,
       'Consumo Orden Servicio',
-      'Salida de inventario por repuesto/material consumido en Orden de Servicio Técnico.',
-      empresaId
+      'Salida de inventario por repuesto/material consumido en Orden de Servicio Técnico.'
     )
     LOG_INS(`Motivo ${motCod} (SALIDA)`)
   }
@@ -119,28 +118,29 @@ async function main () {
   // ============================================================
   console.log('\n--- [3/5] 11 Permisos RayegoTech catálogo')
   const PERMISOS_RT = [
-    ['ordenesServicio.read',         'Órdenes Servicio — Leer',              'Ver listado/detalle de Órdenes de Servicio.'],
-    ['ordenesServicio.write',        'Órdenes Servicio — Crear/Editar',      'Crear y editar Órdenes de Servicio (sin aprobar presupuesto).'],
-    ['ordenesServicio.cambioEstado', 'Órdenes Servicio — Cambiar Estado',    'Avanzar estados del flujo Orden Servicio (recibido→diagnóstico→...)'],
-    ['ordenesServicio.aprobar',      'Órdenes Servicio — Aprobar Presupuesto','Aprobar/rechazar el presupuesto presentado al cliente.'],
-    ['equiposCliente.read',          'Equipos Cliente — Leer',               'Ver listado/detalle de equipos asociados a clientes.'],
-    ['equiposCliente.write',         'Equipos Cliente — Crear/Editar',       'Registrar/editar equipos de clientes (marca, modelo, nro serie).'],
-    ['inventarioServicio.write',     'Inventario Técnico — Consumir',        'Consumir/devolver repuestos y materiales desde Orden Servicio → Kardex.'],
-    ['tecnicos.read',                'Técnicos — Leer',                      'Ver listado/detalle de técnicos, asignaciones y especialidades.'],
-    ['tecnicos.write',               'Técnicos — Crear/Editar',              'Dar de alta/baja técnicos, editar perfil, asignar especialidades.'],
-    ['pagosOrdenServicio.write',     'Pagos Órden Servicio — Registrar',     'Registrar adelantos y pagos de Órdenes Servicio integrados a Caja.'],
-    ['reportesServicioTecnico.read', 'Reportes Servicio Técnico',            'Ver reportes/estadísticas de servicio técnico (productividad, tiempos, garantías).']
+    // [ codigo, modulo, nombre, descripcion ]
+    ['ordenesServicio.read',         'Servicio Técnico',  'Órdenes Servicio — Leer',              'Ver listado/detalle de Órdenes de Servicio.'],
+    ['ordenesServicio.write',        'Servicio Técnico',  'Órdenes Servicio — Crear/Editar',      'Crear y editar Órdenes de Servicio (sin aprobar presupuesto).'],
+    ['ordenesServicio.cambioEstado', 'Servicio Técnico',  'Órdenes Servicio — Cambiar Estado',    'Avanzar estados del flujo Orden Servicio.'],
+    ['ordenesServicio.aprobar',      'Servicio Técnico',  'Órdenes Servicio — Aprobar Presupuesto','Aprobar/rechazar el presupuesto presentado al cliente.'],
+    ['equiposCliente.read',          'Servicio Técnico',  'Equipos Cliente — Leer',               'Ver listado/detalle de equipos asociados a clientes.'],
+    ['equiposCliente.write',         'Servicio Técnico',  'Equipos Cliente — Crear/Editar',       'Registrar/editar equipos de clientes (marca, modelo, nro serie).'],
+    ['inventarioServicio.write',     'Inventario',        'Inventario Técnico — Consumir',        'Consumir/devolver repuestos y materiales desde Orden Servicio → Kardex.'],
+    ['tecnicos.read',                'Servicio Técnico',  'Técnicos — Leer',                      'Ver listado/detalle de técnicos, asignaciones y especialidades.'],
+    ['tecnicos.write',               'Servicio Técnico',  'Técnicos — Crear/Editar',              'Dar de alta/baja técnicos, editar perfil, asignar especialidades.'],
+    ['pagosOrdenServicio.write',     'Caja',              'Pagos Órden Servicio — Registrar',     'Registrar adelantos y pagos de Órdenes Servicio integrados a Caja.'],
+    ['reportesServicioTecnico.read', 'Reportes',          'Reportes Servicio Técnico',            'Ver reportes/estadísticas de servicio técnico (productividad, tiempos, garantías).']
   ]
   let contPerm = 0
-  for (const [cod, nom, desc] of PERMISOS_RT) {
+  for (const [cod, modulo, nom, desc] of PERMISOS_RT) {
     const pEx = await prisma.$queryRawUnsafe(
       `SELECT id FROM permisos WHERE codigo = $1::varchar LIMIT 1;`, cod
     )
     if (pEx && pEx.length) { LOG_SKIP(`permiso ${cod}`); continue }
     await prisma.$queryRawUnsafe(`
-      INSERT INTO permisos (id, codigo, nombre, descripcion, activo, created_at, updated_at)
-      VALUES (gen_random_uuid(), $1::varchar, $2::varchar, $3::varchar, true, NOW(), NOW());
-    `, cod, nom, desc)
+      INSERT INTO permisos (id, codigo, modulo, nombre, descripcion, activo, created_at, updated_at)
+      VALUES (gen_random_uuid(), $1::varchar, $2::varchar, $3::varchar, $4::varchar, true, NOW(), NOW());
+    `, cod, modulo, nom, desc)
     LOG_INS(`permiso ${cod}`)
     contPerm++
   }
@@ -182,7 +182,7 @@ async function main () {
   console.log('\n--- [5/5] Configuración garantia_default_dias = 30')
   const GAR_KEY = 'GARANTIA_DEFAULT_DIAS'
   const cfgEx = await prisma.$queryRawUnsafe(`
-    SELECT id FROM configuraciones
+    SELECT id FROM configuracion
     WHERE empresa_id = $1::uuid AND ambito = 'EMPRESA' AND sucursal_id IS NULL AND clave = $2::varchar
     LIMIT 1;
   `, empresaId, GAR_KEY)
@@ -190,7 +190,7 @@ async function main () {
     LOG_SKIP(`config ${GAR_KEY}`, 'ya existe (valor manual se respeta)')
   } else {
     await prisma.$queryRawUnsafe(`
-      INSERT INTO configuraciones
+      INSERT INTO configuracion
         (id, empresa_id, sucursal_id, ambito, clave, valor_numero, descripcion, created_at, updated_at)
       VALUES (gen_random_uuid(), $1::uuid, NULL, 'EMPRESA', $2::varchar, 30,
               'Garantía predeterminada en días para nuevas Órdenes de Servicio (modificable por orden individual).',
