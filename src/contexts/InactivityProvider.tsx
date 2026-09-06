@@ -409,11 +409,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         }
       }
 
-      if (
-        curSession &&
-        statusRef.current !== 'expired' &&
-        !isAccessTokenValid(curSession.accessToken, 15_000)
-      ) {
+      if (curSession && !isAccessTokenValid(curSession.accessToken, 15_000)) {
         if (isRefreshTokenValid(curSession.refreshToken) && !refreshInFlightRef.current) {
           console.debug(
             `[INACTIVITY] Access token cerca de expirar en tick loop. Refresh silencioso antes del logout. (accessLeft=${accessLeftMs}ms refreshLeft=${refreshLeftMs}ms)`,

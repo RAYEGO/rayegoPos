@@ -487,14 +487,6 @@ export function ReportesPage() {
     }
   }, [category, report])
 
-  const hasReportContent = useMemo(() => {
-    if (category === 'VENTAS') return !!salesMetrics
-    if (category === 'COMPRAS') return !!purchasesView
-    if (category === 'INVENTARIO') return !!inventoryView
-    if (category === 'CAJA') return !!cashierView
-    return report != null
-  }, [category, salesMetrics, purchasesView, inventoryView, cashierView, report])
-
   useEffect(() => {
     const mapa: Record<TabPrincipal, ReportsCategory> = {
       ventas: 'VENTAS',

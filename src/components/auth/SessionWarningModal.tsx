@@ -35,6 +35,7 @@ export function SessionWarningModal() {
         : `${warningCountdownSeconds}s`
     return {
       isAbsolute,
+      timeLeft,
       title: isAbsolute ? 'Tu sesión está por expirar' : 'Tu sesión está por expirar',
       subtitle: isAbsolute
         ? 'Tu sesión se acerca al límite de duración permitido. Renueva la sesión para continuar trabajando.'
