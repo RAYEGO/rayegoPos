@@ -285,6 +285,15 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
               sessionRef.current = refreshRes.session
               try {
                 syncSessionFromStorage()
+                if (typeof window !== 'undefined') {
+                  try {
+                    window.dispatchEvent(
+                      new CustomEvent(AUTH_SESSION_UPDATED_EVENT, { detail: { viaInactivityRefresh: true, ts: Date.now() } }),
+                    )
+                  } catch {
+                    /* ignore */
+                  }
+                }
               } catch {
                 /* ignore */
               }

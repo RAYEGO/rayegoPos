@@ -239,6 +239,8 @@ export type PurchaseOrderDetail = {
     numeroDocumento: string
     direccion: string | null
     logoUrl: string | null
+    telefono: string | null
+    email: string | null
     monedaBase: string
     igvPorDefecto: number
   }

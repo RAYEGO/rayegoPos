@@ -108,6 +108,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const logoutRef = useRef<(reason?: string) => Promise<void>>(async () => {})
+
+  const logout = useCallback(async (reason?: string) => {
+    console.warn(
+      `[AUTH] logout INICIADO. Motivo: ${reason ?? 'sin motivo explícito'}. Sesión actual será destruida (accessToken=${session?.accessToken?.slice(0, 16) ?? 'ninguna'}...)`,
+    )
+    try {
+      await authService.logout(session)
+    } catch (error) {
+      console.warn('No se pudo confirmar el cierre de sesión en la API.', error)
+    } finally {
+      sessionRef.current = null
+      setSessionState(null)
+      clearStoredSession()
+      console.warn('[AUTH] logout COMPLETADO: session=null, storage limpiado.')
+    }
+  }, [session])
+
+  useEffect(() => {
+    logoutRef.current = logout
+  }, [logout])
+
   const syncSessionFromStorage = useCallback(() => {
     const stored = readStoredSession()
     if (!stored) {
@@ -206,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : 'Tu sesión ha expirado. Inicia sesión nuevamente para continuar.'
       const prev = sessionRef.current
       if (prev !== null) {
-        void logout(message).catch(() => {})
+        void logoutRef.current(message).catch(() => {})
       } else {
         clearStoredSession()
         setSession(null)
@@ -225,7 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(AUTH_401_EVENT, onAuth401)
       window.clearInterval(interval)
     }
-  }, [syncSessionFromStorage, logout])
+  }, [syncSessionFromStorage])
 
   const login = useCallback(async (payload: LoginPayload) => {
     console.debug(

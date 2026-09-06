@@ -227,7 +227,7 @@ export async function apiRequest<T>(
           skipRefresh: true,
         })
       }
-      if (refresh.code === 'REFRESH_INVALID') {
+      if (!refresh.ok && refresh.code === 'REFRESH_INVALID') {
         console.warn(
           `[API] Refresh token inválido/expirado en ${path}. Destruyendo sesión almacenada.`,
         )
@@ -249,10 +249,10 @@ export async function apiRequest<T>(
   if (result.status === 401 && !options.skipAuth) {
     const stored = peekStoredSession()
     const triedRefresh =
-      !options.skipRefresh && Boolean(stored?.refreshToken) && !authMockService.isMockSession(stored)
-    const triedRefreshFailed = triedRefresh && stored?.refreshToken
-      ? true
-      : false
+      !options.skipRefresh &&
+      Boolean(stored?.refreshToken) &&
+      (stored === null || !authMockService.isMockSession(stored))
+    const triedRefreshFailed = triedRefresh && stored !== null
     broadcastAuth401({
       endpoint: path,
       status: 401,
