@@ -828,7 +828,7 @@ export function ReportesPage() {
                 <CardDescription className="text-sm text-destructive/80">{error}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap items-center gap-2">
-                <Button type="button" onClick={() => void loadReport()} variant="destructive">
+                <Button type="button" onClick={() => void loadReport()} variant="danger">
                   Reintentar
                 </Button>
                 <Button type="button" variant="outline" onClick={() => setError(null)}>
