@@ -1920,226 +1920,242 @@ export function ProductosPage() {
       )}
 
       {/* Tabs, Filters, and New Product Button */}
-      <Tabs
-        value={mainTab}
-        onValueChange={(value) => setMainTab(value as 'catalogo' | 'maestros')}
-        className="w-full"
+      <div
+        className="sticky top-0 z-30 -mx-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+        style={{ WebkitBackdropFilter: 'blur(12px)' }}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <TabsList>
-            <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
-            <TabsTrigger value="maestros">Maestros</TabsTrigger>
-          </TabsList>
-          <Button size="sm" onClick={openCreateDialog} disabled={isOptionsLoading || !canCreateProduct}>
-            <Plus className="h-4 w-4 mr-1" />
-            Nuevo Producto
-          </Button>
-        </div>
-
-        <TabsContent value="catalogo" className="space-y-4 pt-4">
-          <Card className="p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative flex-1 min-w-[220px] max-w-full">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Buscar por SKU, nombre, código o principio activo"
-                  className="pl-9"
-                />
+        <div className="mx-auto w-full max-w-[1600px] space-y-3 px-4 py-3">
+          <Tabs
+            value={mainTab}
+            onValueChange={(value) => setMainTab(value as 'catalogo' | 'maestros')}
+            className="w-full"
+          >
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <TabsList>
+                <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
+                <TabsTrigger value="maestros">Maestros</TabsTrigger>
+              </TabsList>
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={openCreateDialog}
+                  disabled={isOptionsLoading || !canCreateProduct}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  <span className="whitespace-nowrap">Nuevo Producto</span>
+                </Button>
               </div>
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => setStatusFilter(value as 'TODOS' | ProductStatus)}
-              >
-                <SelectTrigger className="h-9 min-w-[130px]">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="TODOS">Todos</SelectItem>
-                  <SelectItem value="ACTIVO">Activo</SelectItem>
-                  <SelectItem value="INACTIVO">Inactivo</SelectItem>
-                  <SelectItem value="DESCONTINUADO">Descontinuado</SelectItem>
-                </SelectContent>
-              </Select>
-              <SidePanel open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
-                <SidePanelTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-9 relative"
-                  >
-                    <SlidersHorizontal className="mr-1.5 h-4 w-4" />
-                    Filtros
-                    {activeAdvancedFiltersCount > 0 ? (
-                      <Badge
-                        variant="default"
-                        className="ml-1.5 rounded-full px-1.5 py-0 text-[10px] leading-none"
-                      >
-                        {activeAdvancedFiltersCount}
-                      </Badge>
-                    ) : null}
-                  </Button>
-                </SidePanelTrigger>
-                <SidePanelContent className="flex h-full flex-col p-0" showCloseButton>
-                  <div className="flex items-start justify-between gap-3 border-b p-4">
-                    <div className="space-y-0.5">
-                      <p className="text-lg font-semibold text-foreground">
-                        Filtros avanzados
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Refina el catálogo por categoría, laboratorio y otros maestros.
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={activeAdvancedFiltersCount === 0}
-                      onClick={() => {
-                        setCategoryFilter('TODAS')
-                        setLaboratoryFilter('TODOS')
-                        setMedicationTypeFilter('TODOS')
-                        setActivePrincipleFilter('TODOS')
-                      }}
-                    >
-                      Limpiar
-                    </Button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-foreground">
-                          Categoría
-                        </label>
-                        <Select
-                          value={categoryFilter}
-                          onValueChange={setCategoryFilter}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Categoría" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="TODAS">Todas</SelectItem>
-                            {categoryLeafOptions.map((category) => (
-                              <SelectItem key={category.id} value={category.id}>
-                                {category.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-foreground">
-                          Laboratorio
-                        </label>
-                        <Select
-                          value={laboratoryFilter}
-                          onValueChange={setLaboratoryFilter}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Laboratorio" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="TODOS">Todos</SelectItem>
-                            {options.laboratories.map((lab) => (
-                              <SelectItem key={lab.id} value={lab.id}>
-                                {lab.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-foreground">
-                          Tipo comercial
-                        </label>
-                        <Select
-                          value={medicationTypeFilter}
-                          onValueChange={setMedicationTypeFilter}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Tipo comercial" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="TODOS">Todos</SelectItem>
-                            {options.commercialTypes.map((type) => (
-                              <SelectItem key={type.id} value={type.id}>
-                                {type.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-foreground">
-                          Principio activo
-                        </label>
-                        <Select
-                          value={activePrincipleFilter}
-                          onValueChange={setActivePrincipleFilter}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Principio activo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="TODOS">Todos</SelectItem>
-                            {options.activePrinciples.map((principle) => (
-                              <SelectItem key={principle.id} value={principle.id}>
-                                {principle.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-end gap-2 border-t p-4">
-                    <SidePanelClose asChild>
-                      <Button type="button" variant="primary" size="sm">
-                        Listo
-                      </Button>
-                    </SidePanelClose>
-                  </div>
-                </SidePanelContent>
-              </SidePanel>
-              <Select
-                value={`${sortBy}:${sortDir}`}
-                onValueChange={(value) => {
-                  const [by, dir] = value.split(':')
-                  setSortBy(by as 'name' | 'stockUnits' | 'createdAt')
-                  setSortDir(dir as 'asc' | 'desc')
-                }}
-              >
-                <SelectTrigger className="h-9 min-w-[170px]">
-                  <SelectValue placeholder="Orden" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name:asc">Nombre (A → Z)</SelectItem>
-                  <SelectItem value="name:desc">Nombre (Z → A)</SelectItem>
-                  <SelectItem value="stockUnits:desc">Stock (Mayor → Menor)</SelectItem>
-                  <SelectItem value="stockUnits:asc">Stock (Menor → Mayor)</SelectItem>
-                  <SelectItem value="createdAt:desc">Fecha registro (Recientes)</SelectItem>
-                  <SelectItem value="createdAt:asc">Fecha registro (Antiguos)</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={String(pageSize)}
-                onValueChange={(value) => setPageSize(Number(value))}
-              >
-                <SelectTrigger className="h-9 min-w-[130px]">
-                  <SelectValue placeholder="Por página" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="10">10 / página</SelectItem>
-                  <SelectItem value="20">20 / página</SelectItem>
-                  <SelectItem value="50">50 / página</SelectItem>
-                  <SelectItem value="100">100 / página</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
-          </Card>
+
+            <TabsContent value="catalogo" className="space-y-2 pt-2">
+              <div className="flex flex-wrap items-stretch gap-2 sm:gap-3">
+                <div className="relative flex-[1_1_500px] min-w-[260px]">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Buscar por SKU, nombre, código o principio activo"
+                    className="h-9 pl-9"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => setStatusFilter(value as 'TODOS' | ProductStatus)}
+                  >
+                    <SelectTrigger className="h-9 w-[128px]">
+                      <SelectValue placeholder="Estado" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="TODOS">Todos</SelectItem>
+                      <SelectItem value="ACTIVO">Activo</SelectItem>
+                      <SelectItem value="INACTIVO">Inactivo</SelectItem>
+                      <SelectItem value="DESCONTINUADO">Descontinuado</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <SidePanel open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+                    <SidePanelTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 relative"
+                      >
+                        <SlidersHorizontal className="mr-1.5 h-4 w-4" />
+                        <span className="whitespace-nowrap">Filtros</span>
+                        {activeAdvancedFiltersCount > 0 ? (
+                          <Badge
+                            variant="default"
+                            className="ml-1.5 rounded-full px-1.5 py-0 text-[10px] leading-none"
+                          >
+                            {activeAdvancedFiltersCount}
+                          </Badge>
+                        ) : null}
+                      </Button>
+                    </SidePanelTrigger>
+                    <SidePanelContent className="flex h-full flex-col p-0" showCloseButton>
+                      <div className="flex items-start justify-between gap-3 border-b p-4">
+                        <div className="space-y-0.5">
+                          <p className="text-lg font-semibold text-foreground">
+                            Filtros avanzados
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Refina el catálogo por categoría, laboratorio y otros maestros.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={activeAdvancedFiltersCount === 0}
+                          onClick={() => {
+                            setCategoryFilter('TODAS')
+                            setLaboratoryFilter('TODOS')
+                            setMedicationTypeFilter('TODOS')
+                            setActivePrincipleFilter('TODOS')
+                          }}
+                        >
+                          Limpiar
+                        </Button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-4">
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-foreground">
+                              Categoría
+                            </label>
+                            <Select
+                              value={categoryFilter}
+                              onValueChange={setCategoryFilter}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Categoría" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="TODAS">Todas</SelectItem>
+                                {categoryLeafOptions.map((category) => (
+                                  <SelectItem key={category.id} value={category.id}>
+                                    {category.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-foreground">
+                              Laboratorio
+                            </label>
+                            <Select
+                              value={laboratoryFilter}
+                              onValueChange={setLaboratoryFilter}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Laboratorio" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="TODOS">Todos</SelectItem>
+                                {options.laboratories.map((lab) => (
+                                  <SelectItem key={lab.id} value={lab.id}>
+                                    {lab.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-foreground">
+                              Tipo comercial
+                            </label>
+                            <Select
+                              value={medicationTypeFilter}
+                              onValueChange={setMedicationTypeFilter}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Tipo comercial" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="TODOS">Todos</SelectItem>
+                                {options.commercialTypes.map((type) => (
+                                  <SelectItem key={type.id} value={type.id}>
+                                    {type.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-foreground">
+                              Principio activo
+                            </label>
+                            <Select
+                              value={activePrincipleFilter}
+                              onValueChange={setActivePrincipleFilter}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Principio activo" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="TODOS">Todos</SelectItem>
+                                {options.activePrinciples.map((principle) => (
+                                  <SelectItem key={principle.id} value={principle.id}>
+                                    {principle.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 border-t p-4">
+                        <SidePanelClose asChild>
+                          <Button type="button" variant="primary" size="sm">
+                            Listo
+                          </Button>
+                        </SidePanelClose>
+                      </div>
+                    </SidePanelContent>
+                  </SidePanel>
+
+                  <Select
+                    value={`${sortBy}:${sortDir}`}
+                    onValueChange={(value) => {
+                      const [by, dir] = value.split(':')
+                      setSortBy(by as 'name' | 'stockUnits' | 'createdAt')
+                      setSortDir(dir as 'asc' | 'desc')
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[170px]">
+                      <SelectValue placeholder="Orden" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name:asc">Nombre (A → Z)</SelectItem>
+                      <SelectItem value="name:desc">Nombre (Z → A)</SelectItem>
+                      <SelectItem value="stockUnits:desc">Stock (Mayor → Menor)</SelectItem>
+                      <SelectItem value="stockUnits:asc">Stock (Menor → Mayor)</SelectItem>
+                      <SelectItem value="createdAt:desc">Fecha registro (Recientes)</SelectItem>
+                      <SelectItem value="createdAt:asc">Fecha registro (Antiguos)</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(value) => setPageSize(Number(value))}
+                  >
+                    <SelectTrigger className="h-9 w-[132px]">
+                      <SelectValue placeholder="Por página" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10 / página</SelectItem>
+                      <SelectItem value="20">20 / página</SelectItem>
+                      <SelectItem value="50">50 / página</SelectItem>
+                      <SelectItem value="100">100 / página</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
 
           {/* Mobile Cards View */}
           <div className="md:hidden space-y-3">
@@ -2420,8 +2436,6 @@ export function ProductosPage() {
               </CardContent>
             </Card>
           ) : null}
-        </TabsContent>
-
         <TabsContent value="maestros" className="space-y-4 pt-4">
           <ProductMastersCenter
             accessToken={accessToken}
@@ -2430,6 +2444,8 @@ export function ProductosPage() {
           />
         </TabsContent>
       </Tabs>
+        </div>
+      </div>
 
       {isCreateDialogOpen ? (
         <SidePanel
