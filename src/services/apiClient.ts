@@ -226,6 +226,7 @@ export async function apiRequest<T>(
           accessToken: refresh.session.accessToken,
           skipRefresh: true,
         })
+      }
       if (refresh.code === 'REFRESH_INVALID') {
         console.warn(
           `[API] Refresh token inválido/expirado en ${path}. Destruyendo sesión almacenada.`,
