@@ -296,22 +296,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     )
   }, [setSession])
 
-  const logout = useCallback(async (reason?: string) => {
-    console.warn(
-      `[AUTH] logout INICIADO. Motivo: ${reason ?? 'sin motivo explícito'}. Sesión actual será destruida (accessToken=${session?.accessToken?.slice(0, 16) ?? 'ninguna'}...)`,
-    )
-    try {
-      await authService.logout(session)
-    } catch (error) {
-      console.warn('No se pudo confirmar el cierre de sesión en la API.', error)
-    } finally {
-      sessionRef.current = null
-      setSessionState(null)
-      clearStoredSession()
-      console.warn('[AUTH] logout COMPLETADO: session=null, storage limpiado.')
-    }
-  }, [session])
-
   const requestPasswordReset = useCallback(
     async (payload: ForgotPasswordPayload) => authService.requestPasswordReset(payload),
     [],
