@@ -2,6 +2,108 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
+
+function stripDiacritics(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+const UNIT_ABBREVIATION_DICTIONARY: Array<{ patterns: string[]; abbreviation: string }> = [
+  { patterns: ['unidad', 'unidade'], abbreviation: 'und' },
+  { patterns: ['caja'], abbreviation: 'cj' },
+  { patterns: ['blister', 'blíster', 'blisters'], abbreviation: 'bl' },
+  { patterns: ['tableta', 'tabletas'], abbreviation: 'tab' },
+  { patterns: ['capsula', 'cápsula', 'capsulas', 'cápsulas'], abbreviation: 'cap' },
+  { patterns: ['mililitro', 'mililitros'], abbreviation: 'ml' },
+  { patterns: ['gramo', 'gramos'], abbreviation: 'g' },
+  { patterns: ['kilogramo', 'kilogramos'], abbreviation: 'kg' },
+  { patterns: ['frasco', 'frascos'], abbreviation: 'fco' },
+  { patterns: ['paquete', 'paquetes'], abbreviation: 'paq' },
+  { patterns: ['pack', 'pck'], abbreviation: 'pack' },
+  { patterns: ['sobre', 'sobres'], abbreviation: 'sob' },
+  { patterns: ['ampolla', 'ampollas'], abbreviation: 'amp' },
+  { patterns: ['tubo', 'tubos'], abbreviation: 'tb' },
+  { patterns: ['jarabe'], abbreviation: 'jar' },
+  { patterns: ['crema'], abbreviation: 'crm' },
+  { patterns: ['pomada'], abbreviation: 'pom' },
+  { patterns: ['gotero', 'gotas'], abbreviation: 'got' },
+  { patterns: ['supositorio', 'supositorios'], abbreviation: 'sup' },
+  { patterns: ['cucharadita'], abbreviation: 'cdta' },
+  { patterns: ['cucharada'], abbreviation: 'cda' },
+  { patterns: ['libra', 'libras'], abbreviation: 'lb' },
+  { patterns: ['onza', 'onzas'], abbreviation: 'oz' },
+  { patterns: ['metro', 'metros'], abbreviation: 'm' },
+  { patterns: ['centimetro', 'centímetro', 'centimetros', 'centímetros'], abbreviation: 'cm' },
+  { patterns: ['milimetro', 'milímetro', 'milimetros', 'milímetros'], abbreviation: 'mm' },
+  { patterns: ['litro', 'litros'], abbreviation: 'l' },
+]
+
+function suggestUnitAbbreviation(name: string): string {
+  const clean = stripDiacritics(name).toLowerCase().trim()
+  if (!clean) return ''
+  for (const entry of UNIT_ABBREVIATION_DICTIONARY) {
+    if (entry.patterns.some((p) => clean === p || clean.startsWith(p + ' ') || clean.endsWith(' ' + p))) {
+      return entry.abbreviation
+    }
+  }
+  const prefixMatch = UNIT_ABBREVIATION_DICTIONARY.find((entry) => entry.patterns.some((p) => clean.startsWith(p)))
+  if (prefixMatch) return prefixMatch.abbreviation
+  const words = clean.split(/\s+/).filter(Boolean)
+  if (words.length >= 2) {
+    return words
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 6)
+  }
+  const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
+  const firstWord = words[0] ?? clean
+  const consonants: string[] = []
+  for (const ch of firstWord) {
+    if (!vowels.has(ch) && /[a-z]/.test(ch)) consonants.push(ch)
+  }
+  if (consonants.length >= 3) return consonants.slice(0, 3).join('')
+  if (consonants.length >= 2) return consonants.slice(0, 2).join('')
+  return firstWord.slice(0, 3)
+}
+
+const CATEGORY_PALETTE_PRESETS: { hex: string; label: string }[] = [
+  { hex: '#2563EB', label: 'Azul' },
+  { hex: '#3B82F6', label: 'Azul claro' },
+  { hex: '#10B981', label: 'Verde' },
+  { hex: '#34D399', label: 'Verde claro' },
+  { hex: '#06B6D4', label: 'Celeste' },
+  { hex: '#14B8A6', label: 'Turquesa' },
+  { hex: '#8B5CF6', label: 'Morado' },
+  { hex: '#A78BFA', label: 'Violeta' },
+  { hex: '#EC4899', label: 'Rosa' },
+  { hex: '#F43F5E', label: 'Rosa oscuro' },
+  { hex: '#EF4444', label: 'Rojo' },
+  { hex: '#F97316', label: 'Naranja' },
+  { hex: '#F59E0B', label: 'Ámbar' },
+  { hex: '#EAB308', label: 'Amarillo' },
+  { hex: '#64748B', label: 'Gris' },
+  { hex: '#94A3B8', label: 'Gris claro' },
+  { hex: '#0EA5E9', label: 'Cian' },
+  { hex: '#0284C7', label: 'Azul cielo' },
+  { hex: '#16A34A', label: 'Verde oscuro' },
+  { hex: '#DC2626', label: 'Rojo oscuro' },
+  { hex: '#CA8A04', label: 'Mostaza' },
+  { hex: '#DB2777', label: 'Fucsia' },
+  { hex: '#7C3AED', label: 'Violeta oscuro' },
+  { hex: '#475569', label: 'Pizarra' },
+]
+
+function normalizeHex(value: string | undefined | null): string {
+  if (!value) return ''
+  const clean = value.trim()
+  if (!clean) return ''
+  const withHash = clean.startsWith('#') ? clean : `#${clean}`
+  const hexOnly = /^#[0-9A-Fa-f]{3}$|^#[0-9A-Fa-f]{6}$/.test(withHash)
+  if (!hexOnly) return withHash
+  if (withHash.length === 4) {
+    return `#${withHash[1]}${withHash[1]}${withHash[2]}${withHash[2]}${withHash[3]}${withHash[3]}`.toUpperCase()
+  }
+  return withHash.toUpperCase()
+}
 import {
   AlertTriangle,
   BookOpen,
@@ -27,6 +129,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Dialog,
   DialogContent,
@@ -77,6 +180,23 @@ import { useAuthorization } from '@/hooks/useAuthorization'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { productsService } from '@/services/productsService'
+import { COUNTRIES, DEFAULT_COUNTRY_CODE, getCountryByCode } from '@/lib/countries'
+import {
+  buildSkuSuggestionForCategory,
+  consumeReservedSku,
+  discardReservedSku,
+  ensureCountersFromExistingSkus,
+  generateNextSkuForCategory,
+  getSkuPrefixForCategory,
+  normalizeSkuPrefix,
+  saveSkuPrefixForCategory,
+  validateSkuPrefix,
+} from '@/lib/skuGenerator'
+import {
+  evaluateStockLevel,
+  loadStockThresholdCompanyConfig,
+  stockThresholdToVariant,
+} from '@/lib/stockThresholds'
 import {
   buildCumulativePackagingLabels as buildPackagingChainPreview,
   buildPackagingSummary,
@@ -187,6 +307,14 @@ const masterCategorySchema = z.object({
   color: z.string().max(20).optional(),
   orden: z.number().int().nonnegative().optional(),
   activo: z.boolean().optional(),
+  prefijoSku: z
+    .string()
+    .max(6, 'Máximo 6 caracteres.')
+    .refine((v) => validateSkuPrefix(v).ok, {
+      message: 'Debe ser 1-6 letras mayúsculas o dígitos (sin espacios ni acentos).',
+    })
+    .optional()
+    .or(z.literal('')),
 })
 
 const masterLaboratorySchema = z.object({
@@ -216,7 +344,7 @@ const masterPresentationSchema = z.object({
 
 const masterUnitSchema = z.object({
   nombre: z.string().min(2, 'El nombre es obligatorio.').max(80),
-  simbolo: z.string().min(1, 'El símbolo es obligatorio.').max(20),
+  simbolo: z.string().min(1, 'La abreviatura es obligatoria.').max(20),
   descripcion: z.string().max(255).optional(),
   activo: z.boolean().optional(),
 })
@@ -354,9 +482,11 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
-function buildSkuSuggestion() {
-  const stamp = Date.now().toString().slice(-6)
-  return `MED-${stamp}`.slice(0, 50)
+function buildSkuSuggestion(categoryId?: string | null, categoryName?: string | null) {
+  return buildSkuSuggestionForCategory({
+    categoryId: categoryId ?? null,
+    categoryName: categoryName ?? null,
+  })
 }
 
 function formatDate(value: string | null) {
@@ -372,9 +502,15 @@ function formatDate(value: string | null) {
 }
 
 function getStockVariant(product: ProductCatalogItem) {
-  if (product.stockUnits === 0) return 'destructive'
-  if (product.stockUnits <= 20 || product.lotCount <= 1) return 'warning'
-  return 'success'
+  const companyConfig =
+    typeof window !== 'undefined' ? loadStockThresholdCompanyConfig() : null
+  const evaluation = evaluateStockLevel({
+    stockUnits: product.stockUnits,
+    companyConfig,
+    fallbackToLegacyDefaults: true,
+  })
+  if (product.lotCount <= 1 && evaluation.level === 'normal') return 'warning'
+  return stockThresholdToVariant(evaluation, { legacyCompatibility: true })
 }
 
 function getApiErrorMessage(error: unknown) {
@@ -520,6 +656,61 @@ export function ProductosPage() {
 
   const watchedPackagingRows = form.watch('empaque')
   const detectedBasePresentationId = watchedPackagingRows.at(-1)?.presentacionId ?? ''
+  const watchedCategoriaId = form.watch('categoriaId')
+  const watchedSku = form.watch('sku')
+  const currentReservedSkuRef = useRef<string | null>(null)
+  const skuAutoEditedRef = useRef(false)
+  const existingSkusSetRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!catalogRows) return
+    const set = new Set<string>()
+    for (const row of catalogRows) if (row.sku) set.add(row.sku)
+    existingSkusSetRef.current = set
+    try {
+      ensureCountersFromExistingSkus(set)
+    } catch {
+      /* ignore */
+    }
+  }, [catalogRows])
+
+  useEffect(() => {
+    if (editingProduct) return
+    if (!watchedCategoriaId || !isCreateDialogOpen) return
+    if (skuAutoEditedRef.current && currentReservedSkuRef.current) return
+    const categoryRecord = options.categories.find((c) => c.id === watchedCategoriaId)
+    const reserved = generateNextSkuForCategory({
+      categoryId: watchedCategoriaId,
+      categoryName: categoryRecord?.name ?? null,
+      existingSkus: existingSkusSetRef.current,
+    })
+    if (!reserved.sku) return
+    const previous = currentReservedSkuRef.current
+    if (previous && previous !== reserved.sku) {
+      try {
+        discardReservedSku(previous)
+      } catch {
+        /* ignore */
+      }
+    }
+    currentReservedSkuRef.current = reserved.sku
+    skuAutoEditedRef.current = false
+    form.setValue('sku', reserved.sku, { shouldValidate: true })
+  }, [watchedCategoriaId, editingProduct, form, options.categories, isCreateDialogOpen])
+
+  useEffect(() => {
+    if (!isCreateDialogOpen) {
+      if (currentReservedSkuRef.current) {
+        try {
+          discardReservedSku(currentReservedSkuRef.current)
+        } catch {
+          /* ignore */
+        }
+      }
+      currentReservedSkuRef.current = null
+      skuAutoEditedRef.current = false
+    }
+  }, [isCreateDialogOpen])
   const [packagingDraftRows, setPackagingDraftRows] = useState<PackagingFormRow[]>([])
   const draftBasePresentationId = packagingDraftRows.at(-1)?.presentacionId ?? ''
   const draftPurchasePresentationId =
@@ -585,8 +776,23 @@ export function ProductosPage() {
       color: '',
       orden: 0,
       activo: true,
+      prefijoSku: '',
     },
   })
+
+  const watchedCategoryNombre = categoryForm.watch('nombre')
+  const watchedCategoryPrefijo = categoryForm.watch('prefijoSku')
+  const categoryPrefijoEditedRef = useRef(false)
+  useEffect(() => {
+    if (!watchedCategoryNombre || categoryPrefijoEditedRef.current) return
+    if (masterDialogMode === 'edit' && editingCategory?.id) return
+    const suggested = getSkuPrefixForCategory({ categoryName: watchedCategoryNombre })
+    if (!suggested) return
+    const current = (watchedCategoryPrefijo ?? '').trim()
+    if (!current || normalizeSkuPrefix(current) === 'OTR') {
+      categoryForm.setValue('prefijoSku', suggested, { shouldValidate: false })
+    }
+  }, [watchedCategoryNombre, watchedCategoryPrefijo, categoryForm, masterDialogMode, editingCategory])
 
   const laboratoryForm = useForm<MasterLaboratoryFormValues>({
     resolver: zodResolver(masterLaboratorySchema),
@@ -634,6 +840,16 @@ export function ProductosPage() {
       activo: true,
     },
   })
+  const unitAbbreviationEditedRef = useRef(false)
+
+  const watchedUnitNombre = unitForm.watch('nombre')
+  useEffect(() => {
+    if (!watchedUnitNombre || unitAbbreviationEditedRef.current) return
+    const suggestion = suggestUnitAbbreviation(watchedUnitNombre)
+    if (suggestion) {
+      unitForm.setValue('simbolo', suggestion, { shouldValidate: false })
+    }
+  }, [watchedUnitNombre, unitForm])
 
   const canManageMasters =
     authorization.can('*') || authorization.hasAnyRole(['ADMIN_EMPRESA', 'ADMIN', 'SUPERVISOR'])
@@ -1045,6 +1261,7 @@ export function ProductosPage() {
     setEditingActivePrinciple(null)
     setEditingPresentation(null)
     setEditingUnit(null)
+    categoryPrefijoEditedRef.current = false
     categoryForm.reset()
     laboratoryForm.reset()
     medicationTypeForm.reset()
@@ -1074,16 +1291,18 @@ export function ProductosPage() {
       setEditingActivePrinciple(null)
       setEditingPresentation(null)
       setEditingUnit(null)
+      categoryPrefijoEditedRef.current = false
       categoryForm.reset({
         nombre: '',
         descripcion: '',
         color: '',
         orden: 0,
         activo: true,
+        prefijoSku: '',
       })
       laboratoryForm.reset({
         nombre: '',
-        pais: '',
+        pais: getCountryByCode(DEFAULT_COUNTRY_CODE)?.name ?? '',
         descripcion: '',
         activo: true,
       })
@@ -1108,6 +1327,7 @@ export function ProductosPage() {
         descripcion: '',
         activo: true,
       })
+      unitAbbreviationEditedRef.current = false
       setMasterDialogOpen(true)
     },
     [activePrincipleForm, categoryForm, laboratoryForm, medicationTypeForm, presentationForm, unitForm],
@@ -1120,6 +1340,7 @@ export function ProductosPage() {
         return
       }
 
+      const prefixNormalized = normalizeSkuPrefix(values.prefijoSku || values.nombre)
       const payload: UpsertMasterCategoryPayload = {
         nombre: values.nombre.trim(),
         descripcion: values.descripcion?.trim() || undefined,
@@ -1130,15 +1351,29 @@ export function ProductosPage() {
 
       setIsMasterSubmitting(true)
       try {
+        let savedId: string | null = null
         if (masterDialogMode === 'edit' && editingCategory) {
           await productsService.updateMasterCategory(accessToken, editingCategory.id, payload)
           toast.success('Categoría actualizada.')
+          savedId = editingCategory.id
         } else {
           const created = await productsService.createMasterCategory(accessToken, payload)
           toast.success('Categoría creada.')
+          savedId = created.id
           if (masterDialogTargetField === 'categoriaId') {
             form.setValue('categoriaId', created.id, { shouldValidate: true })
           }
+        }
+        try {
+          saveSkuPrefixForCategory(
+            {
+              categoryId: savedId ?? undefined,
+              categoryName: values.nombre.trim(),
+              prefix: prefixNormalized,
+            },
+          )
+        } catch {
+          /* ignore local persistence errors */
         }
 
         resetMasterDialogState()
@@ -1579,10 +1814,19 @@ export function ProductosPage() {
         await productsService.update(accessToken, editingId, payload)
         toast.success('Producto actualizado correctamente.')
       } else {
-        await productsService.create(accessToken, payload)
+        const created = await productsService.create(accessToken, payload)
+        if (values.sku.trim()) {
+          try {
+            consumeReservedSku(values.sku.trim(), (created as any)?.id ?? values.sku.trim())
+          } catch {
+            /* ignore */
+          }
+        }
         toast.success('Producto registrado correctamente.')
       }
       isExplicitCreateDialogClosingRef.current = true
+      currentReservedSkuRef.current = null
+      skuAutoEditedRef.current = false
       setIsCreateDialogOpen(false)
       setEditingProduct(null)
       form.reset(defaultFormValues)
@@ -2128,17 +2372,74 @@ export function ProductosPage() {
               <div className="grid gap-4">
                 <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-medium">SKU</label>
+                {!editingProduct ? (
+                  <span className="truncate text-[11px] text-muted-foreground">
+                    {skuAutoEditedRef.current ? 'Manual' : watchedCategoriaId ? 'Auto' : 'Selecciona categoría para auto-generar'}
+                  </span>
+                ) : (
+                  <span className="truncate text-[11px] text-muted-foreground">Editando: SKU fijo</span>
+                )}
+              </div>
                 <Input
                   {...form.register('sku', {
+                    onChange: (e) => {
+                      if (!editingProduct && !e.target.value.startsWith(skuAutoEditedRef.current ? '__never__' : '__skip__')) {
+                        skuAutoEditedRef.current = true
+                      }
+                      const filtered = e.target.value
+                        .toUpperCase()
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/[^A-ZÑ0-9\-]/g, '')
+                        .slice(0, 50)
+                      if (filtered !== e.target.value) {
+                        form.setValue('sku', filtered, { shouldValidate: true })
+                      }
+                    },
                     onBlur: (event) => {
                       void handleSkuBlur(event.target.value)
                     },
                   })}
-                  placeholder="MED-0001"
+                  placeholder="MED-000001"
                   size={1}
+                  readOnly={false}
+                  className={editingProduct ? 'tracking-[0.14em] font-mono' : 'tracking-[0.14em] font-mono'}
                 />
                 <FieldError message={form.formState.errors.sku?.message} />
+                {!editingProduct && watchedCategoriaId ? (
+                  <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    El prefijo se actualiza al cambiar la categoría.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="link"
+                    className="h-7 w-auto px-2 py-0 text-[11px]"
+                    onClick={() => {
+                      const categoryRecord = options.categories.find((c) => c.id === watchedCategoriaId)
+                      const reserved = generateNextSkuForCategory({
+                        categoryId: watchedCategoriaId,
+                        categoryName: categoryRecord?.name ?? null,
+                        existingSkus: existingSkusSetRef.current,
+                      })
+                      if (reserved.sku) {
+                        const previous = currentReservedSkuRef.current
+                        if (previous && previous !== reserved.sku) {
+                          try { discardReservedSku(previous) } catch { /* ignore */ }
+                        }
+                        currentReservedSkuRef.current = reserved.sku
+                        skuAutoEditedRef.current = false
+                        form.setValue('sku', reserved.sku, { shouldValidate: true })
+                      }
+                    }}
+                  >
+                    Generar nuevo
+                  </Button>
+                </div>
+                ) : null}
               </div>
 
               <div className="space-y-1.5 md:col-span-2">
@@ -3271,19 +3572,213 @@ export function ProductosPage() {
                   <p className="text-xs text-muted-foreground">Código generado automáticamente desde el nombre.</p>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
-                  <label className="text-xs font-medium">Descripción</label>
-                  <Textarea {...categoryForm.register('descripcion')} disabled={isMasterSubmitting} />
-                  <FieldError message={categoryForm.formState.errors.descripcion?.message} />
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-medium">
+                      Prefijo SKU <span className="text-muted-foreground">(1-6 caracteres)</span>
+                    </label>
+                    {watchedCategoryPrefijo ? (
+                      <span className="rounded-md border bg-muted/40 px-2 py-0.5 text-[11px] font-semibold tracking-wider">
+                        {normalizeSkuPrefix(watchedCategoryPrefijo)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      {...categoryForm.register('prefijoSku', {
+                        onBlur: (e) => {
+                          const normalized = normalizeSkuPrefix(e.target.value)
+                          if (e.target.value && e.target.value !== normalized) {
+                            categoryForm.setValue('prefijoSku', normalized, { shouldValidate: true })
+                          }
+                        },
+                      })}
+                      placeholder="MED / BEB / ALI"
+                      disabled={isMasterSubmitting}
+                      maxLength={6}
+                      onChange={(e) => {
+                        categoryPrefijoEditedRef.current = true
+                        const filtered = e.target.value
+                          .toUpperCase()
+                          .normalize('NFD')
+                          .replace(/[\u0300-\u036f]/g, '')
+                          .replace(/[^A-ZÑ0-9]/g, '')
+                          .slice(0, 6)
+                        categoryForm.setValue('prefijoSku', filtered, { shouldValidate: true })
+                      }}
+                      className="tracking-[0.18em] uppercase"
+                    />
+                    {!categoryPrefijoEditedRef.current ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isMasterSubmitting}
+                        onClick={() => {
+                          const sug = getSkuPrefixForCategory({ categoryName: categoryForm.getValues('nombre') })
+                          categoryForm.setValue('prefijoSku', sug, { shouldValidate: true })
+                          categoryPrefijoEditedRef.current = false
+                        }}
+                      >
+                        Sugerir
+                      </Button>
+                    ) : null}
+                  </div>
+                  <FieldError message={categoryForm.formState.errors.prefijoSku?.message} />
+                  <p className="text-xs text-muted-foreground">
+                    Usado para generar automáticamente el SKU (ejemplo: {normalizeSkuPrefix(watchedCategoryPrefijo || 'OTR')}-000001).
+                  </p>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
-                  <label className="text-xs font-medium">Color (opcional)</label>
-                  <Input
-                    {...categoryForm.register('color')}
-                    placeholder="#10B981"
+                  <label className="text-xs font-medium">Descripción</label>
+                  <Textarea
+                    {...categoryForm.register('descripcion')}
                     disabled={isMasterSubmitting}
+                    rows={2}
+                    className="min-h-0 resize-y"
                   />
-                  <FieldError message={categoryForm.formState.errors.color?.message} />
+                  <FieldError message={categoryForm.formState.errors.descripcion?.message} />
                 </div>
+                <Controller
+                  control={categoryForm.control}
+                  name="color"
+                  render={({ field }) => {
+                    const normalized = normalizeHex(field.value || '')
+                    const isSelected = (hex: string) => normalized.toUpperCase() === hex.toUpperCase()
+                    const nativeId = `category-color-native-${masterDialogType}-${masterDialogMode}`
+                    return (
+                      <div className="space-y-2 sm:col-span-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs font-medium">Color (opcional)</label>
+                          {normalized ? (
+                            <button
+                              type="button"
+                              onClick={() => field.onChange('')}
+                              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+                              disabled={isMasterSubmitting}
+                            >
+                              Sin color
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <div
+                            className="flex min-h-10 flex-1 items-center gap-2 rounded-md border bg-background px-3 py-2"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => !isMasterSubmitting && document.getElementById(nativeId)?.click()}
+                              disabled={isMasterSubmitting}
+                              className="group flex items-center gap-2 rounded-md px-1 outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <span
+                                aria-hidden
+                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+                                style={{
+                                  backgroundColor: normalized || 'transparent',
+                                  borderColor: normalized ? 'rgba(15,23,42,0.18)' : 'rgba(100,116,139,0.45)',
+                                  boxShadow: normalized
+                                    ? '0 0 0 2px rgba(255,255,255,0.9) inset'
+                                    : undefined,
+                                }}
+                              >
+                                {normalized ? null : (
+                                  <span
+                                    aria-hidden
+                                    className="block h-5 w-5 rounded-full border border-dashed border-slate-300"
+                                  />
+                                )}
+                              </span>
+                              <span className="text-sm font-medium text-foreground">
+                                {normalized || 'Sin color'}
+                              </span>
+                            </button>
+                            <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
+                              {normalized || '—'}
+                            </span>
+                            <div className="ml-auto flex items-center gap-2">
+                              <input
+                                id={nativeId}
+                                type="color"
+                                value={
+                                  /^#[0-9A-Fa-f]{6}$/.test(normalized) ? normalized : '#10B981'
+                                }
+                                onChange={(e) => field.onChange(normalizeHex(e.target.value))}
+                                disabled={isMasterSubmitting}
+                                className="h-9 w-11 cursor-pointer rounded-md border bg-background p-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                                tabIndex={-1}
+                                aria-label="Selector de color personalizado"
+                              />
+                              <Input
+                                type="text"
+                                value={field.value ?? ''}
+                                onChange={(e) => field.onChange(e.target.value)}
+                                onBlur={() => {
+                                  if (field.value) field.onChange(normalizeHex(field.value))
+                                }}
+                                placeholder="#10B981"
+                                disabled={isMasterSubmitting}
+                                className="h-9 w-28 shrink-0 text-xs tabular-nums"
+                                maxLength={9}
+                              />
+                            </div>
+                          </div>
+                          <span className="inline text-[11px] tabular-nums text-muted-foreground sm:hidden">
+                            {normalized || '—'}
+                          </span>
+                        </div>
+                        <div
+                          role="listbox"
+                          aria-label="Paleta de colores"
+                          className="grid grid-cols-8 gap-1.5 rounded-md border bg-muted/20 p-2 sm:grid-cols-12"
+                        >
+                          {CATEGORY_PALETTE_PRESETS.map((entry) => {
+                            const active = isSelected(entry.hex)
+                            return (
+                              <button
+                                key={entry.hex}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                aria-label={`Color ${entry.label} ${entry.hex}`}
+                                title={`${entry.label} ${entry.hex}`}
+                                disabled={isMasterSubmitting}
+                                onClick={() => field.onChange(entry.hex)}
+                                className={[
+                                  'relative inline-flex h-7 w-7 items-center justify-center rounded-full border transition-transform',
+                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                  'hover:scale-110 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:opacity-60',
+                                  active ? 'border-foreground ring-2 ring-foreground/20' : 'border-slate-200',
+                                ].join(' ')}
+                                style={{ backgroundColor: entry.hex }}
+                              >
+                                {active ? (
+                                  <span
+                                    aria-hidden
+                                    className="absolute inset-0 flex items-center justify-center"
+                                  >
+                                    <svg
+                                      viewBox="0 0 20 20"
+                                      aria-hidden
+                                      className="h-4 w-4 text-white drop-shadow"
+                                      fill="currentColor"
+                                    >
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M16.704 5.29a1 1 0 0 1 .006 1.414l-7.5 7.55a1 1 0 0 1-1.422.006l-3.5-3.5a1 1 0 1 1 1.424-1.404l2.785 2.785 6.789-6.837a1 1 0 0 1 1.418-.014Z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                  </span>
+                                ) : null}
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <FieldError message={categoryForm.formState.errors.color?.message} />
+                      </div>
+                    )
+                  }}
+                />
               </div>
 
               <Controller
@@ -3329,14 +3824,40 @@ export function ProductosPage() {
                   <Input {...laboratoryForm.register('nombre')} disabled={isMasterSubmitting} />
                   <FieldError message={laboratoryForm.formState.errors.nombre?.message} />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">País (opcional)</label>
-                  <Input {...laboratoryForm.register('pais')} disabled={isMasterSubmitting} />
-                  <FieldError message={laboratoryForm.formState.errors.pais?.message} />
-                </div>
+                <Controller
+                  control={laboratoryForm.control}
+                  name="pais"
+                  render={({ field }) => (
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label className="text-xs font-medium">País (opcional)</label>
+                      <Combobox
+                        value={field.value ?? ''}
+                        onValueChange={(next) => field.onChange(next)}
+                        placeholder="Seleccionar país"
+                        searchPlaceholder="Buscar país..."
+                        emptyMessage="No se encontraron países."
+                        disabled={isMasterSubmitting}
+                        options={[
+                          { value: '', label: 'Seleccionar país' },
+                          ...COUNTRIES.map((entry) => ({
+                            value: entry.name,
+                            label: entry.name,
+                            description: entry.code,
+                          })),
+                        ]}
+                      />
+                      <FieldError message={laboratoryForm.formState.errors.pais?.message} />
+                    </div>
+                  )}
+                />
                 <div className="space-y-1.5 sm:col-span-2">
                   <label className="text-xs font-medium">Descripción</label>
-                  <Textarea {...laboratoryForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <Textarea
+                    {...laboratoryForm.register('descripcion')}
+                    disabled={isMasterSubmitting}
+                    rows={2}
+                    className="min-h-0 resize-y"
+                  />
                   <FieldError message={laboratoryForm.formState.errors.descripcion?.message} />
                 </div>
               </div>
@@ -3538,21 +4059,42 @@ export function ProductosPage() {
 
           {masterDialogType === 'unidad' ? (
             <form className="grid gap-4" onSubmit={unitForm.handleSubmit(handleSaveMasterUnit)}>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Símbolo</label>
-                  <Input {...unitForm.register('simbolo')} disabled={isMasterSubmitting} />
-                  <FieldError message={unitForm.formState.errors.simbolo?.message} />
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <label className="text-xs font-medium">Nombre</label>
+                  <label className="text-xs font-medium">Nombre *</label>
                   <Input {...unitForm.register('nombre')} disabled={isMasterSubmitting} />
                   <FieldError message={unitForm.formState.errors.nombre?.message} />
                   <p className="text-xs text-muted-foreground">Código generado automáticamente desde el nombre.</p>
                 </div>
-                <div className="space-y-1.5 sm:col-span-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium">Abreviatura *</label>
+                  <Input
+                    {...unitForm.register('simbolo', {
+                      onBlur: (e) => {
+                        if (e.target.value !== watchedUnitNombre && e.target.value !== suggestUnitAbbreviation(watchedUnitNombre)) {
+                          unitAbbreviationEditedRef.current = true
+                        }
+                      },
+                    })}
+                    disabled={isMasterSubmitting}
+                    placeholder="und / ml / g / tab"
+                    onInput={() => {
+                      unitAbbreviationEditedRef.current = true
+                    }}
+                  />
+                  <FieldError message={unitForm.formState.errors.simbolo?.message} />
+                  <p className="text-xs text-muted-foreground">
+                    Usa una abreviatura corta para operación diaria (ej. und, ml, g, tab).
+                  </p>
+                </div>
+                <div className="space-y-1.5">
                   <label className="text-xs font-medium">Descripción</label>
-                  <Textarea {...unitForm.register('descripcion')} disabled={isMasterSubmitting} />
+                  <Textarea
+                    {...unitForm.register('descripcion')}
+                    disabled={isMasterSubmitting}
+                    rows={2}
+                    className="min-h-0 resize-y"
+                  />
                   <FieldError message={unitForm.formState.errors.descripcion?.message} />
                 </div>
               </div>

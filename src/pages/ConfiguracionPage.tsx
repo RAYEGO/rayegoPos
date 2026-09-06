@@ -10,6 +10,7 @@ import {
   Globe2,
   ImageUp,
   MoreHorizontal,
+  Package,
   Plus,
   RefreshCcw,
   Server,
@@ -63,6 +64,18 @@ import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
 import type { CompanyProfile, UpdateCompanyProfilePayload } from '@/types/company'
+import {
+  buildStockAlertRangeLabels,
+  DEFAULT_STOCK_ALERT_CONFIG,
+  evaluateStockLevel,
+  loadStockThresholdBranchConfig,
+  loadStockThresholdCompanyConfig,
+  saveStockThresholdBranchConfig,
+  saveStockThresholdCompanyConfig,
+  type StockThresholdConfig,
+  type StockThresholdConfigInput,
+  validateStockThresholdConfig,
+} from '@/lib/stockThresholds'
 
 function formatDateTime(value: string) {
   const date = new Date(value)
@@ -326,6 +339,7 @@ export function ConfiguracionPage() {
     | 'sucursales'
     | 'implementacion'
     | 'entorno'
+    | 'inventario'
     | 'herramientas'
     | 'rt-tipos-equipo'
     | 'rt-tipos-servicio'
@@ -394,6 +408,29 @@ export function ConfiguracionPage() {
 
   const [garantiaDefaultDias, setGarantiaDefaultDias] = useState<number>(30)
   const [garantiaGuardando] = useState(false)
+
+  const companyId = session?.user.companyId ?? null
+  const userBranchId = session?.user.branchId ?? null
+  const [stockAlertScope, setStockAlertScope] = useState<'company' | 'branch'>('company')
+  const [stockAlertBranchId, setStockAlertBranchId] = useState<string | null>(null)
+  const [stockAlertEnabled, setStockAlertEnabled] = useState(DEFAULT_STOCK_ALERT_CONFIG.enabled)
+  const [stockAlertCriticalMax, setStockAlertCriticalMax] = useState<number>(DEFAULT_STOCK_ALERT_CONFIG.criticalMax)
+  const [stockAlertLowMax, setStockAlertLowMax] = useState<number>(DEFAULT_STOCK_ALERT_CONFIG.lowMax)
+  const [stockAlertSavedConfig, setStockAlertSavedConfig] = useState<StockThresholdConfig | null>(null)
+  const [isStockAlertLoading, setIsStockAlertLoading] = useState(false)
+  const [isStockAlertSaving, setIsStockAlertSaving] = useState(false)
+  const [stockAlertDirty, setStockAlertDirty] = useState(false)
+
+  const stockAlertValidation = useMemo(() => {
+    const input: StockThresholdConfigInput = {
+      enabled: stockAlertEnabled,
+      criticalMax: stockAlertCriticalMax,
+      lowMax: stockAlertLowMax,
+    }
+    const validation = validateStockThresholdConfig(input)
+    const previewRanges = buildStockAlertRangeLabels(input)
+    return { input, validation, previewRanges }
+  }, [stockAlertEnabled, stockAlertCriticalMax, stockAlertLowMax])
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
@@ -664,6 +701,67 @@ export function ConfiguracionPage() {
     void loadTiposEquipo()
     void loadTiposServicio()
   }, [accessToken])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setIsStockAlertLoading(true)
+      try {
+        const scopeId =
+          stockAlertScope === 'branch'
+            ? stockAlertBranchId ?? userBranchId
+            : null
+        const loaded =
+          stockAlertScope === 'branch' && scopeId
+            ? loadStockThresholdBranchConfig(scopeId, companyId)
+            : loadStockThresholdCompanyConfig(companyId)
+        if (cancelled) return
+        setStockAlertSavedConfig(loaded)
+        const base = loaded
+          ? { enabled: loaded.enabled, criticalMax: loaded.criticalMax, lowMax: loaded.lowMax }
+          : { ...DEFAULT_STOCK_ALERT_CONFIG }
+        setStockAlertEnabled(base.enabled)
+        setStockAlertCriticalMax(base.criticalMax)
+        setStockAlertLowMax(base.lowMax)
+        setStockAlertDirty(false)
+      } finally {
+        if (!cancelled) setIsStockAlertLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [stockAlertScope, stockAlertBranchId, companyId, userBranchId])
+
+  async function handleSaveStockAlertConfig() {
+    const validation = stockAlertValidation.validation
+    if (!validation.ok) {
+      if (validation.errors.criticalMax) toast.error(validation.errors.criticalMax)
+      if (validation.errors.lowMax) toast.error(validation.errors.lowMax)
+      return
+    }
+    setIsStockAlertSaving(true)
+    try {
+      const input = stockAlertValidation.input
+      const scopeId =
+        stockAlertScope === 'branch'
+          ? stockAlertBranchId ?? userBranchId
+          : null
+      const saved =
+        stockAlertScope === 'branch' && scopeId
+          ? saveStockThresholdBranchConfig(scopeId, input, companyId)
+          : saveStockThresholdCompanyConfig(input, companyId)
+      if (!saved) {
+        toast.error('No fue posible guardar la configuración.')
+        return
+      }
+      setStockAlertSavedConfig(saved)
+      setStockAlertDirty(false)
+      toast.success('Configuración de alertas guardada.')
+    } finally {
+      setIsStockAlertSaving(false)
+    }
+  }
 
   function openCreateBranchPanel() {
     setSelectedBranch(null)
@@ -1879,6 +1977,9 @@ export function ConfiguracionPage() {
           <TabsTrigger value="sucursales">Sucursales</TabsTrigger>
           <TabsTrigger value="implementacion">Implementación</TabsTrigger>
           <TabsTrigger value="entorno">Entorno</TabsTrigger>
+          <TabsTrigger value="inventario">
+            <Package className="mr-1 h-4 w-4" /> Inventario
+          </TabsTrigger>
           <TabsTrigger value="herramientas" disabled={!company || !isImplementationMode}>
             Herramientas del sistema
           </TabsTrigger>
@@ -2746,6 +2847,294 @@ export function ConfiguracionPage() {
               ) : null}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="inventario" className="space-y-4 pt-4">
+          <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <CardTitle>Alertas de stock</CardTitle>
+                  <CardDescription>
+                    Define niveles de stock crítico y bajo para todo el POS. Los mismos límites se usan en
+                    Productos, Inventario, Dashboard, Alertas y Reportes.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {stockAlertSavedConfig?.updatedAt ? (
+                    <Badge variant="outline">
+                      Guardado {formatDateTime(stockAlertSavedConfig.updatedAt)}
+                    </Badge>
+                  ) : null}
+                  {stockAlertDirty ? <Badge variant="warning">Cambios sin guardar</Badge> : null}
+                  <Switch
+                    checked={stockAlertEnabled}
+                    onCheckedChange={(next) => {
+                      setStockAlertEnabled(next)
+                      setStockAlertDirty(true)
+                    }}
+                    aria-label="Activar alertas de stock"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">
+                    {stockAlertEnabled ? 'Alertas de stock activadas' : 'Alertas de stock desactivadas'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {stockAlertEnabled
+                      ? 'Se muestran colores y filtros de stock en todo el sistema.'
+                      : 'Todo stock se muestra como Normal sin resaltar alertas.'}
+                  </p>
+                </div>
+                <div className="flex flex-col items-start gap-2 sm:items-end">
+                  <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-medium text-muted-foreground">Alcance</label>
+                  <Select
+                    value={stockAlertScope}
+                    onValueChange={(next: 'company' | 'branch') => {
+                      setStockAlertScope(next)
+                      if (next === 'company') setStockAlertBranchId(null)
+                      else if (next === 'branch' && branches.at(0)) setStockAlertBranchId(branches[0].id)
+                    }}
+                    disabled={!canEditCompany}
+                  >
+                    <SelectTrigger className="w-[190px] h-9">
+                      <SelectValue placeholder="Seleccionar alcance" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">Empresa (por defecto para todas las sucursales)</SelectItem>
+                      <SelectItem value="branch">Sucursal (personalizado)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {stockAlertScope === 'branch' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-medium text-muted-foreground">Sucursal</label>
+                  <Select
+                    value={stockAlertBranchId ?? userBranchId ?? '__none'}
+                    onValueChange={(next) => setStockAlertBranchId(next === '__none' ? null : next)}
+                    disabled={!canEditCompany || branches.length === 0}
+                  >
+                    <SelectTrigger className="w-[260px] h-9">
+                      <SelectValue placeholder="Seleccionar sucursal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.codigo} · {b.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">🔴 Stock crítico (máx)</label>
+                  <span className="text-[11px] text-muted-foreground">
+                    Cantidad máxima considerada urgente
+                  </span>
+                </div>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={stockAlertCriticalMax}
+                  disabled={!canEditCompany || isStockAlertLoading}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '')
+                    const v = raw ? Math.max(0, Number(raw)) : 0
+                    setStockAlertCriticalMax(Number.isInteger(v) ? v : 0)
+                    setStockAlertDirty(true)
+                  }}
+                />
+                {stockAlertValidation.validation.ok ? null : (
+                  <p className="text-xs text-destructive">
+                    {stockAlertValidation.validation.errors?.criticalMax ?? stockAlertValidation.validation.errors?.lowMax}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">🟡 Stock bajo (máx)</label>
+                  <span className="text-[11px] text-muted-foreground">
+                    Cantidad máxima para reposición
+                  </span>
+                </div>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={stockAlertLowMax}
+                  disabled={!canEditCompany || isStockAlertLoading}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '')
+                    const v = raw ? Math.max(0, Number(raw)) : 0
+                    setStockAlertLowMax(Number.isInteger(v) ? v : 0)
+                    setStockAlertDirty(true)
+                  }}
+                />
+                {stockAlertValidation.validation.ok ? null : (
+                  <p className="text-xs text-destructive">
+                    {stockAlertValidation.validation.errors?.lowMax ?? stockAlertValidation.validation.errors?.criticalMax}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border p-4">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-foreground">Vista previa</p>
+                <p className="text-xs text-muted-foreground">
+                  Estos son los rangos y colores que se mostrarán en todo el POS para evaluar el stock.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-rose-50 dark:bg-rose-500/10">
+                  <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-rose-500"></span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🔴 Crítico</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rango {stockAlertValidation.previewRanges.critical?.label ?? '—'}
+                    </p>
+                    <p className="text-xs text-rose-700 dark:text-rose-300">
+                      requiere reposición urgente
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-amber-50 dark:bg-amber-500/10">
+                  <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500"></span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🟡 Bajo</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rango {stockAlertValidation.previewRanges.low?.label ?? '—'}
+                    </p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      considerar reposición
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-emerald-50 dark:bg-emerald-500/10">
+                  <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500"></span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🟢 Normal</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rango {stockAlertValidation.previewRanges.normal?.label ?? '—'}
+                    </p>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                      stock suficiente
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(() => {
+                  const previewConfig: StockThresholdConfigInput = stockAlertValidation.input
+                  const samples = [
+                    { label: '0 unidades', units: 0 },
+                    { label: `${stockAlertCriticalMax} unidades`, units: Math.max(0, stockAlertCriticalMax) },
+                    { label: `${stockAlertLowMax + 5} unidades`, units: Math.max(1, stockAlertLowMax + 5) },
+                  ]
+                  return samples.map((sample) => {
+                    const ev = evaluateStockLevel({
+                      stockUnits: sample.units,
+                      companyConfig: {
+                        ...previewConfig,
+                        updatedAt: null,
+                        scope: 'company',
+                        scopeId: companyId ?? 'preview',
+                      },
+                    })
+                    return (
+                      <div
+                        key={sample.label}
+                        className="flex items-center justify-between rounded-lg border p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs text-muted-foreground">Ejemplo</p>
+                          <p className="text-sm font-medium text-foreground">{sample.label}</p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={[
+                            'ring-1',
+                            ev.level === 'outOfStock' || ev.level === 'critical'
+                              ? 'border-rose-200 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-500/10'
+                              : ev.level === 'low'
+                              ? 'border-amber-200 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10'
+                              : 'border-emerald-200 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10'
+                          ].join(' ')}
+                        >
+                          {ev.levelLabel}
+                        </Badge>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground">Notas</p>
+              <ul className="list-disc space-y-1 pl-4">
+                <li>
+                  <span className="font-medium text-foreground">Arquitectura por sucursal:</span> si no existe configuración personalizada para una sucursal,
+                  se usa la configuración de la empresa.
+                </li>
+                <li>
+                  <span className="font-medium text-foreground">Overrides por producto:</span> la arquitectura ya admite límites personalizados
+                  producto (listos para integrarse en una próxima etapa sin romper datos).
+                </li>
+                <li>
+                  La misma regla evalúa en Productos, Inventario, Dashboard, Alertas y Reportes. No hay valores hardcodeados por módulo.
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const base = stockAlertSavedConfig
+                    ? { enabled: stockAlertSavedConfig.enabled, criticalMax: stockAlertSavedConfig.criticalMax, lowMax: stockAlertSavedConfig.lowMax }
+                    : { ...DEFAULT_STOCK_ALERT_CONFIG }
+                  setStockAlertEnabled(base.enabled)
+                  setStockAlertCriticalMax(base.criticalMax)
+                  setStockAlertLowMax(base.lowMax)
+                  setStockAlertDirty(false)
+                }}
+                disabled={!stockAlertDirty || !canEditCompany || isStockAlertLoading || isStockAlertSaving}
+              >
+                Restablecer
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSaveStockAlertConfig()}
+                disabled={
+                  !canEditCompany ||
+                  isStockAlertLoading ||
+                  isStockAlertSaving ||
+                  !stockAlertDirty ||
+                  !stockAlertValidation.validation.ok
+                }
+              >
+                {isStockAlertSaving ? <Loader className="mr-2 h-4 w-4" /> : null}
+                Guardar configuración
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+          </AuthorizationGate>
         </TabsContent>
 
         <TabsContent value="herramientas" className="space-y-4 pt-4">

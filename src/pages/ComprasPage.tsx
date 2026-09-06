@@ -4737,7 +4737,7 @@ export function ComprasPage() {
               <Button
                 type="button"
                 size="sm"
-                variant="secondary"
+                variant="primary"
                 disabled={
                   !selectedOrderDetail ||
                   selectedOrderDetail.order.logisticsStatus === 'RECEPCION_COMPLETA' ||
