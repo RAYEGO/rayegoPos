@@ -43,12 +43,7 @@ export type StockThresholdEvaluation = {
   badgeBg: string
   requiresUrgentReposition: boolean
   recommendsReposition: boolean
-  thresholdsUsed: {
-    source: 'override' | 'branch' | 'company' | 'legacy-defaults' | 'alerts-disabled'
-    criticalMax: number | null
-    lowMax: number | null
-    enabled: boolean
-  }
+  thresholdsUsed: EffectiveStockThresholds
 }
 
 const STORAGE_PREFIX = 'rayego-pos.stock-thresholds'
@@ -269,31 +264,70 @@ export function getStockThresholdOverrideForProduct(
   return loadStockThresholdOverrides(companyId).find((entry) => entry.productId === productId) ?? null
 }
 
-export function resolveEffectiveStockThresholds(input: Pick<StockThresholdResolverInput, 'companyConfig' | 'branchConfig' | 'productOverride' | 'fallbackToLegacyDefaults'>) {
+export type EffectiveStockThresholds = {
+  source: 'override' | 'branch' | 'company' | 'legacy-defaults' | 'alerts-disabled'
+  criticalMax: number | null
+  lowMax: number | null
+  enabled: boolean
+}
+
+export function resolveEffectiveStockThresholds(
+  input: Pick<StockThresholdResolverInput, 'companyConfig' | 'branchConfig' | 'productOverride' | 'fallbackToLegacyDefaults'>,
+): EffectiveStockThresholds {
   const { companyConfig, branchConfig, productOverride } = input
   const fallbackEnabled = input.fallbackToLegacyDefaults !== false
   if (productOverride && (productOverride.criticalMax !== null || productOverride.lowMax !== null)) {
     const effectiveCompanyOrBranch = branchConfig ?? companyConfig
-    const base = productOverride.criticalMax !== null && productOverride.lowMax !== null
-      ? { enabled: true, criticalMax: productOverride.criticalMax, lowMax: productOverride.lowMax }
-      : {
-          enabled: effectiveCompanyOrBranch?.enabled ?? DEFAULT_STOCK_ALERT_CONFIG.enabled,
-          criticalMax: productOverride.criticalMax ?? (effectiveCompanyOrBranch?.criticalMax ?? DEFAULT_STOCK_ALERT_CONFIG.criticalMax),
-          lowMax: productOverride.lowMax ?? (effectiveCompanyOrBranch?.lowMax ?? DEFAULT_STOCK_ALERT_CONFIG.lowMax),
-        }
-    return { source: 'override' as const, enabled: base.enabled, criticalMax: base.criticalMax, lowMax: base.lowMax }
+    const base =
+      productOverride.criticalMax !== null && productOverride.lowMax !== null
+        ? {
+            enabled: true,
+            criticalMax: productOverride.criticalMax ?? null,
+            lowMax: productOverride.lowMax ?? null,
+          }
+        : {
+            enabled: effectiveCompanyOrBranch?.enabled ?? DEFAULT_STOCK_ALERT_CONFIG.enabled,
+            criticalMax:
+              productOverride.criticalMax ??
+              (effectiveCompanyOrBranch?.criticalMax ?? DEFAULT_STOCK_ALERT_CONFIG.criticalMax) ??
+              null,
+            lowMax:
+              productOverride.lowMax ??
+              (effectiveCompanyOrBranch?.lowMax ?? DEFAULT_STOCK_ALERT_CONFIG.lowMax) ??
+              null,
+          }
+    return {
+      source: 'override',
+      enabled: Boolean(base.enabled),
+      criticalMax: Number.isFinite(base.criticalMax) ? Math.max(0, Math.floor(base.criticalMax as number)) : null,
+      lowMax: Number.isFinite(base.lowMax) ? Math.max(0, Math.floor(base.lowMax as number)) : null,
+    }
   }
-  if (branchConfig) return { source: 'branch' as const, enabled: branchConfig.enabled, criticalMax: branchConfig.criticalMax, lowMax: branchConfig.lowMax }
-  if (companyConfig) return { source: 'company' as const, enabled: companyConfig.enabled, criticalMax: companyConfig.criticalMax, lowMax: companyConfig.lowMax }
+  if (branchConfig) {
+    return {
+      source: 'branch',
+      enabled: Boolean(branchConfig.enabled),
+      criticalMax: Number.isFinite(branchConfig.criticalMax) ? Math.max(0, Math.floor(branchConfig.criticalMax)) : null,
+      lowMax: Number.isFinite(branchConfig.lowMax) ? Math.max(0, Math.floor(branchConfig.lowMax)) : null,
+    }
+  }
+  if (companyConfig) {
+    return {
+      source: 'company',
+      enabled: Boolean(companyConfig.enabled),
+      criticalMax: Number.isFinite(companyConfig.criticalMax) ? Math.max(0, Math.floor(companyConfig.criticalMax)) : null,
+      lowMax: Number.isFinite(companyConfig.lowMax) ? Math.max(0, Math.floor(companyConfig.lowMax)) : null,
+    }
+  }
   if (fallbackEnabled) {
     return {
-      source: 'legacy-defaults' as const,
+      source: 'legacy-defaults',
       enabled: true,
       criticalMax: LEGACY_STOCK_CRITICAL_MAX,
       lowMax: LEGACY_STOCK_LOW_MAX,
     }
   }
-  return { source: 'alerts-disabled' as const, enabled: false, criticalMax: null, lowMax: null }
+  return { source: 'alerts-disabled', enabled: false, criticalMax: null, lowMax: null }
 }
 
 export function evaluateStockLevel(input: StockThresholdResolverInput): StockThresholdEvaluation {
