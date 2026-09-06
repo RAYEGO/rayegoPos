@@ -231,6 +231,43 @@ export function ReportesPage() {
     setTo(toDateInput(today))
   }, [])
 
+  const handlePrincipalTabChange = useCallback(
+    (nextTab: TabPrincipal) => {
+      if (nextTab === tabPrincipal) return
+      setTabPrincipal(nextTab)
+      const mapa: Record<TabPrincipal, ReportsCategory> = {
+        ventas: 'VENTAS',
+        compras: 'COMPRAS',
+        inventario: 'INVENTARIO',
+        caja: 'CAJA',
+        'servicio-tecnico': 'VENTAS',
+      }
+      const nextCategory = mapa[nextTab]
+      if (nextCategory !== category && nextTab !== 'servicio-tecnico') {
+        setCategory(nextCategory)
+      }
+    },
+    [category, tabPrincipal],
+  )
+
+  const handleCategoryChange = useCallback(
+    (nextCategory: ReportsCategory) => {
+      if (nextCategory === category) return
+      setCategory(nextCategory)
+      const mapa: Partial<Record<ReportsCategory, TabPrincipal>> = {
+        VENTAS: 'ventas',
+        COMPRAS: 'compras',
+        INVENTARIO: 'inventario',
+        CAJA: 'caja',
+      }
+      const nextTab = mapa[nextCategory]
+      if (nextTab && nextTab !== tabPrincipal) {
+        setTabPrincipal(nextTab)
+      }
+    },
+    [category, tabPrincipal],
+  )
+
   const applySalesPeriodPreset = useCallback((next: SalesPeriodPreset) => {
     const today = startOfDay(new Date())
     if (next === 'CUSTOM') {
@@ -319,44 +356,6 @@ export function ReportesPage() {
       setIsLoading(false)
     }
   }, [accessToken, branchId, category, from, handleUnauthorized, to])
-
-  useEffect(() => {
-    if (salesPeriodPresetRef.current === 'CUSTOM') return
-    const preset = salesPeriodPresetRef.current
-    const today = startOfDay(new Date())
-    let fromDate = today
-    let toDate = today
-    if (preset === 'TODAY') {
-      fromDate = today
-      toDate = today
-    } else if (preset === 'YESTERDAY') {
-      const yesterday = new Date(today)
-      yesterday.setDate(yesterday.getDate() - 1)
-      fromDate = yesterday
-      toDate = yesterday
-    } else if (preset === 'LAST_7_DAYS') {
-      const past = new Date(today)
-      past.setDate(past.getDate() - 6)
-      fromDate = past
-      toDate = today
-    } else if (preset === 'THIS_MONTH') {
-      const first = new Date(today.getFullYear(), today.getMonth(), 1)
-      fromDate = first
-      toDate = today
-    }
-    const nextFrom = toDateInput(fromDate)
-    const nextTo = toDateInput(toDate)
-    if (nextFrom !== from || nextTo !== to) {
-      setFrom(nextFrom)
-      setTo(nextTo)
-    }
-  }, [category, from, to])
-
-  useEffect(() => {
-    if (salesPeriodPresetRef.current === 'CUSTOM') return
-    setSalesPeriodPreset('CUSTOM')
-    salesPeriodPresetRef.current = 'CUSTOM'
-  }, [category, from, to])
 
   useEffect(() => {
     void loadReport()
@@ -487,32 +486,6 @@ export function ReportesPage() {
     }
   }, [category, report])
 
-  useEffect(() => {
-    const mapa: Record<TabPrincipal, ReportsCategory> = {
-      ventas: 'VENTAS',
-      compras: 'COMPRAS',
-      inventario: 'INVENTARIO',
-      caja: 'CAJA',
-      'servicio-tecnico': 'VENTAS',
-    }
-    const nextCategory = mapa[tabPrincipal]
-    if (nextCategory !== category) {
-      setCategory(nextCategory)
-    }
-  }, [tabPrincipal, category])
-
-  useEffect(() => {
-    const mapa: Partial<Record<ReportsCategory, TabPrincipal>> = {
-      VENTAS: 'ventas',
-      COMPRAS: 'compras',
-      INVENTARIO: 'inventario',
-      CAJA: 'caja',
-    }
-    if (mapa[category] && mapa[category] !== tabPrincipal) {
-      setTabPrincipal(mapa[category] as TabPrincipal)
-    }
-  }, [category, tabPrincipal])
-
   const loadOrdenesRT = useCallback(async () => {
     if (!accessToken) return
     setOrdenesRTLoading(true)
@@ -620,31 +593,42 @@ export function ReportesPage() {
 
   return (
     <div className="space-y-4 p-4">
-      <Tabs value={tabPrincipal} onValueChange={(v) => setTabPrincipal(v as TabPrincipal)}>
-        <TabsList className="grid w-full grid-cols-3 sm:w-fit sm:grid-cols-5">
-          <TabsTrigger value="ventas" className="gap-2">
-            <ShoppingCart className="h-4 w-4" />
-            <span className="hidden sm:inline">Ventas</span>
-          </TabsTrigger>
-          <TabsTrigger value="compras" className="gap-2">
-            <WalletCards className="h-4 w-4" />
-            <span className="hidden sm:inline">Compras</span>
-          </TabsTrigger>
-          <TabsTrigger value="inventario" className="gap-2">
-            <Boxes className="h-4 w-4" />
-            <span className="hidden sm:inline">Inventario</span>
-          </TabsTrigger>
-          <TabsTrigger value="caja" className="gap-2">
-            <Users className="h-4 w-4" />
-            <span className="hidden sm:inline">Caja</span>
-          </TabsTrigger>
-          <TabsTrigger value="servicio-tecnico" className="gap-2 col-span-3 sm:col-span-1">
-            <Wrench className="h-4 w-4" />
-            <span className="hidden sm:inline">Servicio Técnico</span>
-            <span className="sm:hidden">Técnico</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div
+        role="tablist"
+        aria-label="Reportes principales y servicio técnico"
+        className="inline-flex h-10 w-full items-center justify-start gap-1 rounded-md bg-muted p-1 text-muted-foreground sm:w-fit sm:grid-cols-5"
+      >
+        {([
+          ['ventas', 'Ventas', ShoppingCart],
+          ['compras', 'Compras', BarChart3],
+          ['inventario', 'Inventario', Boxes],
+          ['caja', 'Caja', WalletCards],
+          ['servicio-tecnico', 'Servicio Técnico', Wrench],
+        ] as Array<[TabPrincipal, string, typeof WalletCards]>).map(([value, label, Icon]) => {
+          const isActive = tabPrincipal === value
+          return (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => handlePrincipalTabChange(value)}
+              data-state={isActive ? 'active' : 'inactive'}
+              className={`col-span-1 sm:col-span-1 inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+                isActive
+                  ? 'bg-background text-foreground shadow w-full sm:w-auto'
+                  : 'hover:bg-background/50 hover:text-foreground w-full sm:w-auto'
+              } ${value === 'servicio-tecnico' ? 'col-span-3 sm:col-span-1' : ''}`}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{label}</span>
+              {value === 'servicio-tecnico' ? (
+                <span className="sm:hidden">Técnico</span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
 
       {category === 'VENTAS' ? (
         <div className="space-y-3">
@@ -666,7 +650,7 @@ export function ReportesPage() {
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <div className="md:hidden">
-                <Select value={category} onValueChange={(value) => setCategory(value as ReportsCategory)}>
+                <Select value={category} onValueChange={(value) => handleCategoryChange(value as ReportsCategory)}>
                   <SelectTrigger className="h-9 w-[200px]">
                     <SelectValue placeholder="Categoría" />
                   </SelectTrigger>
@@ -763,7 +747,7 @@ export function ReportesPage() {
                   type="button"
                   variant={category === key ? 'primary' : 'outline'}
                   className="w-full justify-start gap-2"
-                  onClick={() => setCategory(key)}
+                  onClick={() => handleCategoryChange(key)}
                 >
                   <Icon className="h-4 w-4" />
                   {label}
@@ -816,13 +800,42 @@ export function ReportesPage() {
           ) : null}
 
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader className="h-7 w-7" />
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i} className="p-4 space-y-2">
+                    <div className="h-3 w-24 rounded bg-muted animate-pulse" aria-hidden />
+                    <div className="h-7 w-40 rounded bg-muted animate-pulse" aria-hidden />
+                  </Card>
+                ))}
+              </div>
+              <Card>
+                <CardHeader>
+                  <div className="h-5 w-40 rounded bg-muted animate-pulse" aria-hidden />
+                  <div className="h-3 w-72 rounded bg-muted animate-pulse" aria-hidden />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64 w-full rounded bg-muted/50 animate-pulse" aria-hidden />
+                </CardContent>
+              </Card>
             </div>
           ) : error ? (
-            <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-              {error}
-            </div>
+            <Card className="border-destructive/40 bg-destructive/5">
+              <CardHeader>
+                <CardTitle className="text-base text-destructive">
+                  No se pudo cargar el reporte
+                </CardTitle>
+                <CardDescription className="text-sm text-destructive/80">{error}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap items-center gap-2">
+                <Button type="button" onClick={() => void loadReport()} variant="destructive">
+                  Reintentar
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setError(null)}>
+                  Cerrar
+                </Button>
+              </CardContent>
+            </Card>
           ) : null}
 
           {report ? (
@@ -1190,60 +1203,74 @@ export function ReportesPage() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-                        <div className="rounded-2xl border p-4">
-                          <p className="text-xs text-muted-foreground">Apertura</p>
-                          <p className="mt-2 text-xl font-bold text-foreground">
+                      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+                        <div className="rounded-2xl border p-4 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Apertura
+                          </p>
+                          <p className="mt-2 text-lg font-bold break-normal min-w-0 text-foreground overflow-hidden text-ellipsis">
                             {formatCurrency(cashierView.summary.turnover.openingCash)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border p-4">
-                          <p className="text-xs text-muted-foreground">Ventas en efectivo</p>
-                          <p className="mt-2 text-xl font-bold text-emerald-600 dark:text-emerald-500">
+                        <div className="rounded-2xl border p-4 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Ventas en efectivo
+                          </p>
+                          <p className="mt-2 text-lg font-bold break-normal min-w-0 text-emerald-600 dark:text-emerald-500 overflow-hidden text-ellipsis">
                             +{' '}
                             {formatCurrency(cashierView.summary.turnover.salesCashNet)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border p-4">
-                          <p className="text-xs text-muted-foreground">Ingresos adicionales</p>
-                          <p className="mt-2 text-xl font-bold text-sky-600 dark:text-sky-500">
+                        <div className="rounded-2xl border p-4 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Ingresos adicionales
+                          </p>
+                          <p className="mt-2 text-lg font-bold break-normal min-w-0 text-sky-600 dark:text-sky-500 overflow-hidden text-ellipsis">
                             +{' '}
                             {formatCurrency(cashierView.summary.turnover.manualIncomes)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border p-4">
-                          <p className="text-xs text-muted-foreground">Egresos / retiros</p>
-                          <p className="mt-2 text-xl font-bold text-rose-600 dark:text-rose-500">
+                        <div className="rounded-2xl border p-4 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Egresos / retiros
+                          </p>
+                          <p className="mt-2 text-lg font-bold break-normal min-w-0 text-rose-600 dark:text-rose-500 overflow-hidden text-ellipsis">
                             −{' '}
                             {formatCurrency(cashierView.summary.turnover.manualExpenses)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border p-4 bg-muted/40">
-                          <p className="text-xs text-muted-foreground">Efectivo esperado</p>
-                          <p className="mt-2 text-xl font-bold text-foreground">
+                        <div className="rounded-2xl border p-4 bg-muted/40 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Efectivo esperado
+                          </p>
+                          <p className="mt-2 text-lg font-bold break-normal min-w-0 text-foreground overflow-hidden text-ellipsis">
                             {formatCurrency(cashierView.summary.turnover.expectedCash)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border p-4 bg-muted/40">
-                          <p className="text-xs text-muted-foreground">Efectivo contado</p>
-                          <p className="mt-2 text-xl font-bold text-foreground">
+                        <div className="rounded-2xl border p-4 bg-muted/40 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Efectivo contado
+                          </p>
+                          <p className="mt-2 text-lg font-bold break-normal min-w-0 text-foreground overflow-hidden text-ellipsis">
                             {formatCurrency(cashierView.summary.turnover.countedCash)}
                           </p>
                         </div>
-                        <div className="rounded-2xl border p-4">
-                          <p className="text-xs text-muted-foreground">Diferencia</p>
-                          <p className="mt-2">
+                        <div className="rounded-2xl border p-4 min-w-0 overflow-hidden">
+                          <p className="text-[11px] leading-tight text-muted-foreground line-clamp-2 min-h-[2em]">
+                            Diferencia
+                          </p>
+                          <div className="mt-2 flex w-full items-center justify-start">
                             <Badge
                               variant={
                                 cashierView.summary.turnover.difference === 0
                                   ? 'success'
                                   : 'warning'
                               }
-                              className="text-base px-3 py-1 rounded-xl"
+                              className="max-w-full inline-flex items-center justify-center whitespace-nowrap rounded-xl px-3 py-1 text-sm"
                             >
                               {formatCurrency(cashierView.summary.turnover.difference)}
                             </Badge>
-                          </p>
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -1566,170 +1593,290 @@ export function ReportesPage() {
                   </CardHeader>
                 </Card>
               ) : null}
+            </>
+          ) : null}
 
-              {tabPrincipal === 'servicio-tecnico' ? (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Wrench className="h-5 w-5 text-primary" aria-hidden />
-                        <h1 className="text-2xl font-bold text-foreground tracking-tight">
-                          Reporte Servicio Técnico
-                        </h1>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Estadísticas de órdenes, rendimiento de técnicos y cobertura de garantías.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        size="xl"
-                        variant="outline"
-                        onClick={() => void loadOrdenesRT()}
-                      >
-                        <BarChart3 className="mr-2 h-5 w-5" />
-                        Actualizar
-                      </Button>
-                    </div>
+          {tabPrincipal === 'servicio-tecnico' ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-5 w-5 text-primary" aria-hidden />
+                    <h1 className="text-2xl font-bold text-foreground tracking-tight">
+                      Reporte Servicio Técnico
+                    </h1>
                   </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Estadísticas de órdenes, rendimiento de técnicos y cobertura de garantías.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="xl"
+                    variant="outline"
+                    onClick={() => void loadOrdenesRT()}
+                  >
+                    <BarChart3 className="mr-2 h-5 w-5" />
+                    Actualizar
+                  </Button>
+                </div>
+              </div>
 
-                  <Tabs value={tabRT} onValueChange={(v) => setTabRT(v as TabRT)} className="mt-6">
-                    <TabsList className="grid w-full grid-cols-2 sm:w-fit sm:grid-cols-3">
-                      <TabsTrigger value="ordenes-servicio">Órdenes Servicio</TabsTrigger>
-                      <TabsTrigger value="rendimiento-tecnicos">Rendimiento Técnicos</TabsTrigger>
-                      <TabsTrigger value="garantias">Garantías</TabsTrigger>
-                    </TabsList>
+              <ReportContentErrorBoundary onRetry={() => void loadOrdenesRT()}>
+                <Tabs value={tabRT} onValueChange={(v) => setTabRT(v as TabRT)} className="mt-6">
+                  <TabsList className="grid w-full grid-cols-2 sm:w-fit sm:grid-cols-3">
+                    <TabsTrigger value="ordenes-servicio">Órdenes Servicio</TabsTrigger>
+                    <TabsTrigger value="rendimiento-tecnicos">Rendimiento Técnicos</TabsTrigger>
+                    <TabsTrigger value="garantias">Garantías</TabsTrigger>
+                  </TabsList>
 
-                    <TabsContent value="ordenes-servicio" className="space-y-4 pt-4">
-                      <AuthorizationGate
-                        permission="ordenesServicio.read"
-                        fallback={
-                          <Card>
-                            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                              No tienes permiso para ver los reportes de órdenes de servicio.
-                            </CardContent>
-                          </Card>
-                        }
-                      >
-                        {ordenesRTLoading ? (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader className="h-10 w-10" />
-                          </div>
-                        ) : (
-                          <>
-                            <div className="grid gap-3 sm:grid-cols-3">
-                              <Card className="p-4">
-                                <p className="text-xs text-muted-foreground">Total Órdenes</p>
-                                <p className="mt-2 text-2xl font-bold text-foreground">{rtStats.total}</p>
-                              </Card>
-                              <Card className="p-4">
-                                <p className="text-xs text-muted-foreground">Órdenes Entregadas</p>
-                                <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
-                                  {rtStats.totalEntregadas}
-                                </p>
-                              </Card>
-                              <Card className="p-4">
-                                <p className="text-xs text-muted-foreground">Monto Total Cerradas</p>
-                                <p className="mt-2 text-2xl font-bold text-foreground">
-                                  {formatCurrency(rtStats.montoTotalCerradas)}
-                                </p>
-                              </Card>
-                            </div>
-
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Órdenes por Estado</CardTitle>
-                                <CardDescription>
-                                  Distribución actual de las órdenes de servicio
-                                </CardDescription>
-                              </CardHeader>
-                              <CardContent>
-                                {rtStats.porEstado.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground text-center py-4">
-                                    Sin órdenes registradas
-                                  </p>
-                                ) : (
-                                  <div className="grid gap-2">
-                                    {rtStats.porEstado.map((row) => (
-                                      <div
-                                        key={row.estado}
-                                        className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                                      >
-                                        <div className="flex items-center gap-3">
-                                          <Badge
-                                            variant={
-                                              estadoBadgeVariant(row.estado as EstadoOrdenServicio) as any
-                                            }
-                                          >
-                                            {estadoLabel(row.estado as EstadoOrdenServicio)}
-                                          </Badge>
-                                        </div>
-                                        <p className="font-bold text-foreground text-lg">{row.cantidad}</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </CardContent>
+                  <TabsContent value="ordenes-servicio" className="space-y-4 pt-4">
+                    <AuthorizationGate
+                      permission="ordenesServicio.read"
+                      fallback={
+                        <Card>
+                          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                            No tienes permiso para ver los reportes de órdenes de servicio.
+                          </CardContent>
+                        </Card>
+                      }
+                    >
+                      {ordenesRTLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                          <Loader className="h-10 w-10" />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Total Órdenes</p>
+                              <p className="mt-2 text-2xl font-bold text-foreground">{rtStats.total}</p>
                             </Card>
-                          </>
-                        )}
-                      </AuthorizationGate>
-                    </TabsContent>
-
-                    <TabsContent value="rendimiento-tecnicos" className="space-y-4 pt-4">
-                      <AuthorizationGate
-                        permission="tecnicos.read"
-                        fallback={
-                          <Card>
-                            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                              No tienes permiso para ver el rendimiento de técnicos.
-                            </CardContent>
-                          </Card>
-                        }
-                      >
-                        {ordenesRTLoading ? (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader className="h-10 w-10" />
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Órdenes Entregadas</p>
+                              <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
+                                {rtStats.totalEntregadas}
+                              </p>
+                            </Card>
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Monto Total Cerradas</p>
+                              <p className="mt-2 text-2xl font-bold text-foreground">
+                                {formatCurrency(rtStats.montoTotalCerradas)}
+                              </p>
+                            </Card>
                           </div>
-                        ) : (
+
                           <Card>
                             <CardHeader>
-                              <CardTitle>Rendimiento por Técnico</CardTitle>
+                              <CardTitle>Órdenes por Estado</CardTitle>
                               <CardDescription>
-                                Cantidad de órdenes atendidas, entregadas y promedio de días
+                                Distribución actual de las órdenes de servicio
                               </CardDescription>
                             </CardHeader>
                             <CardContent>
-                              {rtStats.porTecnico.length === 0 ? (
+                              {rtStats.porEstado.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-4">
-                                  Sin datos de rendimiento de técnicos
+                                  Sin órdenes registradas
+                                </p>
+                              ) : (
+                                <div className="grid gap-2">
+                                  {rtStats.porEstado.map((row) => (
+                                    <div
+                                      key={row.estado}
+                                      className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <Badge
+                                          variant={
+                                            estadoBadgeVariant(row.estado as EstadoOrdenServicio)
+                                          }
+                                        >
+                                          {estadoLabel(row.estado as EstadoOrdenServicio)}
+                                        </Badge>
+                                      </div>
+                                      <p className="font-bold text-foreground text-lg">{row.cantidad}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </>
+                      )}
+                    </AuthorizationGate>
+                  </TabsContent>
+
+                  <TabsContent value="rendimiento-tecnicos" className="space-y-4 pt-4">
+                    <AuthorizationGate
+                      permission="tecnicos.read"
+                      fallback={
+                        <Card>
+                          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                            No tienes permiso para ver el rendimiento de técnicos.
+                          </CardContent>
+                        </Card>
+                      }
+                    >
+                      {ordenesRTLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                          <Loader className="h-10 w-10" />
+                        </div>
+                      ) : (
+                        <Card>
+                          <CardHeader>
+                            <CardTitle>Rendimiento por Técnico</CardTitle>
+                            <CardDescription>
+                              Cantidad de órdenes atendidas, entregadas y promedio de días
+                            </CardDescription>
+                          </CardHeader>
+                          <CardContent>
+                            {rtStats.porTecnico.length === 0 ? (
+                              <p className="text-sm text-muted-foreground text-center py-4">
+                                Sin datos de rendimiento de técnicos
+                              </p>
+                            ) : (
+                              <div className="hidden md:block">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Técnico</TableHead>
+                                      <TableHead className="text-right">Órdenes Asignadas</TableHead>
+                                      <TableHead className="text-right">Entregadas</TableHead>
+                                      <TableHead className="text-right">Promedio Días</TableHead>
+                                      <TableHead className="text-right">Monto Total Entregadas</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {rtStats.porTecnico.map((t) => (
+                                      <TableRow key={t.nombre}>
+                                        <TableCell className="font-medium text-foreground">{t.nombre}</TableCell>
+                                        <TableCell className="text-right">{t.total}</TableCell>
+                                        <TableCell className="text-right">
+                                          <Badge variant="success">{t.entregadas}</Badge>
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                          {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
+                                        </TableCell>
+                                        <TableCell className="text-right font-semibold text-foreground">
+                                          {formatCurrency(t.totalMonto)}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            )}
+                            {rtStats.porTecnico.length > 0 ? (
+                              <div className="md:hidden space-y-3 mt-4">
+                                {rtStats.porTecnico.map((t) => (
+                                  <Card key={t.nombre} className="p-4">
+                                    <p className="font-medium text-foreground">{t.nombre}</p>
+                                    <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                                      <div>
+                                        <p className="text-muted-foreground">Asignadas</p>
+                                        <p className="text-base font-bold">{t.total}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground">Entregadas</p>
+                                        <p className="text-base font-bold text-emerald-600 dark:text-emerald-500">{t.entregadas}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground">Promedio días</p>
+                                        <p className="text-base font-semibold">
+                                          {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground">Monto entregadas</p>
+                                        <p className="text-base font-semibold">{formatCurrency(t.totalMonto)}</p>
+                                      </div>
+                                    </div>
+                                  </Card>
+                                ))}
+                              </div>
+                            ) : null}
+                          </CardContent>
+                        </Card>
+                      )}
+                    </AuthorizationGate>
+                  </TabsContent>
+
+                  <TabsContent value="garantias" className="space-y-4 pt-4">
+                    <AuthorizationGate
+                      permission="garantiasOrdenServicio.read"
+                      fallback={
+                        <Card>
+                          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                            No tienes permiso para ver las garantías.
+                          </CardContent>
+                        </Card>
+                      }
+                    >
+                      {ordenesRTLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                          <Loader className="h-10 w-10" />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Garantías Activas</p>
+                              <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
+                                {rtStats.garantiasActivas.filter((g) => g.estado === 'ACTIVA').length}
+                              </p>
+                            </Card>
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Garantías Vencidas</p>
+                              <p className="mt-2 text-2xl font-bold text-destructive">
+                                {rtStats.garantiasActivas.filter((g) => g.estado === 'VENCIDA').length}
+                              </p>
+                            </Card>
+                            <Card className="p-4">
+                              <p className="text-xs text-muted-foreground">Cobertura de Órdenes Entregadas</p>
+                              <p className="mt-2 text-2xl font-bold text-foreground">
+                                {(rtStats.coberturaGarantia * 100).toFixed(0)}%
+                              </p>
+                            </Card>
+                          </div>
+
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Detalle de Garantías</CardTitle>
+                              <CardDescription>
+                                {rtStats.totalEntregadas > 0
+                                  ? `${rtStats.entregadasConGarantia} de ${rtStats.totalEntregadas} órdenes entregadas con garantía`
+                                  : 'Sin órdenes entregadas aún'}
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              {rtStats.garantiasActivas.length === 0 ? (
+                                <p className="text-sm text-muted-foreground text-center py-4">
+                                  Sin garantías registradas aún
                                 </p>
                               ) : (
                                 <div className="hidden md:block">
                                   <Table>
                                     <TableHeader>
                                       <TableRow>
-                                        <TableHead>Técnico</TableHead>
-                                        <TableHead className="text-right">Órdenes Asignadas</TableHead>
-                                        <TableHead className="text-right">Entregadas</TableHead>
-                                        <TableHead className="text-right">Promedio Días</TableHead>
-                                        <TableHead className="text-right">Monto Total Entregadas</TableHead>
+                                        <TableHead>N° OS</TableHead>
+                                        <TableHead>Vence</TableHead>
+                                        <TableHead>Estado</TableHead>
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                      {rtStats.porTecnico.map((t) => (
-                                        <TableRow key={t.nombre}>
-                                          <TableCell className="font-medium text-foreground">{t.nombre}</TableCell>
-                                          <TableCell className="text-right">{t.total}</TableCell>
-                                          <TableCell className="text-right">
-                                            <Badge variant="success">{t.entregadas}</Badge>
-                                          </TableCell>
-                                          <TableCell className="text-right">
-                                            {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
-                                          </TableCell>
-                                          <TableCell className="text-right font-semibold text-foreground">
-                                            {formatCurrency(t.totalMonto)}
+                                      {rtStats.garantiasActivas.map((g, idx) => (
+                                        <TableRow key={`${g.ordenNumero}-${idx}`}>
+                                          <TableCell className="font-medium text-foreground">{g.ordenNumero}</TableCell>
+                                          <TableCell className="text-muted-foreground">{g.vence ? fmtDate(g.vence) : '—'}</TableCell>
+                                          <TableCell>
+                                            <Badge
+                                              variant={
+                                                g.estado === 'ACTIVA' ? 'success' : 'destructive'
+                                              }
+                                            >
+                                              {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
+                                            </Badge>
                                           </TableCell>
                                         </TableRow>
                                       ))}
@@ -1737,154 +1884,36 @@ export function ReportesPage() {
                                   </Table>
                                 </div>
                               )}
-                              {rtStats.porTecnico.length > 0 ? (
+                              {rtStats.garantiasActivas.length > 0 ? (
                                 <div className="md:hidden space-y-3 mt-4">
-                                  {rtStats.porTecnico.map((t) => (
-                                    <Card key={t.nombre} className="p-4">
-                                      <p className="font-medium text-foreground">{t.nombre}</p>
-                                      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                                        <div>
-                                          <p className="text-muted-foreground">Asignadas</p>
-                                          <p className="text-base font-bold">{t.total}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-muted-foreground">Entregadas</p>
-                                          <p className="text-base font-bold text-emerald-600 dark:text-emerald-500">{t.entregadas}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-muted-foreground">Promedio días</p>
-                                          <p className="text-base font-semibold">
-                                            {t.promedioDias > 0 ? `${t.promedioDias.toFixed(1)} d` : '—'}
-                                          </p>
-                                        </div>
-                                        <div>
-                                          <p className="text-muted-foreground">Monto entregadas</p>
-                                          <p className="text-base font-semibold">{formatCurrency(t.totalMonto)}</p>
-                                        </div>
+                                  {rtStats.garantiasActivas.map((g, idx) => (
+                                    <Card key={`${g.ordenNumero}-${idx}`} className="p-4">
+                                      <div className="flex items-center justify-between gap-3">
+                                        <p className="font-medium text-foreground">{g.ordenNumero}</p>
+                                        <Badge
+                                          variant={
+                                            g.estado === 'ACTIVA' ? 'success' : 'destructive'
+                                          }
+                                        >
+                                          {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
+                                        </Badge>
                                       </div>
+                                      <p className="mt-2 text-xs text-muted-foreground">
+                                        Vence: {g.vence ? fmtDate(g.vence) : 'Sin fecha'}
+                                      </p>
                                     </Card>
                                   ))}
                                 </div>
                               ) : null}
                             </CardContent>
                           </Card>
-                        )}
-                      </AuthorizationGate>
-                    </TabsContent>
-
-                    <TabsContent value="garantias" className="space-y-4 pt-4">
-                      <AuthorizationGate
-                        permission="garantiasOrdenServicio.read"
-                        fallback={
-                          <Card>
-                            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                              No tienes permiso para ver las garantías.
-                            </CardContent>
-                          </Card>
-                        }
-                      >
-                        {ordenesRTLoading ? (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader className="h-10 w-10" />
-                          </div>
-                        ) : (
-                          <>
-                            <div className="grid gap-3 sm:grid-cols-3">
-                              <Card className="p-4">
-                                <p className="text-xs text-muted-foreground">Garantías Activas</p>
-                                <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-500">
-                                  {rtStats.garantiasActivas.filter((g) => g.estado === 'ACTIVA').length}
-                                </p>
-                              </Card>
-                              <Card className="p-4">
-                                <p className="text-xs text-muted-foreground">Garantías Vencidas</p>
-                                <p className="mt-2 text-2xl font-bold text-destructive">
-                                  {rtStats.garantiasActivas.filter((g) => g.estado === 'VENCIDA').length}
-                                </p>
-                              </Card>
-                              <Card className="p-4">
-                                <p className="text-xs text-muted-foreground">Cobertura de Órdenes Entregadas</p>
-                                <p className="mt-2 text-2xl font-bold text-foreground">
-                                  {(rtStats.coberturaGarantia * 100).toFixed(0)}%
-                                </p>
-                              </Card>
-                            </div>
-
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Detalle de Garantías</CardTitle>
-                                <CardDescription>
-                                  {rtStats.totalEntregadas > 0
-                                    ? `${rtStats.entregadasConGarantia} de ${rtStats.totalEntregadas} órdenes entregadas con garantía`
-                                    : 'Sin órdenes entregadas aún'}
-                                </CardDescription>
-                              </CardHeader>
-                              <CardContent>
-                                {rtStats.garantiasActivas.length === 0 ? (
-                                  <p className="text-sm text-muted-foreground text-center py-4">
-                                    Sin garantías registradas aún
-                                  </p>
-                                ) : (
-                                  <div className="hidden md:block">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>N° OS</TableHead>
-                                          <TableHead>Vence</TableHead>
-                                          <TableHead>Estado</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {rtStats.garantiasActivas.map((g, idx) => (
-                                          <TableRow key={`${g.ordenNumero}-${idx}`}>
-                                            <TableCell className="font-medium text-foreground">{g.ordenNumero}</TableCell>
-                                            <TableCell className="text-muted-foreground">{g.vence ? fmtDate(g.vence) : '—'}</TableCell>
-                                            <TableCell>
-                                              <Badge
-                                                variant={
-                                                  g.estado === 'ACTIVA' ? 'success' : 'destructive'
-                                                }
-                                              >
-                                                {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
-                                              </Badge>
-                                            </TableCell>
-                                          </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                )}
-                                {rtStats.garantiasActivas.length > 0 ? (
-                                  <div className="md:hidden space-y-3 mt-4">
-                                    {rtStats.garantiasActivas.map((g, idx) => (
-                                      <Card key={`${g.ordenNumero}-${idx}`} className="p-4">
-                                        <div className="flex items-center justify-between gap-3">
-                                          <p className="font-medium text-foreground">{g.ordenNumero}</p>
-                                          <Badge
-                                            variant={
-                                              g.estado === 'ACTIVA' ? 'success' : 'destructive'
-                                            }
-                                          >
-                                            {g.estado === 'ACTIVA' ? 'Activa' : 'Vencida'}
-                                          </Badge>
-                                        </div>
-                                        <p className="mt-2 text-xs text-muted-foreground">
-                                          Vence: {g.vence ? fmtDate(g.vence) : 'Sin fecha'}
-                                        </p>
-                                      </Card>
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </CardContent>
-                            </Card>
-                          </>
-                        )}
-                      </AuthorizationGate>
-                    </TabsContent>
-                  </Tabs>
-                </div>
-              ) : null}
-            </>
+                        </>
+                      )}
+                    </AuthorizationGate>
+                  </TabsContent>
+                </Tabs>
+              </ReportContentErrorBoundary>
+            </div>
           ) : null}
           </div>
         </ReportContentErrorBoundary>
