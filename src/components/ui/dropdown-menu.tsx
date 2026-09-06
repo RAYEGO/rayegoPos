@@ -92,7 +92,9 @@ export const DropdownMenuItem = React.forwardRef<
         }
       } finally {
         requestAnimationFrame(() => {
-          ranOnceRef.current = false
+          setTimeout(() => {
+            ranOnceRef.current = false
+          }, 0)
         })
       }
       if (firstError != null) throw firstError
@@ -102,7 +104,11 @@ export const DropdownMenuItem = React.forwardRef<
   const wrappedSelectHandler = React.useCallback(
     (event?: Event) => {
       const ev = event ?? new Event('dropdown-select')
-      requestAnimationFrame(() => runConsumerHandlers(ev))
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          runConsumerHandlers(ev)
+        }, 0)
+      })
     },
     [runConsumerHandlers],
   )
