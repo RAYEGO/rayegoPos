@@ -2,7 +2,7 @@ export type StockAlertLevel = 'critical' | 'low' | 'normal' | 'outOfStock'
 
 export type StockAlertLevelLabel = 'Crítico' | 'Bajo' | 'Normal' | 'Sin stock'
 
-export type StockAlertVariant = 'destructive' | 'warning' | 'success' | 'secondary'
+export type StockAlertVariant = 'destructive' | 'warning' | 'success' | 'outline'
 
 export type StockThresholdConfigInput = {
   enabled: boolean
@@ -394,6 +394,6 @@ export function stockThresholdToVariant(
     if (evaluation.level === 'critical' || evaluation.level === 'low') return 'warning'
     return 'success'
   }
-  if (evaluation.thresholdsUsed.enabled === false && options.honorDisabled !== false) return 'secondary'
+  if (evaluation.thresholdsUsed.enabled === false && options.honorDisabled !== false) return 'outline'
   return evaluation.variant
 }

@@ -501,7 +501,12 @@ function formatDate(value: string | null) {
   }).format(new Date(`${value}T00:00:00`))
 }
 
-function getStockVariant(product: ProductCatalogItem) {
+function getStockVariant(
+  product: ProductCatalogItem,
+): Extract<
+  NonNullable<React.ComponentProps<typeof Badge>['variant']>,
+  'default' | 'success' | 'warning' | 'info' | 'destructive' | 'outline'
+> {
   const companyConfig =
     typeof window !== 'undefined' ? loadStockThresholdCompanyConfig() : null
   const evaluation = evaluateStockLevel({
@@ -510,7 +515,11 @@ function getStockVariant(product: ProductCatalogItem) {
     fallbackToLegacyDefaults: true,
   })
   if (product.lotCount <= 1 && evaluation.level === 'normal') return 'warning'
-  return stockThresholdToVariant(evaluation, { legacyCompatibility: true })
+  const variant = stockThresholdToVariant(evaluation, { legacyCompatibility: true })
+  if (variant === 'destructive' || variant === 'warning' || variant === 'success' || variant === 'outline') {
+    return variant
+  }
+  return 'outline'
 }
 
 function getApiErrorMessage(error: unknown) {
@@ -657,22 +666,24 @@ export function ProductosPage() {
   const watchedPackagingRows = form.watch('empaque')
   const detectedBasePresentationId = watchedPackagingRows.at(-1)?.presentacionId ?? ''
   const watchedCategoriaId = form.watch('categoriaId')
-  const watchedSku = form.watch('sku')
   const currentReservedSkuRef = useRef<string | null>(null)
   const skuAutoEditedRef = useRef(false)
   const existingSkusSetRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    if (!catalogRows) return
+    if (!products.length) {
+      existingSkusSetRef.current = new Set()
+      return
+    }
     const set = new Set<string>()
-    for (const row of catalogRows) if (row.sku) set.add(row.sku)
+    for (const row of products) if (row.sku) set.add(row.sku)
     existingSkusSetRef.current = set
     try {
       ensureCountersFromExistingSkus(set)
     } catch {
       /* ignore */
     }
-  }, [catalogRows])
+  }, [products])
 
   useEffect(() => {
     if (editingProduct) return
@@ -2416,7 +2427,7 @@ export function ProductosPage() {
                   <Button
                     type="button"
                     size="sm"
-                    variant="link"
+                    variant="ghost"
                     className="h-7 w-auto px-2 py-0 text-[11px]"
                     onClick={() => {
                       const categoryRecord = options.categories.find((c) => c.id === watchedCategoriaId)
