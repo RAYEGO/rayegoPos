@@ -19,7 +19,6 @@ export function SessionWarningModal() {
     acknowledgeWarning,
     pendingOperation,
     settings,
-    refreshSession,
     markExpired,
   } = useInactivityContext()
 
@@ -58,10 +57,9 @@ export function SessionWarningModal() {
 
   const handleContinue = async () => {
     try {
-      await refreshSession()
-    } catch {
-    } finally {
       await acknowledgeWarning()
+    } catch {
+      /* no-op: acknowledgeWarning ya maneja refresh y close; si falla no propagar */
     }
   }
 

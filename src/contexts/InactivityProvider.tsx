@@ -98,6 +98,8 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const lastAbsoluteWarningShownAtRef = useRef<number>(0)
   const refreshInFlightRef = useRef(false)
   const lastReportAtRef = useRef<number>(0)
+  const logoutInFlightRef = useRef(false)
+  const warningIntervalStartedAtRef = useRef<number>(0)
 
   useEffect(() => {
     sessionRef.current = session
@@ -116,6 +118,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     if (warningIntervalRef.current !== null) {
       window.clearInterval(warningIntervalRef.current)
       warningIntervalRef.current = null
+      warningIntervalStartedAtRef.current = 0
     }
   }, [])
 
@@ -128,9 +131,13 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const markExpired = useCallback(
     (details: SessionExpirationDetails) => {
+      if (statusRef.current === 'expired') return
+      if (logoutInFlightRef.current) return
+      logoutInFlightRef.current = true
       setLastExpirationDetails(details)
       setStatus('expired')
       setWarningReason(null)
+      warningReasonRef.current = null
       clearWarningInterval()
       clearTickInterval()
       if (typeof window !== 'undefined') {
@@ -155,11 +162,17 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
       setWarningCountdownSeconds(seconds)
 
       clearWarningInterval()
+      warningIntervalStartedAtRef.current = Date.now()
       warningIntervalRef.current = window.setInterval(() => {
+        if (statusRef.current === 'active' || statusRef.current === 'expired') {
+          clearWarningInterval()
+          return
+        }
         setWarningCountdownSeconds((prev) => {
           const next = prev - 1
           if (next <= 0) {
             clearWarningInterval()
+            if (statusRef.current !== 'warning') return 0
             if (warningReasonRef.current === 'absolute-expiry') {
               markExpired({
                 reason: 'absolute-expiry',
@@ -184,13 +197,23 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   )
 
   const closeWarningAndReset = useCallback(() => {
+    clearWarningInterval()
     setStatus('active')
     setWarningReason(null)
     warningReasonRef.current = null
-    clearWarningInterval()
     setWarningCountdownSeconds(0)
     setLastExpirationDetails(null)
-  }, [clearWarningInterval])
+    idleDeadlineRef.current = Date.now() + settings.idleTimeoutMs
+    setIdleTimeLeftMs(settings.idleTimeoutMs)
+    const now = Date.now()
+    lastReportAtRef.current = now
+    setLastActivityAt(now)
+    try {
+      window.localStorage.setItem(INACTIVITY_STORAGE_PREFIX + '.lastSync', String(now))
+    } catch {
+      /* ignore */
+    }
+  }, [clearWarningInterval, settings.idleTimeoutMs])
 
   const reportActivity = useCallback(() => {
     const now = Date.now()
@@ -267,7 +290,9 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   ])
 
   const acknowledgeWarning = useCallback(async () => {
-    if (warningReasonRef.current === 'absolute-expiry') {
+    if (statusRef.current !== 'warning') return
+    const snapshotReason = warningReasonRef.current
+    if (snapshotReason === 'absolute-expiry') {
       const cur = sessionRef.current
       if (cur?.refreshToken && !refreshInFlightRef.current) {
         refreshInFlightRef.current = true
@@ -275,20 +300,21 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
           const refreshRes = await authService.refreshSession()
           if (refreshRes.ok) {
             sessionRef.current = refreshRes.session
-            closeWarningAndReset()
             lastAbsoluteWarningShownAtRef.current = Date.now()
+            closeWarningAndReset()
             return
           } else if (refreshRes.code === 'NETWORK_ERROR') {
-            reportActivity()
+            closeWarningAndReset()
             return
           }
         } finally {
           refreshInFlightRef.current = false
         }
       }
+      return
     }
-    reportActivity()
-  }, [closeWarningAndReset, reportActivity])
+    closeWarningAndReset()
+  }, [closeWarningAndReset])
 
   const setPendingOperation = useCallback((snapshot: PendingOperationSnapshot | null) => {
     if (snapshot) {
