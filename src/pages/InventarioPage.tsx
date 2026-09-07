@@ -536,19 +536,17 @@ export function InventarioPage() {
   const [usoServicioTecnicoFilter, setUsoServicioTecnicoFilter] = useState<'TODOS' | UsoServicioTecnico>('TODOS')
   const lotCreateInputKeyRef = useRef(0)
   const isCreateDialogPrev = useRef(false)
-  const [activeTab, setActiveTab] = useState<
-    'lotes' | 'movimientos' | 'alertas' | 'consumo-rt'
-  >(() => {
-    if (
-      initialTab === 'movimientos' ||
-      initialTab === 'alertas' ||
-      initialTab === 'lotes' ||
-      (initialTab === 'consumo-rt' && hasConsumoRTTab)
-    ) {
-      return initialTab as typeof activeTab
+  type InventoryTab = 'lotes' | 'movimientos' | 'alertas' | 'consumo-rt'
+  const INVENTORY_TABS: readonly InventoryTab[] = ['lotes', 'movimientos', 'alertas', 'consumo-rt']
+  const resolvedInitialTab: InventoryTab = useMemo<InventoryTab>(() => {
+    const t = initialTab
+    if (t && (INVENTORY_TABS as readonly string[]).includes(t)) {
+      if (t !== 'consumo-rt') return t
+      if (hasConsumoRTTab) return 'consumo-rt'
     }
     return 'lotes'
-  })
+  }, [initialTab, hasConsumoRTTab])
+  const [activeTab, setActiveTab] = useState<InventoryTab>(resolvedInitialTab)
 
   useEffect(() => {
     setActiveTab((prev) => {
@@ -993,7 +991,7 @@ export function InventarioPage() {
         </div>
       )}
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as InventoryTab)}>
         <TabsList className={`grid w-full lg:w-fit ${hasConsumoRTTab ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTrigger value="lotes">Stock por lotes</TabsTrigger>
           <TabsTrigger value="movimientos">Movimientos</TabsTrigger>

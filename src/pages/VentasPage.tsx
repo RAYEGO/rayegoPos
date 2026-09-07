@@ -233,7 +233,7 @@ export function VentasPage() {
   const [receiptSale, setReceiptSale] = useState<{ id: string; code: string } | null>(null)
   const [receiptPayload, setReceiptPayload] = useState<SaleReceiptResponse | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [showSaleObservations, setShowSaleObservations] = useState(false)
+  const [showSaleObservaciones, setShowSaleObservaciones] = useState(false)
   const [expandedPaymentNotes, setExpandedPaymentNotes] = useState<Record<number, boolean>>({})
 
   const handleUnauthorized = useHandleUnauthorized('VentasPage')

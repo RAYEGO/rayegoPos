@@ -84,7 +84,7 @@ export function DashboardPage() {
 
   const isPlatformAdmin = hasRole('ADMIN_POS')
 
-  const filteredPlatformStats = useMemo(() => {
+  const filteredPlatformStats: PlatformStats = useMemo(() => {
     const base = PLATFORM_STATS
     const tiposEmpresa = hasSTCard
       ? base.tiposEmpresa
@@ -224,12 +224,15 @@ export function DashboardPage() {
   )
 }
 
+type PlatformStatsTipoEmpresa = { codigo: string; nombre: string; color: string; empresasCount: number }
+type PlatformStatsActivity = { id: string; createdAt: string; title: string; subtitle: string; variant: 'info' | 'success' | 'warning' }
+
 type PlatformStats = {
   empresasRegistradas: number
   empresasActivas: number
   administradoresRegistrados: number
-  tiposEmpresa: { codigo: string; nombre: string; color: string; empresasCount: number }[]
-  recentActivity: { id: string; createdAt: string; title: string; subtitle: string; variant: 'info' | 'success' | 'warning' }[]
+  tiposEmpresa: PlatformStatsTipoEmpresa[]
+  recentActivity: PlatformStatsActivity[]
 }
 
 const PLATFORM_STATS: PlatformStats = {
