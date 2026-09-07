@@ -33,6 +33,7 @@ const ACTIVITY_EVENTS = [
 ] as const
 
 const ACTIVITY_REPORT_COOLDOWN_MS = 800
+const ACK_GRACE_MS = 5_000
 
 type InactivityStatus = 'active' | 'warning' | 'expired'
 export type WarningReason = 'inactivity' | 'absolute-expiry' | null
@@ -99,7 +100,8 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const refreshInFlightRef = useRef(false)
   const lastReportAtRef = useRef<number>(0)
   const logoutInFlightRef = useRef(false)
-  const warningIntervalStartedAtRef = useRef<number>(0)
+  const warningIntervalStartedAtRef = useRef(0)
+  const userAcknowledgedAtRef = useRef(0)
 
   useEffect(() => {
     sessionRef.current = session
@@ -131,6 +133,8 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const markExpired = useCallback(
     (details: SessionExpirationDetails) => {
+      const graceLeft = ACK_GRACE_MS - (Date.now() - userAcknowledgedAtRef.current)
+      if (graceLeft > 0) return
       if (statusRef.current === 'expired') return
       if (logoutInFlightRef.current) return
       logoutInFlightRef.current = true
@@ -203,9 +207,9 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     warningReasonRef.current = null
     setWarningCountdownSeconds(0)
     setLastExpirationDetails(null)
-    idleDeadlineRef.current = Date.now() + settings.idleTimeoutMs
-    setIdleTimeLeftMs(settings.idleTimeoutMs)
     const now = Date.now()
+    idleDeadlineRef.current = now + settings.idleTimeoutMs
+    setIdleTimeLeftMs(settings.idleTimeoutMs)
     lastReportAtRef.current = now
     setLastActivityAt(now)
     try {
@@ -291,7 +295,12 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const acknowledgeWarning = useCallback(async () => {
     if (statusRef.current !== 'warning') return
+
+    clearWarningInterval()
+    userAcknowledgedAtRef.current = Date.now()
+
     const snapshotReason = warningReasonRef.current
+
     if (snapshotReason === 'absolute-expiry') {
       const cur = sessionRef.current
       if (cur?.refreshToken && !refreshInFlightRef.current) {
@@ -299,22 +308,43 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         try {
           const refreshRes = await authService.refreshSession()
           if (refreshRes.ok) {
-            sessionRef.current = refreshRes.session
+            try {
+              syncSessionFromStorage()
+              if (typeof window !== 'undefined') {
+                try {
+                  window.dispatchEvent(
+                    new CustomEvent(AUTH_SESSION_UPDATED_EVENT, {
+                      detail: { viaInactivityAcknowledge: true, ts: Date.now() },
+                    }),
+                  )
+                } catch {
+                  /* ignore */
+                }
+              }
+            } catch {
+              /* ignore */
+            }
             lastAbsoluteWarningShownAtRef.current = Date.now()
             closeWarningAndReset()
             return
           } else if (refreshRes.code === 'NETWORK_ERROR') {
             closeWarningAndReset()
             return
+          } else {
+            closeWarningAndReset()
+            return
           }
         } finally {
           refreshInFlightRef.current = false
         }
+      } else if (!cur?.refreshToken) {
+        closeWarningAndReset()
       }
       return
     }
+
     closeWarningAndReset()
-  }, [closeWarningAndReset])
+  }, [clearWarningInterval, closeWarningAndReset, syncSessionFromStorage])
 
   const setPendingOperation = useCallback((snapshot: PendingOperationSnapshot | null) => {
     if (snapshot) {
@@ -385,10 +415,18 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         : null
 
       if (curSession && refreshLeftMs !== null && refreshLeftMs <= 0) {
-        void markExpired({
-          reason: 'refresh-invalid',
-          message: 'El token de renovación ha expirado. Inicia sesión nuevamente para continuar.',
-        })
+        const graceLeft = ACK_GRACE_MS - (Date.now() - userAcknowledgedAtRef.current)
+        if (graceLeft > 0) {
+          return
+        } else if (refreshInFlightRef.current) {
+          return
+        } else {
+          void markExpired({
+            reason: 'refresh-invalid',
+            message:
+              'El token de renovación ha expirado. Inicia sesión nuevamente para continuar.',
+          })
+        }
         return
       }
 
@@ -435,11 +473,13 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         }
       }
 
+      const ackGraceActive = Date.now() - userAcknowledgedAtRef.current < ACK_GRACE_MS
       if (curSession && !isAccessTokenValid(curSession.accessToken, 15_000)) {
-        if (isRefreshTokenValid(curSession.refreshToken) && !refreshInFlightRef.current) {
-          console.debug(
-            `[INACTIVITY] Access token cerca de expirar en tick loop. Refresh silencioso antes del logout. (accessLeft=${accessLeftMs}ms refreshLeft=${refreshLeftMs}ms)`,
-          )
+        if (
+          isRefreshTokenValid(curSession.refreshToken) &&
+          !refreshInFlightRef.current &&
+          !ackGraceActive
+        ) {
           refreshInFlightRef.current = true
           void (async () => {
             try {

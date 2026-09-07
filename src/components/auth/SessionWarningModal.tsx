@@ -59,7 +59,7 @@ export function SessionWarningModal() {
     try {
       await acknowledgeWarning()
     } catch {
-      /* no-op: acknowledgeWarning ya maneja refresh y close; si falla no propagar */
+      /* no-op */
     }
   }
 
