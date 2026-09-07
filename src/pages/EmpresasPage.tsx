@@ -828,7 +828,7 @@ export function EmpresasPage() {
                     render={({ field }) => (
                       <Select value={field.value} onValueChange={field.onChange} disabled={readOnly}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Selecciona un tipo" />
+                          <SelectValue placeholder="Seleccionar" />
                         </SelectTrigger>
                         <SelectContent>
                           {tipos.map((t) => (
@@ -1263,7 +1263,7 @@ export function EmpresasPage() {
                       <Label>Sucursal <span className="text-destructive">*</span></Label>
                       <Select value={adminBranchId} onValueChange={setAdminBranchId}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Selecciona una sucursal" />
+                          <SelectValue placeholder="Seleccionar" />
                         </SelectTrigger>
                         <SelectContent>
                           {branches.map((b) => (

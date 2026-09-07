@@ -1849,7 +1849,7 @@ export function InventarioPage() {
                     render={({ field }) => (
                       <Select value={field.value || undefined} onValueChange={field.onChange}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Selecciona presentación" />
+                          <SelectValue placeholder="Seleccionar" />
                         </SelectTrigger>
                         <SelectContent>
                           {(selectedAdjustProduct?.packaging?.presentations ?? [])
@@ -2179,7 +2179,7 @@ export function InventarioPage() {
                   render={({ field }) => (
                     <Select value={field.value || undefined} onValueChange={field.onChange}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Selecciona sucursal destino" />
+                        <SelectValue placeholder="Seleccionar" />
                       </SelectTrigger>
                       <SelectContent>
                         {destinationBranchOptions.map((branch) => (

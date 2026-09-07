@@ -447,7 +447,7 @@ export function AdministradoresPage() {
                   <Label htmlFor="adm-empresa">Empresa *</Label>
                   <Select value={watchEmpresaId || ''} onValueChange={onChangeEmpresa}>
                     <SelectTrigger id="adm-empresa">
-                      <SelectValue placeholder="Selecciona empresa" />
+                      <SelectValue placeholder="Seleccionar" />
                     </SelectTrigger>
                     <SelectContent>
                       {empresas.map((e) => (
@@ -485,7 +485,7 @@ export function AdministradoresPage() {
                           }
                         >
                           <SelectTrigger id="adm-sucursal">
-                            <SelectValue placeholder="Selecciona sucursal" />
+                            <SelectValue placeholder="Seleccionar" />
                           </SelectTrigger>
                           <SelectContent>
                             {currentEmpresaBranches.map((s) => (
