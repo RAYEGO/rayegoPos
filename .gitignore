@@ -27,3 +27,17 @@ dist-ssr
 *.sln
 *.sw?
 scripts/db/sql-limpieza/
+
+# Build output logs y debugging local (no deben subirse al repo)
+build-*.txt
+*.output.txt
+debug-*.md
+coverage/
+
+# Archivos sueltos accidentales / backups de BD
+*.backup
+develop
+
+# Cache deploy providers (no código fuente)
+.vercel/
+.railway/
