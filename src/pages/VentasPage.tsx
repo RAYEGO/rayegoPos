@@ -14,6 +14,7 @@ import {
   History,
   ClipboardList,
   X,
+  MessageSquarePlus,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -232,6 +233,8 @@ export function VentasPage() {
   const [receiptSale, setReceiptSale] = useState<{ id: string; code: string } | null>(null)
   const [receiptPayload, setReceiptPayload] = useState<SaleReceiptResponse | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showSaleObservations, setShowSaleObservations] = useState(false)
+  const [expandedPaymentNotes, setExpandedPaymentNotes] = useState<Record<number, boolean>>({})
 
   const handleUnauthorized = useHandleUnauthorized('VentasPage')
 
@@ -265,6 +268,12 @@ export function VentasPage() {
       control: checkoutForm.control,
       name: 'clienteId',
     }) ?? 'SHOWROOM'
+
+  const watchedSaleObservaciones =
+    useWatch({
+      control: checkoutForm.control,
+      name: 'observaciones',
+    }) ?? ''
 
   const loadDashboard = useCallback(async () => {
     if (!accessToken) {
@@ -608,6 +617,17 @@ export function VentasPage() {
           },
         ],
       })
+      setShowSaleObservations(false)
+      setExpandedPaymentNotes({})
+    } else {
+      const savedObs = checkoutForm.getValues('observaciones') ?? ''
+      const savedPays = checkoutForm.getValues('payments') ?? []
+      setShowSaleObservations(Boolean(savedObs))
+      const next: Record<number, boolean> = {}
+      savedPays.forEach((p, i) => {
+        if (p?.observaciones) next[i] = true
+      })
+      setExpandedPaymentNotes(next)
     }
 
     setIsCartPanelOpen(true)
@@ -1293,21 +1313,37 @@ export function VentasPage() {
                   )}
                 </Card>
 
-                <Card className="p-4">
-                  <p className="font-medium text-foreground">Detalle de venta</p>
-                  <p className="text-xs text-muted-foreground">
-                    Cliente, comprobante y observaciones.
-                  </p>
+                <Card className="p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-foreground">Detalle de venta</p>
+                      <p className="text-xs text-muted-foreground">
+                        Cliente, comprobante y observaciones.
+                      </p>
+                    </div>
+                    {!showSaleObservaciones && !watchedSaleObservaciones ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowSaleObservations(true)}
+                        className="gap-1.5 h-8"
+                      >
+                        <MessageSquarePlus className="h-3.5 w-3.5" />
+                        <span className="text-xs">Agregar observación</span>
+                      </Button>
+                    ) : null}
+                  </div>
 
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
                       <label className="text-sm font-medium">Cliente</label>
                       <Controller
                         control={checkoutForm.control}
                         name="clienteId"
                         render={({ field }) => (
                           <Select value={field.value || 'SHOWROOM'} onValueChange={field.onChange}>
-                            <SelectTrigger>
+                            <SelectTrigger className="h-9">
                               <SelectValue placeholder="Venta mostrador" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1323,14 +1359,14 @@ export function VentasPage() {
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <label className="text-sm font-medium">Tipo de comprobante</label>
                       <Controller
                         control={checkoutForm.control}
                         name="tipoComprobante"
                         render={({ field }) => (
                           <Select value={field.value} onValueChange={field.onChange}>
-                            <SelectTrigger>
+                            <SelectTrigger className="h-9">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -1343,19 +1379,37 @@ export function VentasPage() {
                       />
                     </div>
 
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="text-sm font-medium">Observaciones</label>
-                      <Textarea
-                        {...checkoutForm.register('observaciones')}
-                        placeholder="Notas para receta, despacho o indicaciones internas"
-                        className="min-h-24"
-                      />
-                      <FieldError message={checkoutForm.formState.errors.observaciones?.message} />
-                    </div>
+                    {showSaleObservaciones || watchedSaleObservaciones ? (
+                      <div className="space-y-1.5 md:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium">Observaciones</label>
+                          {showSaleObservaciones && !watchedSaleObservaciones ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                checkoutForm.setValue('observaciones', '', { shouldDirty: false })
+                                setShowSaleObservations(false)
+                              }}
+                              className="h-7 px-2 text-xs"
+                            >
+                              Quitar
+                            </Button>
+                          ) : null}
+                        </div>
+                        <Textarea
+                          {...checkoutForm.register('observaciones')}
+                          placeholder="Notas para receta, despacho o indicaciones internas"
+                          className="min-h-9 h-9 resize-none py-2 leading-5"
+                        />
+                        <FieldError message={checkoutForm.formState.errors.observaciones?.message} />
+                      </div>
+                    ) : null}
                   </div>
                 </Card>
 
-                <Card className="p-4">
+                <Card className="p-3 sm:p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-medium text-foreground">Pagos</p>
@@ -1381,29 +1435,34 @@ export function VentasPage() {
                     </Button>
                   </div>
 
-                  <div className="mt-4 space-y-6">
+                  <div className="mt-3 space-y-3">
                     {paymentFields.map((field, index) => {
+                      const hasNoteField = expandedPaymentNotes[index] || Boolean(watchedPayments[index]?.observaciones)
                       return (
                         <div
                           key={field.id}
-                          className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2 xl:grid-cols-[1.4fr_0.8fr_1fr_auto]"
+                          className="grid gap-3 rounded-2xl border p-3 sm:p-4 md:grid-cols-2 lg:grid-cols-[1.25fr_0.9fr_1fr_auto]"
                         >
-                          <FormPaymentMethodTwoLevelSelect
-                            control={checkoutForm.control}
-                            name={`payments.${index}.formaPagoId`}
-                            methods={options.paymentMethods}
-                            label="Medio de pago"
-                            placeholderCategory="Selecciona medio de pago"
-                            placeholderSubmethod="Selecciona tipo"
-                            id={`sale-payment-${index}`}
-                            required
-                          />
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium">Medio de pago</label>
+                            <FormPaymentMethodTwoLevelSelect
+                              control={checkoutForm.control}
+                              name={`payments.${index}.formaPagoId`}
+                              methods={options.paymentMethods}
+                              label={undefined as any}
+                              placeholderCategory="Selecciona medio de pago"
+                              placeholderSubmethod="Selecciona tipo"
+                              id={`sale-payment-${index}`}
+                              required
+                            />
+                          </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-1.5">
                             <label className="text-sm font-medium">Monto</label>
                             <Input
                               type="number"
                               step="0.01"
+                              className="h-9"
                               {...checkoutForm.register(`payments.${index}.monto`, {
                                 valueAsNumber: true,
                               })}
@@ -1413,7 +1472,7 @@ export function VentasPage() {
                             />
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-1.5">
                             <label className="text-sm font-medium">
                               Referencia
                               <span className="ml-1 text-xs font-normal text-muted-foreground">
@@ -1423,6 +1482,7 @@ export function VentasPage() {
                             <Input
                               {...checkoutForm.register(`payments.${index}.referenciaExterna`)}
                               placeholder="Código de operación, voucher, N° externo..."
+                              className="h-9"
                             />
                             <FieldError
                               message={
@@ -1432,30 +1492,74 @@ export function VentasPage() {
                             />
                           </div>
 
-                          <div className="flex items-end justify-end">
+                          <div className="flex items-end justify-end pb-0.5">
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon"
                               onClick={() => removePayment(index)}
                               disabled={paymentFields.length === 1}
+                              className="h-9 w-9"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
 
-                          <div className="space-y-2 md:col-span-2 xl:col-span-4">
-                            <label className="text-sm font-medium">Observaciones del pago</label>
-                            <Textarea
-                              {...checkoutForm.register(`payments.${index}.observaciones`)}
-                              placeholder="Notas del cobro o conciliación"
-                              className="min-h-20"
-                            />
-                            <FieldError
-                              message={
-                                checkoutForm.formState.errors.payments?.[index]?.observaciones?.message
-                              }
-                            />
+                          <div className="space-y-1.5 md:col-span-2 lg:col-span-4">
+                            {!hasNoteField ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  setExpandedPaymentNotes((prev) => ({ ...prev, [index]: true }))
+                                }
+                                className="h-8 px-2 gap-1.5"
+                              >
+                                <MessageSquarePlus className="h-3.5 w-3.5" />
+                                <span className="text-xs">Agregar nota al pago</span>
+                              </Button>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-sm font-medium">Observaciones del pago</label>
+                                  {expandedPaymentNotes[index] &&
+                                  !watchedPayments[index]?.observaciones ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        checkoutForm.setValue(
+                                          `payments.${index}.observaciones`,
+                                          '',
+                                          { shouldDirty: false },
+                                        )
+                                        setExpandedPaymentNotes((prev) => {
+                                          const n = { ...prev }
+                                          delete n[index]
+                                          return n
+                                        })
+                                      }}
+                                      className="h-7 px-2 text-xs"
+                                    >
+                                      Quitar
+                                    </Button>
+                                  ) : null}
+                                </div>
+                                <Textarea
+                                  {...checkoutForm.register(`payments.${index}.observaciones`)}
+                                  placeholder="Notas del cobro o conciliación"
+                                  className="min-h-9 h-9 resize-none py-2 leading-5"
+                                />
+                                <FieldError
+                                  message={
+                                    checkoutForm.formState.errors.payments?.[index]?.observaciones
+                                      ?.message
+                                  }
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                       )
@@ -1463,44 +1567,55 @@ export function VentasPage() {
                   </div>
                 </Card>
 
-                <Card className="p-4">
-                  <p className="font-medium text-foreground">Totales</p>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <div>
+                <Card className="p-3 sm:p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium text-foreground">Totales</p>
+                    <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <span>Usa pagos combinados</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:gap-x-6">
+                    <div className="flex items-baseline justify-between gap-3 py-0.5">
                       <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
                         Total venta
                       </p>
-                      <p className="mt-2 text-base font-semibold text-foreground">
+                      <p className="text-[15px] font-semibold text-foreground tabular-nums">
                         {formatCurrency(cartMetrics.total)}
                       </p>
                     </div>
-                    <div>
+                    <div className="flex items-baseline justify-between gap-3 py-0.5">
                       <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
                         Pagos registrados
                       </p>
-                      <p className="mt-2 text-base font-semibold text-foreground">
+                      <p className="text-[15px] font-semibold text-foreground tabular-nums">
                         {formatCurrency(watchedPaymentTotal)}
                       </p>
                     </div>
-                    <div>
+                    <div className="flex items-baseline justify-between gap-3 py-0.5">
                       <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
                         Vuelto estimado
                       </p>
-                      <p className="mt-2 text-base font-semibold text-foreground">
+                      <p className="text-[15px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
                         {formatCurrency(estimatedChange)}
                       </p>
                     </div>
-                    <div>
+                    <div className="flex items-baseline justify-between gap-3 py-0.5">
                       <p className="text-caption uppercase tracking-[0.14em] text-muted-foreground">
                         Saldo estimado
                       </p>
-                      <p className="mt-2 text-base font-semibold text-foreground">
+                      <p
+                        className={`text-[15px] font-semibold tabular-nums ${
+                          estimatedOutstanding > 0
+                            ? 'text-destructive'
+                            : 'text-foreground'
+                        }`}
+                      >
                         {formatCurrency(estimatedOutstanding)}
                       </p>
                     </div>
                   </div>
                   {paymentBlockingMessage ? (
-                    <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                    <div className="mt-3 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                       {paymentBlockingMessage}
                     </div>
                   ) : null}
@@ -1508,7 +1623,7 @@ export function VentasPage() {
               </div>
             </div>
 
-            <div className="border-t bg-popover px-6 py-4">
+            <div className="border-t bg-popover px-4 py-3 sm:px-6 sm:py-4">
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
