@@ -48,6 +48,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { inventoryService } from '@/services/inventoryService'
@@ -523,6 +524,8 @@ export function InventarioPage() {
   const accessToken = session?.accessToken ?? ''
   const activeBranchId = session?.user.branchId ?? ''
   const activeBranchName = session?.user.branchName ?? ''
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasConsumoRTTab = isFeatureEnabled('inventory_tab_consumption_st')
   const [searchParams] = useSearchParams()
   const initialProductId = searchParams.get('productId')
   const initialTab = searchParams.get('tab')
@@ -540,12 +543,19 @@ export function InventarioPage() {
       initialTab === 'movimientos' ||
       initialTab === 'alertas' ||
       initialTab === 'lotes' ||
-      initialTab === 'consumo-rt'
+      (initialTab === 'consumo-rt' && hasConsumoRTTab)
     ) {
-      return initialTab
+      return initialTab as typeof activeTab
     }
     return 'lotes'
   })
+
+  useEffect(() => {
+    setActiveTab((prev) => {
+      if (prev === 'consumo-rt' && !hasConsumoRTTab) return 'lotes'
+      return prev
+    })
+  }, [hasConsumoRTTab])
   const [pendingAction, setPendingAction] = useState(() => initialAction)
   const [dashboard, setDashboard] = useState<InventoryDashboardResponse>(emptyDashboard)
   const [isLoading, setIsLoading] = useState(true)
@@ -984,13 +994,15 @@ export function InventarioPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
-        <TabsList className="grid w-full grid-cols-4 lg:w-fit">
+        <TabsList className={`grid w-full lg:w-fit ${hasConsumoRTTab ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTrigger value="lotes">Stock por lotes</TabsTrigger>
           <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
           <TabsTrigger value="alertas">Alertas y FIFO</TabsTrigger>
-          <TabsTrigger value="consumo-rt">
-            <Wrench className="mr-1 h-4 w-4" /> Consumo ST
-          </TabsTrigger>
+          {hasConsumoRTTab ? (
+            <TabsTrigger value="consumo-rt">
+              <Wrench className="mr-1 h-4 w-4" /> Consumo ST
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="lotes" className="space-y-6">
@@ -1418,8 +1430,9 @@ export function InventarioPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="consumo-rt" className="space-y-6">
-          <AuthorizationGate permission="consumoInventarioRT.write">
+        {hasConsumoRTTab ? (
+          <TabsContent value="consumo-rt" className="space-y-6">
+            <AuthorizationGate permission="consumoInventarioRT.write">
             <Card>
               <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
@@ -1529,8 +1542,9 @@ export function InventarioPage() {
                 )}
               </CardContent>
             </Card>
-          </AuthorizationGate>
-        </TabsContent>
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
       </Tabs>
 
       {isManualLotEnabled ? (

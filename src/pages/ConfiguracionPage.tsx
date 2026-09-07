@@ -60,6 +60,7 @@ import type { TipoEquipo, TipoServicio } from '@/types/rayegotech'
 import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
@@ -333,6 +334,10 @@ export function ConfiguracionPage() {
   const accessToken = session?.accessToken ?? ''
   const branchName = session?.user.branchName ?? ''
   const canEditCompany = authorization.hasRole('ADMIN')
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasEquiposTypesTab = isFeatureEnabled('config_tab_equipment_types')
+  const hasServiceTypesTab = isFeatureEnabled('config_tab_service_types')
+  const hasRTGeneralTab = isFeatureEnabled('config_section_technical_service')
 
   const [activeTab, setActiveTab] = useState<
     | 'empresa'
@@ -345,6 +350,21 @@ export function ConfiguracionPage() {
     | 'rt-tipos-servicio'
     | 'rt-general'
   >('empresa')
+
+  useEffect(() => {
+    const tabAllowed: Record<typeof activeTab, boolean> = {
+      empresa: true,
+      sucursales: true,
+      implementacion: true,
+      entorno: true,
+      inventario: true,
+      herramientas: true,
+      'rt-tipos-equipo': hasEquiposTypesTab,
+      'rt-tipos-servicio': hasServiceTypesTab,
+      'rt-general': hasRTGeneralTab,
+    }
+    setActiveTab((prev) => (tabAllowed[prev] ? prev : 'empresa'))
+  }, [hasEquiposTypesTab, hasServiceTypesTab, hasRTGeneralTab])
   const [environment, setEnvironment] = useState<SystemEnvironment | null>(null)
   const [isEnvironmentLoading, setIsEnvironmentLoading] = useState(false)
   const [environmentError, setEnvironmentError] = useState<string | null>(null)
@@ -1983,15 +2003,21 @@ export function ConfiguracionPage() {
           <TabsTrigger value="herramientas" disabled={!company || !isImplementationMode}>
             Herramientas del sistema
           </TabsTrigger>
-          <TabsTrigger value="rt-tipos-equipo">
-            <Wrench className="mr-1 h-4 w-4" /> Tipos de equipo
-          </TabsTrigger>
-          <TabsTrigger value="rt-tipos-servicio">
-            <Wrench className="mr-1 h-4 w-4" /> Tipos de servicio
-          </TabsTrigger>
-          <TabsTrigger value="rt-general">
-            <Wrench className="mr-1 h-4 w-4" /> Servicio Técnico
-          </TabsTrigger>
+          {hasEquiposTypesTab ? (
+            <TabsTrigger value="rt-tipos-equipo">
+              <Wrench className="mr-1 h-4 w-4" /> Tipos de equipo
+            </TabsTrigger>
+          ) : null}
+          {hasServiceTypesTab ? (
+            <TabsTrigger value="rt-tipos-servicio">
+              <Wrench className="mr-1 h-4 w-4" /> Tipos de servicio
+            </TabsTrigger>
+          ) : null}
+          {hasRTGeneralTab ? (
+            <TabsTrigger value="rt-general">
+              <Wrench className="mr-1 h-4 w-4" /> Servicio Técnico
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="empresa" className="space-y-4 pt-4">
@@ -2420,8 +2446,9 @@ export function ConfiguracionPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="rt-tipos-equipo" className="space-y-4 pt-4">
-          <AuthorizationGate permission="configuracion.read">
+        {hasEquiposTypesTab ? (
+          <TabsContent value="rt-tipos-equipo" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
             <Card>
               <CardHeader>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2547,10 +2574,12 @@ export function ConfiguracionPage() {
               </div>
             </SidePanelContent>
           </SidePanel>
-        </TabsContent>
+          </TabsContent>
+        ) : null}
 
-        <TabsContent value="rt-tipos-servicio" className="space-y-4 pt-4">
-          <AuthorizationGate permission="configuracion.read">
+        {hasServiceTypesTab ? (
+          <TabsContent value="rt-tipos-servicio" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
             <Card>
               <CardHeader>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -2847,10 +2876,12 @@ export function ConfiguracionPage() {
               ) : null}
             </CardContent>
           </Card>
-        </TabsContent>
+          </TabsContent>
+        ) : null}
 
-        <TabsContent value="inventario" className="space-y-4 pt-4">
-          <AuthorizationGate permission="configuracion.read">
+        {hasRTGeneralTab ? (
+          <TabsContent value="rt-general" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
             <Card>
               <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
@@ -3145,7 +3176,8 @@ export function ConfiguracionPage() {
           </CardContent>
         </Card>
           </AuthorizationGate>
-        </TabsContent>
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="herramientas" className="space-y-4 pt-4">
           <Card>

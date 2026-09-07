@@ -56,6 +56,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { useAuth } from '@/hooks/useAuth'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { customersService } from '@/services/customersService'
@@ -351,6 +352,11 @@ function FieldError({ message }: { message?: string }) {
 export function ClientesPage() {
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasEquiposTab = isFeatureEnabled('customers_tab_equipment')
+  const hasOrdenesRTTab = isFeatureEnabled('customers_tab_st_orders')
+  const hasPagosOSTab = isFeatureEnabled('customers_tab_os_payments')
+  const hasGarantiasTab = isFeatureEnabled('customers_tab_warranties')
 
   const [activeTab, setActiveTab] = useState<
     | 'padron'
@@ -361,6 +367,19 @@ export function ClientesPage() {
     | 'pagos-os'
     | 'garantias'
   >('padron')
+
+  useEffect(() => {
+    const tabIsAllowed: Record<typeof activeTab, boolean> = {
+      padron: true,
+      'historial-compras': true,
+      'estado-cuenta': true,
+      'equipos-cliente': hasEquiposTab,
+      'ordenes-rt': hasOrdenesRTTab,
+      'pagos-os': hasPagosOSTab,
+      garantias: hasGarantiasTab,
+    }
+    setActiveTab((prev) => (tabIsAllowed[prev] ? prev : 'padron'))
+  }, [hasEquiposTab, hasOrdenesRTTab, hasPagosOSTab, hasGarantiasTab])
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [customerSales, setCustomerSales] = useState<CustomerSalesResponse['sales']>([])
   const [customerSalesLoading, setCustomerSalesLoading] = useState(false)
@@ -980,18 +999,26 @@ export function ClientesPage() {
             <TabsTrigger value="padron">Padrón</TabsTrigger>
             <TabsTrigger value="historial-compras">Historial de compras</TabsTrigger>
             <TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
-            <TabsTrigger value="equipos-cliente">
-              <MonitorCog className="mr-1 h-4 w-4" /> Equipos
-            </TabsTrigger>
-            <TabsTrigger value="ordenes-rt">
-              <Wrench className="mr-1 h-4 w-4" /> Órdenes ST
-            </TabsTrigger>
-            <TabsTrigger value="pagos-os">
-              <CreditCard className="mr-1 h-4 w-4" /> Pagos OS
-            </TabsTrigger>
-            <TabsTrigger value="garantias">
-              <ShieldCheck className="mr-1 h-4 w-4" /> Garantías
-            </TabsTrigger>
+            {hasEquiposTab ? (
+              <TabsTrigger value="equipos-cliente">
+                <MonitorCog className="mr-1 h-4 w-4" /> Equipos
+              </TabsTrigger>
+            ) : null}
+            {hasOrdenesRTTab ? (
+              <TabsTrigger value="ordenes-rt">
+                <Wrench className="mr-1 h-4 w-4" /> Órdenes ST
+              </TabsTrigger>
+            ) : null}
+            {hasPagosOSTab ? (
+              <TabsTrigger value="pagos-os">
+                <CreditCard className="mr-1 h-4 w-4" /> Pagos OS
+              </TabsTrigger>
+            ) : null}
+            {hasGarantiasTab ? (
+              <TabsTrigger value="garantias">
+                <ShieldCheck className="mr-1 h-4 w-4" /> Garantías
+              </TabsTrigger>
+            ) : null}
           </TabsList>
           <Button type="button" size="sm" onClick={openCreateDialog}>
             <Plus className="h-4 w-4 mr-1" />
@@ -1516,8 +1543,9 @@ export function ClientesPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="equipos-cliente" className="space-y-4 pt-4">
-          <AuthorizationGate permission="equiposCliente.read">
+        {hasEquiposTab ? (
+          <TabsContent value="equipos-cliente" className="space-y-4 pt-4">
+            <AuthorizationGate permission="equiposCliente.read">
             <Card className="p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
                 <div className="space-y-1">
@@ -1616,11 +1644,13 @@ export function ClientesPage() {
                 </Table>
               </Card>
             )}
-          </AuthorizationGate>
-        </TabsContent>
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
 
-        <TabsContent value="ordenes-rt" className="space-y-4 pt-4">
-          <AuthorizationGate permission="ordenesServicio.read">
+        {hasOrdenesRTTab ? (
+          <TabsContent value="ordenes-rt" className="space-y-4 pt-4">
+            <AuthorizationGate permission="ordenesServicio.read">
             <Card className="p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
                 <div className="space-y-1">
@@ -1733,11 +1763,13 @@ export function ClientesPage() {
                 </Table>
               </Card>
             )}
-          </AuthorizationGate>
-        </TabsContent>
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
 
-        <TabsContent value="pagos-os" className="space-y-4 pt-4">
-          <AuthorizationGate permission="pagosOrdenServicio.write">
+        {hasPagosOSTab ? (
+          <TabsContent value="pagos-os" className="space-y-4 pt-4">
+            <AuthorizationGate permission="pagosOrdenServicio.write">
             <Card className="p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
                 <div className="space-y-1">
@@ -1827,11 +1859,13 @@ export function ClientesPage() {
                 </Table>
               </Card>
             )}
-          </AuthorizationGate>
-        </TabsContent>
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
 
-        <TabsContent value="garantias" className="space-y-4 pt-4">
-          <AuthorizationGate permission="ordenesServicio.read">
+        {hasGarantiasTab ? (
+          <TabsContent value="garantias" className="space-y-4 pt-4">
+            <AuthorizationGate permission="ordenesServicio.read">
             <Card className="p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
                 <div className="space-y-1">
@@ -1933,8 +1967,9 @@ export function ClientesPage() {
               </Card>
             )}
           </AuthorizationGate>
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+        ) : null}
+        </Tabs>
 
       <Dialog
         open={isPaymentDialogOpen}

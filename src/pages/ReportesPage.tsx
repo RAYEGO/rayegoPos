@@ -33,6 +33,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { useAuth } from '@/hooks/useAuth'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { reportsService } from '@/services/reportsService'
@@ -197,6 +198,8 @@ const categories: Array<{
 export function ReportesPage() {
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasRTReports = isFeatureEnabled('reports_section_technical_service')
 
   const [category, setCategory] = useState<ReportsCategory>('CAJA')
   const [branchId, setBranchId] = useState<string>('all')
@@ -215,10 +218,17 @@ export function ReportesPage() {
 
   type TabPrincipal = 'ventas' | 'compras' | 'inventario' | 'caja' | 'servicio-tecnico'
   type TabRT = 'ordenes-servicio' | 'rendimiento-tecnicos' | 'garantias'
-  const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('caja')
+  const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>(() => (hasRTReports ? 'caja' : 'caja'))
   const [tabRT, setTabRT] = useState<TabRT>('ordenes-servicio')
   const [ordenesRT, setOrdenesRT] = useState<OrdenServicio[]>([])
   const [ordenesRTLoading, setOrdenesRTLoading] = useState(false)
+
+  useEffect(() => {
+    setTabPrincipal((prev) => {
+      if (prev === 'servicio-tecnico' && !hasRTReports) return 'caja'
+      return prev
+    })
+  }, [hasRTReports])
 
   const handleUnauthorized = useHandleUnauthorized('ReportesPage')
 
@@ -595,15 +605,15 @@ export function ReportesPage() {
     <div className="space-y-4 p-4">
       <div
         role="tablist"
-        aria-label="Reportes principales y servicio técnico"
-        className="inline-flex h-10 w-full items-center justify-start gap-1 rounded-md bg-muted p-1 text-muted-foreground sm:w-fit sm:grid-cols-5"
+        aria-label="Reportes principales"
+        className="inline-flex h-10 w-full items-center justify-start gap-1 rounded-md bg-muted p-1 text-muted-foreground sm:w-fit"
       >
         {([
           ['ventas', 'Ventas', ShoppingCart],
           ['compras', 'Compras', BarChart3],
           ['inventario', 'Inventario', Boxes],
           ['caja', 'Caja', WalletCards],
-          ['servicio-tecnico', 'Servicio Técnico', Wrench],
+          ...(hasRTReports ? ([['servicio-tecnico', 'Servicio Técnico', Wrench]] as Array<[TabPrincipal, string, typeof WalletCards]>) : []),
         ] as Array<[TabPrincipal, string, typeof WalletCards]>).map(([value, label, Icon]) => {
           const isActive = tabPrincipal === value
           return (
@@ -614,11 +624,11 @@ export function ReportesPage() {
               aria-selected={isActive}
               onClick={() => handlePrincipalTabChange(value)}
               data-state={isActive ? 'active' : 'inactive'}
-              className={`col-span-1 sm:col-span-1 inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+              className={`col-span-1 inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all w-full sm:w-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
                 isActive
-                  ? 'bg-background text-foreground shadow w-full sm:w-auto'
-                  : 'hover:bg-background/50 hover:text-foreground w-full sm:w-auto'
-              } ${value === 'servicio-tecnico' ? 'col-span-3 sm:col-span-1' : ''}`}
+                  ? 'bg-background text-foreground shadow'
+                  : 'hover:bg-background/50 hover:text-foreground'
+              }`}
             >
               <Icon className="h-4 w-4" aria-hidden="true" />
               <span className="hidden sm:inline">{label}</span>
@@ -1596,7 +1606,7 @@ export function ReportesPage() {
             </>
           ) : null}
 
-          {tabPrincipal === 'servicio-tecnico' ? (
+          {hasRTReports && tabPrincipal === 'servicio-tecnico' ? (
             <div className="space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">

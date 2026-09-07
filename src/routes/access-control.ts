@@ -1,4 +1,8 @@
 import type { AuthPermission, AuthRole, AuthSession } from '@/types/auth'
+import {
+  isFeatureEnabled,
+  MODULE_CODE_TO_FEATURE,
+} from '@/config/features'
 
 export type RouteAccess = {
   requiresAuth?: boolean
@@ -102,7 +106,11 @@ export function evaluateRouteAccess(
 
   if (access.moduleCode && session) {
     if (!hasEnabledModule(session, access.moduleCode)) {
-      return { allowed: false, reason: 'module-not-enabled' }
+      return { allowed: false, reason: 'module-not-enabled' as const }
+    }
+    const featureKey = MODULE_CODE_TO_FEATURE[access.moduleCode]
+    if (featureKey && !isFeatureEnabled(featureKey, session)) {
+      return { allowed: false, reason: 'module-not-enabled' as const }
     }
   }
 

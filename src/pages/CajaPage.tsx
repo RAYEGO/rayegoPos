@@ -70,6 +70,7 @@ import {
 } from '@/lib/payment-methods'
 import type { PaymentCategory } from '@/lib/payment-methods'
 import { useAuth } from '@/hooks/useAuth'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
@@ -178,6 +179,8 @@ export function CajaPage() {
   const navigate = useNavigate()
   const accessToken = session?.accessToken ?? ''
   const activeBranchName = session?.user.branchName ?? 'Sucursal activa'
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasOSTab = isFeatureEnabled('cashier_tab_os_payments')
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -194,6 +197,13 @@ export function CajaPage() {
   const [detailTab, setDetailTab] = useState<
     'resumen' | 'movimientos' | 'conciliacion' | 'historial' | 'pagos-os'
   >('resumen')
+
+  useEffect(() => {
+    setDetailTab((prev) => {
+      if (prev === 'pagos-os' && !hasOSTab) return 'resumen'
+      return prev
+    })
+  }, [hasOSTab])
 
   const [reconciliationPreview, setReconciliationPreview] =
     useState<CashReconciliationPreviewResponse | null>(null)
@@ -1003,15 +1013,17 @@ export function CajaPage() {
           </div>
 
           <Tabs value={detailTab} onValueChange={(value) => setDetailTab(value as any)} className="mt-6">
-            <TabsList className="grid w-full grid-cols-3 sm:w-fit sm:grid-cols-5">
+            <TabsList className={`grid w-full sm:w-fit ${hasOSTab ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
               <TabsTrigger value="resumen">Resumen</TabsTrigger>
               <TabsTrigger value="movimientos">Movimientos</TabsTrigger>
               <TabsTrigger value="conciliacion">Conciliación</TabsTrigger>
               <TabsTrigger value="historial">Historial</TabsTrigger>
-              <TabsTrigger value="pagos-os" className="gap-2">
-                <Wrench className="h-4 w-4" />
-                Pagos OS
-              </TabsTrigger>
+              {hasOSTab ? (
+                <TabsTrigger value="pagos-os" className="gap-2">
+                  <Wrench className="h-4 w-4" />
+                  Pagos OS
+                </TabsTrigger>
+              ) : null}
             </TabsList>
 
             <TabsContent value="resumen" className="space-y-4 pt-4">
@@ -1682,14 +1694,15 @@ export function CajaPage() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="pagos-os" className="space-y-4 pt-4">
-              <AuthorizationGate
-                permission="pagosOrdenServicio.write"
-                fallback={
-                  <Card>
-                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      No tienes permiso para ver los pagos de órdenes de servicio.
-                    </CardContent>
+            {hasOSTab ? (
+              <TabsContent value="pagos-os" className="space-y-4 pt-4">
+                <AuthorizationGate
+                  permission="pagosOrdenServicio.write"
+                  fallback={
+                    <Card>
+                      <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                        No tienes permiso para ver los pagos de órdenes de servicio.
+                      </CardContent>
                   </Card>
                 }
               >
@@ -1802,6 +1815,7 @@ export function CajaPage() {
                 </>
               </AuthorizationGate>
             </TabsContent>
+            ) : null}
           </Tabs>
         </Card>
       ) : null}
