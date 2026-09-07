@@ -84,26 +84,6 @@ export function DashboardPage() {
 
   const isPlatformAdmin = hasRole('ADMIN_POS')
 
-  const filteredPlatformStats: PlatformStats = useMemo(() => {
-    const base = PLATFORM_STATS
-    const tiposEmpresa = hasSTCard
-      ? base.tiposEmpresa
-      : base.tiposEmpresa.filter((t) => t.codigo !== 'SERVICIO_TECNICO')
-    const recentActivity = hasSTCard
-      ? base.recentActivity
-      : base.recentActivity.filter(
-          (r) =>
-            !/SERVICIO_TECNICO|RayegoTech|Servicio Técnico|Electro Servicios|Técnico|Jefe de Servicios/i.test(
-              `${r.title} ${r.subtitle}`,
-            ),
-        )
-    return {
-      ...base,
-      tiposEmpresa,
-      recentActivity,
-    }
-  }, [hasSTCard])
-
   const [dashboard, setDashboard] = useState<DashboardOverviewResponse>(defaultDashboard)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -277,6 +257,27 @@ const PLATFORM_STATS: PlatformStats = {
 
 function PlatformAdminDashboardContent() {
   const navigate = useNavigate()
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasSTCard = isFeatureEnabled('dashboard_card_technical_service')
+  const filteredPlatformStats: PlatformStats = useMemo(() => {
+    const base = PLATFORM_STATS
+    const tiposEmpresa = hasSTCard
+      ? base.tiposEmpresa
+      : base.tiposEmpresa.filter((t: PlatformStatsTipoEmpresa) => t.codigo !== 'SERVICIO_TECNICO')
+    const recentActivity = hasSTCard
+      ? base.recentActivity
+      : base.recentActivity.filter(
+          (r: PlatformStatsActivity) =>
+            !/SERVICIO_TECNICO|RayegoTech|Servicio Técnico|Electro Servicios|Técnico|Jefe de Servicios/i.test(
+              `${r.title} ${r.subtitle}`,
+            ),
+        )
+    return {
+      ...base,
+      tiposEmpresa,
+      recentActivity,
+    }
+  }, [hasSTCard])
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
