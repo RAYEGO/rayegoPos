@@ -541,8 +541,9 @@ export function InventarioPage() {
   const resolvedInitialTab: InventoryTab = useMemo<InventoryTab>(() => {
     const t = initialTab
     if (t && (INVENTORY_TABS as readonly string[]).includes(t)) {
-      if (t !== 'consumo-rt') return t
-      if (hasConsumoRTTab) return 'consumo-rt'
+      const tValid = t as InventoryTab
+      if (tValid !== 'consumo-rt') return tValid
+      if (hasConsumoRTTab) return tValid
     }
     return 'lotes'
   }, [initialTab, hasConsumoRTTab])

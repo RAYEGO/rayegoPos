@@ -617,12 +617,12 @@ export function VentasPage() {
           },
         ],
       })
-      setShowSaleObservations(false)
+      setShowSaleObservaciones(false)
       setExpandedPaymentNotes({})
     } else {
       const savedObs = checkoutForm.getValues('observaciones') ?? ''
       const savedPays = checkoutForm.getValues('payments') ?? []
-      setShowSaleObservations(Boolean(savedObs))
+      setShowSaleObservaciones(Boolean(savedObs))
       const next: Record<number, boolean> = {}
       savedPays.forEach((p, i) => {
         if (p?.observaciones) next[i] = true
@@ -1326,7 +1326,7 @@ export function VentasPage() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => setShowSaleObservations(true)}
+                        onClick={() => setShowSaleObservaciones(true)}
                         className="gap-1.5 h-8"
                       >
                         <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -1390,7 +1390,7 @@ export function VentasPage() {
                               size="sm"
                               onClick={() => {
                                 checkoutForm.setValue('observaciones', '', { shouldDirty: false })
-                                setShowSaleObservations(false)
+                                setShowSaleObservaciones(false)
                               }}
                               className="h-7 px-2 text-xs"
                             >
