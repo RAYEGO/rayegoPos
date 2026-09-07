@@ -1648,7 +1648,7 @@ export function ClientesPage() {
                           render={({ field }) => (
                             <Select value={field.value} onValueChange={field.onChange}>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecciona un tipo" />
+                                <SelectValue placeholder="Seleccionar" />
                               </SelectTrigger>
                               <SelectContent>
                                 {dashboard.options.tiposPersona.map((item) => (
@@ -1671,7 +1671,7 @@ export function ClientesPage() {
                           render={({ field }) => (
                             <Select value={field.value} onValueChange={field.onChange}>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecciona un documento" />
+                                <SelectValue placeholder="Seleccionar" />
                               </SelectTrigger>
                               <SelectContent>
                                 {dashboard.options.tiposDocumento.map((item) => (

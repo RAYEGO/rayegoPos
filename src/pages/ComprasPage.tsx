@@ -2300,7 +2300,7 @@ export function ComprasPage() {
                       render={({ field }) => (
                         <Select value={field.value || undefined} onValueChange={field.onChange}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Selecciona proveedor" />
+                            <SelectValue placeholder="Seleccionar" />
                           </SelectTrigger>
                           <SelectContent>
                             {options.suppliers.map((supplier) => (
@@ -2635,7 +2635,7 @@ export function ComprasPage() {
                                   }}
                                 >
                                   <SelectTrigger>
-                                    <SelectValue placeholder="Selecciona presentación" />
+                                    <SelectValue placeholder="Seleccionar" />
                                   </SelectTrigger>
                                   <SelectContent>
                                     {presentations.map((pres) => (
@@ -4344,7 +4344,7 @@ export function ComprasPage() {
                     render={({ field }) => (
                       <Select value={field.value} onValueChange={field.onChange}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Selecciona un motivo" />
+                          <SelectValue placeholder="Seleccionar" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Fondo adicional">Fondo adicional</SelectItem>
