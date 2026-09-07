@@ -1444,13 +1444,16 @@ export function VentasPage() {
                           className="grid gap-3 rounded-2xl border p-3 sm:p-4 md:grid-cols-2 lg:grid-cols-[1.25fr_0.9fr_1fr_auto]"
                         >
                           <div className="space-y-1.5">
-                            <label className="text-sm font-medium">Medio de pago</label>
+                            <label className="text-sm font-medium">
+                              Medio de pago
+                              <span className="ml-1 text-rose-600">*</span>
+                            </label>
                             <FormPaymentMethodTwoLevelSelect
                               control={checkoutForm.control}
                               name={`payments.${index}.formaPagoId`}
                               methods={options.paymentMethods}
-                              label={undefined as any}
-                              placeholderCategory="Selecciona medio de pago"
+                              hideInternalLabel
+                              placeholderCategory="Seleccionar"
                               placeholderSubmethod="Selecciona tipo"
                               id={`sale-payment-${index}`}
                               required
