@@ -1388,16 +1388,22 @@ export function VentasPage() {
                           key={field.id}
                           className="grid gap-4 rounded-2xl border p-4 md:grid-cols-2 xl:grid-cols-[1.4fr_0.8fr_1fr_auto]"
                         >
-                          <FormPaymentMethodTwoLevelSelect
-                            control={checkoutForm.control}
-                            name={`payments.${index}.formaPagoId`}
-                            methods={options.paymentMethods}
-                            label="Medio de pago"
-                            placeholderCategory="Selecciona medio de pago"
-                            placeholderSubmethod="Selecciona tipo"
-                            id={`sale-payment-${index}`}
-                            required
-                          />
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium">
+                              Medio de pago
+                              <span className="ml-1 text-rose-600">*</span>
+                            </label>
+                            <FormPaymentMethodTwoLevelSelect
+                              control={checkoutForm.control}
+                              name={`payments.${index}.formaPagoId`}
+                              methods={options.paymentMethods}
+                              hideInternalLabel
+                              placeholderCategory="Seleccionar"
+                              placeholderSubmethod="Selecciona tipo"
+                              id={`sale-payment-${index}`}
+                              required
+                            />
+                          </div>
 
                           <div className="space-y-2">
                             <label className="text-sm font-medium">Monto</label>

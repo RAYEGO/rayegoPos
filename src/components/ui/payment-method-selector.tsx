@@ -28,6 +28,7 @@ export type PaymentMethodSelectProps<T extends PaymentMethodOption> = {
   id?: string
   error?: string
   submethodLabel?: string
+  hideInternalLabel?: boolean
 }
 
 export function PaymentMethodTwoLevelSelect<T extends PaymentMethodOption>(
@@ -46,6 +47,7 @@ export function PaymentMethodTwoLevelSelect<T extends PaymentMethodOption>(
     id,
     error,
     submethodLabel = 'Medio digital',
+    hideInternalLabel = false,
   } = props
 
   const groups = React.useMemo(() => buildPaymentCategoryGroups(methods), [methods])
@@ -104,14 +106,16 @@ export function PaymentMethodTwoLevelSelect<T extends PaymentMethodOption>(
 
   return (
     <div className={cn('space-y-4', className)}>
-      <div className="space-y-2">
-        <label
-          htmlFor={id ? `${id}-category` : undefined}
-          className="text-sm font-medium"
-        >
-          {label}
-          {required && <span className="ml-1 text-rose-600">*</span>}
-        </label>
+      <div className={cn(hideInternalLabel ? 'space-y-0' : 'space-y-2')}>
+        {!hideInternalLabel && (
+          <label
+            htmlFor={id ? `${id}-category` : undefined}
+            className="text-sm font-medium"
+          >
+            {label}
+            {required && <span className="ml-1 text-rose-600">*</span>}
+          </label>
+        )}
         <Select
           value={categoryValue}
           onValueChange={handleCategoryChange}
@@ -186,6 +190,7 @@ type FormPaymentMethodProps<
   className?: string
   id?: string
   submethodLabel?: string
+  hideInternalLabel?: boolean
 }
 
 export function FormPaymentMethodTwoLevelSelect<
@@ -204,6 +209,7 @@ export function FormPaymentMethodTwoLevelSelect<
     className,
     id,
     submethodLabel,
+    hideInternalLabel,
   } = props
 
   return (
@@ -223,6 +229,7 @@ export function FormPaymentMethodTwoLevelSelect<
           className={className}
           id={id}
           submethodLabel={submethodLabel}
+          hideInternalLabel={hideInternalLabel}
           error={fieldState.error?.message}
         />
       )}
