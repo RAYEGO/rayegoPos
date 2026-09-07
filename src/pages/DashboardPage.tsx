@@ -79,8 +79,6 @@ export function DashboardPage() {
   const { hasRole } = useAuthorization()
   const accessToken = session?.accessToken ?? ''
   const navigate = useNavigate()
-  const { isFeatureEnabled } = useBusinessFeatures()
-  const hasSTCard = isFeatureEnabled('dashboard_card_technical_service')
 
   const isPlatformAdmin = hasRole('ADMIN_POS')
 
