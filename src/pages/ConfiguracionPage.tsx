@@ -2722,9 +2722,11 @@ export function ConfiguracionPage() {
             </SidePanelContent>
           </SidePanel>
         </TabsContent>
+        ) : null}
 
-        <TabsContent value="rt-general" className="space-y-4 pt-4">
-          <AuthorizationGate permission="configuracion.read">
+        {hasRTGeneralTab ? (
+          <TabsContent value="rt-general" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
             <Card>
               <CardHeader>
                 <CardTitle>Configuración General · Servicio Técnico</CardTitle>
@@ -2771,6 +2773,7 @@ export function ConfiguracionPage() {
             </Card>
           </AuthorizationGate>
         </TabsContent>
+        ) : null}
 
         <TabsContent value="entorno" className="space-y-4 pt-4">
           <Card>
@@ -2877,10 +2880,8 @@ export function ConfiguracionPage() {
             </CardContent>
           </Card>
           </TabsContent>
-        ) : null}
 
-        {hasRTGeneralTab ? (
-          <TabsContent value="rt-general" className="space-y-4 pt-4">
+        <TabsContent value="inventario" className="space-y-4 pt-4">
             <AuthorizationGate permission="configuracion.read">
             <Card>
               <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -3177,7 +3178,6 @@ export function ConfiguracionPage() {
         </Card>
           </AuthorizationGate>
           </TabsContent>
-        ) : null}
 
         <TabsContent value="herramientas" className="space-y-4 pt-4">
           <Card>
