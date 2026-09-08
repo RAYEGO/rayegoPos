@@ -13,6 +13,7 @@ export type AuthPermission =
   | 'dashboard.read'
   | 'ventas.read'
   | 'productos.read'
+  | 'productos.manage'
   | 'compras.read'
   | 'inventario.read'
   | 'clientes.read'
@@ -29,6 +30,18 @@ export type AuthPermission =
   | 'empresas.read'
   | 'empresas.manage'
   | 'administradores.manage'
+  // ==================== SERVICIO TÉCNICO (RayegoTech) ====================
+  | 'ordenesServicio.read'
+  | 'ordenesServicio.write'
+  | 'ordenesServicio.cambioEstado'
+  | 'tecnicos.read'
+  | 'tecnicos.write'
+  | 'equiposCliente.read'
+  | 'equiposCliente.write'
+  | 'presupuestosOrdenServicio.write'
+  | 'pagosOrdenServicio.write'
+  | 'consumoInventarioRT.write'
+  | 'garantiasOrdenServicio.read'
 
 export type AuthUser = {
   id: string

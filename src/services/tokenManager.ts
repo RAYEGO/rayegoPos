@@ -1,4 +1,8 @@
 import { AUTH_STORAGE_KEY } from '@/config/auth'
+import {
+  AUTH_SESSION_CLEARED_EVENT,
+  AUTH_SESSION_UPDATED_EVENT,
+} from '@/config/auth'
 import type { AuthSession } from '@/types/auth'
 import {
   decodeJwtPayload,
@@ -44,6 +48,24 @@ export function setSessionStorageTarget(session: AuthSession, target: SessionWri
   storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
 }
 
+function broadcastAuthSessionCleared() {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT))
+  } catch {
+    /* ignore */
+  }
+}
+
+function broadcastAuthSessionUpdated() {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_SESSION_UPDATED_EVENT))
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function performTokenRefresh(): Promise<RefreshResult> {
   if (refreshPromise) return refreshPromise
 
@@ -63,6 +85,7 @@ export async function performTokenRefresh(): Promise<RefreshResult> {
       const decoded = decodeJwtPayload(refreshToken)
       if (!isRefreshTokenValid(refreshToken)) {
         clearSessionFromStorage()
+        broadcastAuthSessionCleared()
         return {
           ok: false,
           code: 'REFRESH_INVALID',
@@ -82,6 +105,7 @@ export async function performTokenRefresh(): Promise<RefreshResult> {
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
           clearSessionFromStorage()
+          broadcastAuthSessionCleared()
         }
         return {
           ok: false,
@@ -99,6 +123,7 @@ export async function performTokenRefresh(): Promise<RefreshResult> {
       }
 
       writeSessionToStorage(res.data)
+      broadcastAuthSessionUpdated()
       return { ok: true, session: res.data }
     } catch {
       return {
@@ -120,8 +145,10 @@ export function peekStoredSession(): AuthSession | null {
 
 export function overwriteStoredSession(session: AuthSession): void {
   writeSessionToStorage(session)
+  broadcastAuthSessionUpdated()
 }
 
 export function clearAllSessionStorage(): void {
   clearSessionFromStorage()
+  broadcastAuthSessionCleared()
 }

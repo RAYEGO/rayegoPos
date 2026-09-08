@@ -42,12 +42,35 @@ export function ReceiptViewer({ receipt, className }: ReceiptViewerProps) {
         .join(' ')}
     >
       <div className="space-y-1 text-center">
+        {receipt.company.logoUrl ? (
+          <img
+            src={receipt.company.logoUrl}
+            alt="Logo de la empresa"
+            title="Logo de la empresa"
+            onError={(event) => {
+              const el = event.currentTarget as HTMLImageElement
+              const parent = el.parentElement
+              void parent
+              el.style.display = 'none'
+            }}
+            style={{
+              display: 'block',
+              height: 'auto',
+              width: 'auto',
+              maxHeight: 28,
+              maxWidth: '60mm',
+              objectFit: 'contain',
+              margin: '0 auto 2px auto',
+            }}
+          />
+        ) : null}
         <p className="text-[12px] font-bold">
           {receipt.company.nombreComercial ?? receipt.company.razonSocial}
         </p>
         <p>RUC: {receipt.company.ruc}</p>
         {receipt.company.direccion ? <p>{receipt.company.direccion}</p> : null}
         {receipt.company.telefono ? <p>{receipt.company.telefono}</p> : null}
+        {receipt.company.email ? <p>{receipt.company.email}</p> : null}
         <p className="pt-1 font-semibold">{receipt.branch.nombre}</p>
         {receipt.branch.direccion ? <p>{receipt.branch.direccion}</p> : null}
       </div>

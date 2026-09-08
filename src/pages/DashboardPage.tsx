@@ -22,6 +22,7 @@ import {
 import { Loader } from '@/components/ui/loader'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { dashboardService } from '@/services/dashboardService'
@@ -201,12 +202,15 @@ export function DashboardPage() {
   )
 }
 
+type PlatformStatsTipoEmpresa = { codigo: string; nombre: string; color: string; empresasCount: number }
+type PlatformStatsActivity = { id: string; createdAt: string; title: string; subtitle: string; variant: 'info' | 'success' | 'warning' }
+
 type PlatformStats = {
   empresasRegistradas: number
   empresasActivas: number
   administradoresRegistrados: number
-  tiposEmpresa: { codigo: string; nombre: string; color: string; empresasCount: number }[]
-  recentActivity: { id: string; createdAt: string; title: string; subtitle: string; variant: 'info' | 'success' | 'warning' }[]
+  tiposEmpresa: PlatformStatsTipoEmpresa[]
+  recentActivity: PlatformStatsActivity[]
 }
 
 const PLATFORM_STATS: PlatformStats = {
@@ -251,6 +255,27 @@ const PLATFORM_STATS: PlatformStats = {
 
 function PlatformAdminDashboardContent() {
   const navigate = useNavigate()
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasSTCard = isFeatureEnabled('dashboard_card_technical_service')
+  const filteredPlatformStats: PlatformStats = useMemo(() => {
+    const base = PLATFORM_STATS
+    const tiposEmpresa = hasSTCard
+      ? base.tiposEmpresa
+      : base.tiposEmpresa.filter((t: PlatformStatsTipoEmpresa) => t.codigo !== 'SERVICIO_TECNICO')
+    const recentActivity = hasSTCard
+      ? base.recentActivity
+      : base.recentActivity.filter(
+          (r: PlatformStatsActivity) =>
+            !/SERVICIO_TECNICO|RayegoTech|Servicio Técnico|Electro Servicios|Técnico|Jefe de Servicios/i.test(
+              `${r.title} ${r.subtitle}`,
+            ),
+        )
+    return {
+      ...base,
+      tiposEmpresa,
+      recentActivity,
+    }
+  }, [hasSTCard])
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -263,7 +288,7 @@ function PlatformAdminDashboardContent() {
             <Building2 className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">{PLATFORM_STATS.empresasRegistradas}</p>
+            <p className="text-display text-foreground">{filteredPlatformStats.empresasRegistradas}</p>
             <Button
               type="button"
               variant="outline"
@@ -285,11 +310,11 @@ function PlatformAdminDashboardContent() {
             <Shield className="h-5 w-5 text-emerald-600" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">{PLATFORM_STATS.empresasActivas}</p>
+            <p className="text-display text-foreground">{filteredPlatformStats.empresasActivas}</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              {PLATFORM_STATS.empresasActivas === PLATFORM_STATS.empresasRegistradas
+              {filteredPlatformStats.empresasActivas === filteredPlatformStats.empresasRegistradas
                 ? 'Todas las empresas están activas.'
-                : `${PLATFORM_STATS.empresasRegistradas - PLATFORM_STATS.empresasActivas} inactiva(s).`}
+                : `${filteredPlatformStats.empresasRegistradas - filteredPlatformStats.empresasActivas} inactiva(s).`}
             </p>
           </CardContent>
         </Card>
@@ -303,7 +328,7 @@ function PlatformAdminDashboardContent() {
             <Users2 className="h-5 w-5 text-indigo-600" />
           </CardHeader>
           <CardContent>
-            <p className="text-display text-foreground">{PLATFORM_STATS.administradoresRegistrados}</p>
+            <p className="text-display text-foreground">{filteredPlatformStats.administradoresRegistrados}</p>
             <Button
               type="button"
               variant="outline"
@@ -326,7 +351,7 @@ function PlatformAdminDashboardContent() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {PLATFORM_STATS.tiposEmpresa.map((tipo) => (
+              {filteredPlatformStats.tiposEmpresa.map((tipo) => (
                 <Badge
                   key={tipo.codigo}
                   variant="outline"
@@ -359,7 +384,7 @@ function PlatformAdminDashboardContent() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 sm:grid-cols-2">
-            {PLATFORM_STATS.tiposEmpresa.map((tipo) => (
+            {filteredPlatformStats.tiposEmpresa.map((tipo) => (
               <div
                 key={tipo.codigo}
                 className="rounded-2xl border p-4"
@@ -396,7 +421,7 @@ function PlatformAdminDashboardContent() {
           <CardDescription>Cambios y eventos globales de la plataforma.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {PLATFORM_STATS.recentActivity.map((row) => (
+          {filteredPlatformStats.recentActivity.map((row) => (
             <div
               key={row.id}
               className="flex items-start justify-between gap-3 rounded-2xl border p-3"

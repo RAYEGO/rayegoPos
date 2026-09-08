@@ -160,23 +160,45 @@ export function PurchaseOrderDocument({ order, variant = 'external' }: Props) {
             <tr>
               <td style={{ verticalAlign: 'top', width: '55%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div
-                    style={{
-                      height: 36,
-                      width: 36,
-                      borderRadius: 8,
-                      background: 'linear-gradient(135deg,#0284c7,#4f46e5)',
-                      color: 'white',
-                      display: 'grid',
-                      placeItems: 'center',
-                      fontWeight: 700,
-                      letterSpacing: 0.5,
-                      fontSize: 13,
-                      flexShrink: 0,
-                    }}
-                  >
-                    RB
-                  </div>
+                  {order.company.logoUrl ? (
+                    <img
+                      src={order.company.logoUrl}
+                      alt="Logo de la empresa"
+                      title="Logo de la empresa"
+                      onError={(event) => {
+                        const el = event.currentTarget as HTMLImageElement
+                        el.style.display = 'none'
+                      }}
+                      style={{
+                        height: 48,
+                        width: 48,
+                        objectFit: 'contain',
+                        borderRadius: 8,
+                        border: '1px solid #e2e8f0',
+                        background: '#ffffff',
+                        padding: 4,
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        height: 48,
+                        width: 48,
+                        borderRadius: 8,
+                        background: 'linear-gradient(135deg,#0284c7,#4f46e5)',
+                        color: 'white',
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontWeight: 700,
+                        letterSpacing: 0.5,
+                        fontSize: 15,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {companyName ? companyName.trim().charAt(0).toUpperCase() : 'RB'}
+                    </div>
+                  )}
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.15, color: '#0f172a', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                       {companyName}
@@ -187,6 +209,8 @@ export function PurchaseOrderDocument({ order, variant = 'external' }: Props) {
                     <div style={{ fontSize: 9.5, color: '#64748b', marginTop: 2, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                       RUC {order.company.numeroDocumento}
                       {order.company.direccion ? ` · ${order.company.direccion}` : ''}
+                      {order.company.telefono ? ` · ${order.company.telefono}` : ''}
+                      {order.company.email ? ` · ${order.company.email}` : ''}
                     </div>
                   </div>
                 </div>

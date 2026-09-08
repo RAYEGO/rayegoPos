@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/config/auth'
+import { API_BASE_URL, AUTH_401_EVENT, AUTH_SESSION_CLEARED_EVENT } from '@/config/auth'
 import { authMockService } from '@/services/authMockService'
 import {
   clearAllSessionStorage,
@@ -6,6 +6,32 @@ import {
   peekStoredSession,
 } from '@/services/tokenManager'
 import { isAccessTokenValid } from '@/utils/jwt'
+
+function broadcastAuthSessionCleared(detail?: { endpoint?: string; viaRefresh?: boolean }) {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_SESSION_CLEARED_EVENT, { detail: detail ?? null }),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+function broadcastAuth401(detail: {
+  endpoint: string
+  status: number
+  message: string
+  refreshTried: boolean
+  refreshFailed: boolean
+}) {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_401_EVENT, { detail }))
+  } catch {
+    /* ignore */
+  }
+}
 
 type ApiRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -197,16 +223,45 @@ export async function apiRequest<T>(
           accessToken: refresh.session.accessToken,
           skipRefresh: true,
         })
-      } else if (refresh.code === 'REFRESH_INVALID') {
+      }
+      if (!refresh.ok && refresh.code === 'REFRESH_INVALID') {
         console.warn(
           `[API] Refresh token inválido/expirado en ${path}. Destruyendo sesión almacenada.`,
         )
         clearAllSessionStorage()
+        broadcastAuthSessionCleared({ endpoint: path, viaRefresh: true })
+        broadcastAuth401({
+          endpoint: path,
+          status: 401,
+          message: 'Tu sesión ha expirado. Inicia sesión nuevamente para continuar.',
+          refreshTried: true,
+          refreshFailed: true,
+        })
       }
     }
   }
 
   if (result.ok) return result.data
+
+  if (result.status === 401 && !options.skipAuth) {
+    const stored = peekStoredSession()
+    const triedRefresh =
+      !options.skipRefresh &&
+      Boolean(stored?.refreshToken) &&
+      (stored === null || !authMockService.isMockSession(stored))
+    const triedRefreshFailed = triedRefresh && stored !== null
+    broadcastAuth401({
+      endpoint: path,
+      status: 401,
+      message: result.errorMessage || 'Tu sesión ha expirado. Inicia sesión nuevamente para continuar.',
+      refreshTried: triedRefresh,
+      refreshFailed: triedRefreshFailed,
+    })
+    if (!triedRefresh && !options.skipRefresh) {
+      clearAllSessionStorage()
+      broadcastAuthSessionCleared({ endpoint: path, viaRefresh: false })
+    }
+  }
 
   if (result.status === 0) {
     throw new ApiNetworkError(result.errorMessage)

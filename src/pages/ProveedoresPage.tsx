@@ -5,7 +5,6 @@ import { z } from 'zod'
 import {
   ChevronDown,
   Edit,
-  History,
   Loader2,
   MoreVertical,
   Plus,
@@ -481,12 +480,6 @@ export function ProveedoresPage() {
                             {supplier.activo ? 'Desactivar' : 'Reactivar'}
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => toast.info('El historial del proveedor se integrará en el siguiente paso.')}
-                          >
-                            <History className="mr-2 h-4 w-4" />
-                            Historial
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
                             className="text-destructive"
                             onClick={() => openDeleteDialog(supplier)}
                           >
@@ -573,14 +566,6 @@ export function ProveedoresPage() {
                                   <DropdownMenuItem onClick={() => handleToggleStatus(supplier)}>
                                     <ShieldAlert className="mr-2 h-4 w-4" />
                                     {supplier.activo ? 'Desactivar' : 'Reactivar'}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() =>
-                                      toast.info('El historial del proveedor se integrará en el siguiente paso.')
-                                    }
-                                  >
-                                    <History className="mr-2 h-4 w-4" />
-                                    Historial
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     className="text-destructive"

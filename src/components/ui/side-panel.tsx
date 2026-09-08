@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 
 export type SidePanelProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
 export function SidePanel({ modal = false, ...props }: SidePanelProps) {
-  return <DialogPrimitive.Root modal={modal} {...props} />
+  return <DialogPrimitive.Root data-side-panel-root="true" modal={modal} {...props} />
 }
 
 export const SidePanelTrigger = DialogPrimitive.Trigger
@@ -34,15 +34,80 @@ export const SidePanelContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     showCloseButton?: boolean
   }
->(({ className, children, showCloseButton = false, ...props }, ref) => (
+>(({ className, children, showCloseButton = false, onPointerDownOutside, onEscapeKeyDown, ...props }, ref) => {
+  const selfRef = React.useRef<HTMLElement | null>(null)
+  const setRefs = React.useCallback(
+    (node: HTMLElement | null) => {
+      selfRef.current = node
+      if (typeof ref === 'function') {
+        ;(ref as any)(node)
+      } else if (ref) {
+        ;(ref as React.MutableRefObject<HTMLElement | null>).current = node
+      }
+    },
+    [ref],
+  )
+
+  const hasAnyOpenNestedDialog = React.useCallback(() => {
+    if (typeof document === 'undefined') return false
+    const self = selfRef.current
+    const candidateRoots = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-radix-dialog-root][data-state="open"], [role="dialog"][data-state="open"]',
+      ),
+    )
+    const container = document.body
+    for (const el of candidateRoots) {
+      if (!container.contains(el)) continue
+      if (el === self) continue
+      if (self && (self.contains(el) || el.contains(self))) {
+        if (el.contains(self)) continue
+      }
+      return true
+    }
+    return false
+  }, [])
+
+  const eventTargetLivesInTemporaryOverlay = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false
+    const portalAncestor = target.closest<HTMLElement>(
+      '[data-radix-popper-content-wrapper], [data-radix-dropdown-menu-content], [data-radix-tooltip-content], [data-radix-popover-content], [data-radix-hover-card-content]',
+    )
+    return Boolean(portalAncestor)
+  }
+
+  return (
   <SidePanelPortal>
     <SidePanelOverlay />
     <DialogPrimitive.Content
-      ref={ref}
+      ref={setRefs as any}
+      data-side-panel-content="true"
       className={cn(
         'fixed inset-y-0 right-0 z-[50] flex h-full w-full flex-col border-l bg-popover text-popover-foreground shadow-soft outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-[70vw] sm:max-w-[70vw] sm:rounded-l-2xl lg:w-[700px] lg:max-w-[700px]',
         className,
       )}
+      onPointerDownOutside={(event) => {
+        if (eventTargetLivesInTemporaryOverlay(event.target)) {
+          event.preventDefault()
+          return
+        }
+        if (hasAnyOpenNestedDialog()) {
+          event.preventDefault()
+          return
+        }
+        if (typeof onPointerDownOutside === 'function') onPointerDownOutside(event)
+      }}
+      onEscapeKeyDown={(event) => {
+        if (eventTargetLivesInTemporaryOverlay(document.activeElement)) {
+          event.preventDefault()
+          return
+        }
+        if (hasAnyOpenNestedDialog()) {
+          event.preventDefault()
+          return
+        }
+        if (typeof onEscapeKeyDown === 'function') onEscapeKeyDown(event)
+      }}
       onOpenAutoFocus={(event) => {
         const root = event.currentTarget as HTMLElement | null
         if (!root) return
@@ -114,6 +179,7 @@ export const SidePanelContent = React.forwardRef<
       ) : null}
     </DialogPrimitive.Content>
   </SidePanelPortal>
-))
+  )
+})
 
 SidePanelContent.displayName = 'SidePanelContent'

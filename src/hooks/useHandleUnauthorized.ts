@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { toast } from 'sonner'
+import { AUTH_401_EVENT } from '@/config/auth'
 import { authMockService } from '@/services/authMockService'
 import { authService } from '@/services/authService'
 import { useAuth } from '@/hooks/useAuth'
@@ -20,9 +21,28 @@ type HandleUnauthorizedFn = {
   ): Promise<{ handledAsMock: boolean; handledViaRefresh: boolean }>
 }
 
+function broadcastAuth401(payload: { endpoint: string; message: string; status: number }) {
+  if (typeof window === 'undefined') return
+  try {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_401_EVENT, {
+        detail: {
+          endpoint: payload.endpoint,
+          status: payload.status,
+          message: payload.message,
+          refreshTried: false,
+          refreshFailed: false,
+        },
+      }),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useHandleUnauthorized(page: string) {
-  const { logout, session } = useAuth()
-  const { markExpired, reportActivity } = useInactivityContext()
+  const { session } = useAuth()
+  const { reportActivity } = useInactivityContext()
 
   const volatile = useCallback(
     async (...args: unknown[]): Promise<{ handledAsMock: boolean; handledViaRefresh: boolean }> => {
@@ -96,23 +116,25 @@ export function useHandleUnauthorized(page: string) {
           return { handledAsMock: false, handledViaRefresh: false }
         }
         console.warn(
-          `[${page}] Refresh falló con code=${refresh.code} message="${refresh.message}". Se procede a logout.`,
+          `[${page}] Refresh falló con code=${refresh.code} message="${refresh.message}". Se dispara AUTH_401_EVENT para unificar el logout global.`,
         )
+        toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
+        broadcastAuth401({ endpoint, message: refresh.message || message, status })
+        return { handledAsMock: false, handledViaRefresh: false }
       }
 
-      const reason = `${page}.handleUnauthorized → ${endpoint} status=${status} message="${message}"`
-      console.warn(
-        `[${page}] Sesión inválida en ${endpoint} status=${status} message="${message}". Se dispara logout.`,
-      )
-      toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
-      markExpired({
-        reason: 'auth-401-unrecoverable',
-        message: reason,
-      })
-      await logout(reason)
+      if (status === 401) {
+        const reason = `${page}.handleUnauthorized → ${endpoint} status=${status} message="${message}"`
+        console.warn(
+          `[${page}] Sesión inválida en ${endpoint} status=${status} message="${message}". Se dispara AUTH_401_EVENT para logout global.`,
+        )
+        toast.error('Tu sesión ya no es válida. Ingresa nuevamente para continuar.')
+        broadcastAuth401({ endpoint, message: reason, status })
+      }
+
       return { handledAsMock: false, handledViaRefresh: false }
     },
-    [logout, markExpired, page, reportActivity, session],
+    [page, reportActivity, session],
   )
 
   const volatileRef = useRef(volatile)

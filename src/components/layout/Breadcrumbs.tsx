@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
-import { navItems } from '@/config/navigation'
+import { privateRoutes } from '@/routes/routeDefinitions'
 import { paths } from '@/routes/paths'
 import {
   Breadcrumb,
@@ -28,7 +28,11 @@ export function Breadcrumbs() {
       return [{ label: 'Login', href: paths.login, isCurrent: true }]
     }
 
-    const lookup = new Map(navItems.map((i) => [i.href, i.label]))
+    const lookup = new Map(
+      privateRoutes
+        .filter((r) => r.navLabel)
+        .map((r) => [r.path, r.navLabel!]),
+    )
     const currentLabel = lookup.get(normalized) ?? 'Sección'
 
     const rootLabel = lookup.get(paths.dashboard) ?? 'Dashboard'

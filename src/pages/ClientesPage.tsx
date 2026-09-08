@@ -4,12 +4,16 @@ import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   ChevronDown,
+  CreditCard,
   MoreVertical,
   Edit,
+  MonitorCog,
   Plus,
   Search,
+  ShieldCheck,
   ShieldAlert,
   Trash2,
+  Wrench,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +21,8 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
+  CardDescription,
+  CardTitle,
 } from '@/components/ui/card'
 import {
   Dialog,
@@ -48,10 +54,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { useAuth } from '@/hooks/useAuth'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { customersService } from '@/services/customersService'
+import { rtService } from '@/services/rtService'
 import type {
   CreateCustomerPayload,
   CustomerAccountStatementResponse,
@@ -61,6 +70,12 @@ import type {
   CustomersDashboardResponse,
   RegisterCustomerPaymentPayload,
 } from '@/types/customers'
+import type {
+  ClienteEquipo,
+  GarantiaOrden,
+  OrdenPago,
+  OrdenServicio,
+} from '@/types/rayegotech'
 import { toast } from 'sonner'
 import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
 import type { PaymentMethodOption } from '@/lib/payment-methods'
@@ -337,10 +352,34 @@ function FieldError({ message }: { message?: string }) {
 export function ClientesPage() {
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasEquiposTab = isFeatureEnabled('customers_tab_equipment')
+  const hasOrdenesRTTab = isFeatureEnabled('customers_tab_st_orders')
+  const hasPagosOSTab = isFeatureEnabled('customers_tab_os_payments')
+  const hasGarantiasTab = isFeatureEnabled('customers_tab_warranties')
 
-  const [activeTab, setActiveTab] = useState<'padron' | 'historial-compras' | 'estado-cuenta'>(
-    'padron',
-  )
+  const [activeTab, setActiveTab] = useState<
+    | 'padron'
+    | 'historial-compras'
+    | 'estado-cuenta'
+    | 'equipos-cliente'
+    | 'ordenes-rt'
+    | 'pagos-os'
+    | 'garantias'
+  >('padron')
+
+  useEffect(() => {
+    const tabIsAllowed: Record<typeof activeTab, boolean> = {
+      padron: true,
+      'historial-compras': true,
+      'estado-cuenta': true,
+      'equipos-cliente': hasEquiposTab,
+      'ordenes-rt': hasOrdenesRTTab,
+      'pagos-os': hasPagosOSTab,
+      garantias: hasGarantiasTab,
+    }
+    setActiveTab((prev) => (tabIsAllowed[prev] ? prev : 'padron'))
+  }, [hasEquiposTab, hasOrdenesRTTab, hasPagosOSTab, hasGarantiasTab])
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [customerSales, setCustomerSales] = useState<CustomerSalesResponse['sales']>([])
   const [customerSalesLoading, setCustomerSalesLoading] = useState(false)
@@ -365,6 +404,16 @@ export function ClientesPage() {
   const [isPaymentSubmitting, setIsPaymentSubmitting] = useState(false)
   const [paymentMethodResetKey, setPaymentMethodResetKey] = useState(0)
   const paymentAmountInputRef = useRef<HTMLInputElement | null>(null)
+
+  // ================ RayegoTech: tabs RT por cliente ================
+  const [equiposCliente, setEquiposCliente] = useState<ClienteEquipo[]>([])
+  const [equiposClienteLoading, setEquiposClienteLoading] = useState(false)
+  const [ordenesRT, setOrdenesRT] = useState<OrdenServicio[]>([])
+  const [ordenesRTLoading, setOrdenesRTLoading] = useState(false)
+  const [pagosOS, setPagosOS] = useState<OrdenPago[]>([])
+  const [pagosOSLoading, setPagosOSLoading] = useState(false)
+  const [garantiasRT, setGarantiasRT] = useState<GarantiaOrden[]>([])
+  const [garantiasRTLoading, setGarantiasRTLoading] = useState(false)
 
   const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerFormSchema),
@@ -495,12 +544,104 @@ export function ClientesPage() {
     [accessToken, handleUnauthorized],
   )
 
+  // ================ RayegoTech: loaders tabs RT por cliente ================
+  const loadEquiposCliente = useCallback(
+    async (clienteId: string) => {
+      if (!accessToken) return
+      try {
+        setEquiposClienteLoading(true)
+        const res = await rtService.listEquipos(clienteId)
+        setEquiposCliente(res.items || [])
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+        setEquiposCliente([])
+      } finally {
+        setEquiposClienteLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+  const loadOrdenesRT = useCallback(
+    async (clienteId: string) => {
+      if (!accessToken) return
+      try {
+        setOrdenesRTLoading(true)
+        const res = await rtService.listOrdenes({ clienteId })
+        setOrdenesRT(res.items || [])
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+        setOrdenesRT([])
+      } finally {
+        setOrdenesRTLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+  const loadPagosOS = useCallback(
+    async (clienteId: string) => {
+      setPagosOS([])
+      setPagosOSLoading(true)
+      try {
+        const ordenes = await rtService.listOrdenes({ clienteId })
+        const todos: OrdenPago[] = []
+        for (const o of ordenes.items || []) {
+          if (o.pagos && o.pagos.length > 0) todos.push(...o.pagos)
+        }
+        setPagosOS(todos)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+      } finally {
+        setPagosOSLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+  const loadGarantiasRT = useCallback(
+    async (clienteId: string) => {
+      setGarantiasRT([])
+      setGarantiasRTLoading(true)
+      try {
+        const ordenes = await rtService.listOrdenes({ clienteId })
+        const todas: GarantiaOrden[] = []
+        for (const o of ordenes.items || []) {
+          if (o.garantia) todas.push(o.garantia)
+        }
+        setGarantiasRT(todas)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+      } finally {
+        setGarantiasRTLoading(false)
+      }
+    },
+    [accessToken, handleUnauthorized],
+  )
+
   useEffect(() => {
     if (!selectedCustomerId) {
       setCustomerSales([])
       setCustomerSalesError(null)
       setAccountStatement(null)
       setAccountStatementError(null)
+      setEquiposCliente([])
+      setOrdenesRT([])
+      setPagosOS([])
+      setGarantiasRT([])
       return
     }
 
@@ -511,8 +652,37 @@ export function ClientesPage() {
 
     if (activeTab === 'estado-cuenta') {
       void loadAccountStatement(selectedCustomerId)
+      return
     }
-  }, [activeTab, loadAccountStatement, loadCustomerSales, selectedCustomerId])
+
+    if (activeTab === 'equipos-cliente') {
+      void loadEquiposCliente(selectedCustomerId)
+      return
+    }
+
+    if (activeTab === 'ordenes-rt') {
+      void loadOrdenesRT(selectedCustomerId)
+      return
+    }
+
+    if (activeTab === 'pagos-os') {
+      void loadPagosOS(selectedCustomerId)
+      return
+    }
+
+    if (activeTab === 'garantias') {
+      void loadGarantiasRT(selectedCustomerId)
+    }
+  }, [
+    activeTab,
+    loadAccountStatement,
+    loadCustomerSales,
+    loadEquiposCliente,
+    loadGarantiasRT,
+    loadOrdenesRT,
+    loadPagosOS,
+    selectedCustomerId,
+  ])
 
   function handleClearSelectedClient() {
     setSelectedCustomerId('')
@@ -520,6 +690,10 @@ export function ClientesPage() {
     setCustomerSalesError(null)
     setAccountStatement(null)
     setAccountStatementError(null)
+    setEquiposCliente([])
+    setOrdenesRT([])
+    setPagosOS([])
+    setGarantiasRT([])
     setIsPaymentDialogOpen(false)
     paymentForm.reset({
       monto: 0,
@@ -816,7 +990,7 @@ export function ClientesPage() {
       <Tabs
         value={activeTab}
         onValueChange={(value) =>
-          setActiveTab(value as 'padron' | 'historial-compras' | 'estado-cuenta')
+          setActiveTab(value as typeof activeTab)
         }
         className="w-full"
       >
@@ -825,6 +999,26 @@ export function ClientesPage() {
             <TabsTrigger value="padron">Padrón</TabsTrigger>
             <TabsTrigger value="historial-compras">Historial de compras</TabsTrigger>
             <TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
+            {hasEquiposTab ? (
+              <TabsTrigger value="equipos-cliente">
+                <MonitorCog className="mr-1 h-4 w-4" /> Equipos
+              </TabsTrigger>
+            ) : null}
+            {hasOrdenesRTTab ? (
+              <TabsTrigger value="ordenes-rt">
+                <Wrench className="mr-1 h-4 w-4" /> Órdenes ST
+              </TabsTrigger>
+            ) : null}
+            {hasPagosOSTab ? (
+              <TabsTrigger value="pagos-os">
+                <CreditCard className="mr-1 h-4 w-4" /> Pagos OS
+              </TabsTrigger>
+            ) : null}
+            {hasGarantiasTab ? (
+              <TabsTrigger value="garantias">
+                <ShieldCheck className="mr-1 h-4 w-4" /> Garantías
+              </TabsTrigger>
+            ) : null}
           </TabsList>
           <Button type="button" size="sm" onClick={openCreateDialog}>
             <Plus className="h-4 w-4 mr-1" />
@@ -903,22 +1097,6 @@ export function ClientesPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedCustomerId(customer.id)
-                              setActiveTab('historial-compras')
-                            }}
-                          >
-                            Historial de compras
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedCustomerId(customer.id)
-                              setActiveTab('estado-cuenta')
-                            }}
-                          >
-                            Estado de cuenta
-                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openEditDialog(customer)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar
@@ -1019,22 +1197,6 @@ export function ClientesPage() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedCustomerId(customer.id)
-                                      setActiveTab('historial-compras')
-                                    }}
-                                  >
-                                    Historial de compras
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedCustomerId(customer.id)
-                                      setActiveTab('estado-cuenta')
-                                    }}
-                                  >
-                                    Estado de cuenta
-                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => openEditDialog(customer)}>
                                     <Edit className="mr-2 h-4 w-4" />
                                     Editar
@@ -1380,7 +1542,434 @@ export function ClientesPage() {
             </>
           )}
         </TabsContent>
-      </Tabs>
+
+        {hasEquiposTab ? (
+          <TabsContent value="equipos-cliente" className="space-y-4 pt-4">
+            <AuthorizationGate permission="equiposCliente.read">
+            <Card className="p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <MonitorCog className="h-4 w-4 text-primary" /> Equipos del cliente
+                  </CardTitle>
+                  <CardDescription>
+                    Equipos registrados del cliente en el módulo Servicio Técnico.
+                  </CardDescription>
+                </div>
+                <CustomerAutocomplete
+                  customers={dashboard.customers}
+                  value={selectedCustomerId}
+                  onValueChange={(value) => setSelectedCustomerId(value)}
+                  placeholder="Seleccionar cliente"
+                />
+              </div>
+              {selectedCustomer ? (
+                <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground">Cliente</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                        {getCustomerDisplayName(selectedCustomer)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={handleClearSelectedClient}
+                    >
+                      <X className="h-4 w-4" />
+                      <span className="sr-only">Limpiar</span>
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+
+            {!selectedCustomer ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Usa el buscador superior o el padrón.
+                </p>
+              </div>
+            ) : equiposClienteLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : equiposCliente.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Sin equipos registrados</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Los equipos se pueden asociar desde la Orden de Servicio.
+                </p>
+              </div>
+            ) : (
+              <Card className="p-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Tipo equipo</TableHead>
+                      <TableHead>Marca / Modelo</TableHead>
+                      <TableHead>N° Serie</TableHead>
+                      <TableHead>Estado físico</TableHead>
+                      <TableHead>Garantía</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {equiposCliente.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell className="font-medium">
+                          {e.tipoEquipo?.nombre || (e as any).tipoEquipoNombre || '—'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-0.5">
+                            <p>{e.marca || '—'}</p>
+                            <p className="text-xs text-muted-foreground">{e.modelo || '—'}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{e.numeroSerie || '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{e.estadoFisico || '—'}</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {e.createdAt
+                            ? new Date(e.createdAt).toLocaleDateString('es-PE')
+                            : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            )}
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
+
+        {hasOrdenesRTTab ? (
+          <TabsContent value="ordenes-rt" className="space-y-4 pt-4">
+            <AuthorizationGate permission="ordenesServicio.read">
+            <Card className="p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Wrench className="h-4 w-4 text-primary" /> Órdenes de Servicio
+                  </CardTitle>
+                  <CardDescription>
+                    Historial de Órdenes de Servicio del cliente seleccionado.
+                  </CardDescription>
+                </div>
+                <CustomerAutocomplete
+                  customers={dashboard.customers}
+                  value={selectedCustomerId}
+                  onValueChange={(value) => setSelectedCustomerId(value)}
+                  placeholder="Seleccionar cliente"
+                />
+              </div>
+              {selectedCustomer ? (
+                <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground">Cliente</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                        {getCustomerDisplayName(selectedCustomer)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={handleClearSelectedClient}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+
+            {!selectedCustomer ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              </div>
+            ) : ordenesRTLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : ordenesRT.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Sin órdenes de servicio</p>
+              </div>
+            ) : (
+              <Card className="p-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>N° OS</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Equipo</TableHead>
+                      <TableHead>Técnico</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Fecha</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ordenesRT.map((o) => (
+                      <TableRow key={o.id}>
+                        <TableCell className="font-mono text-xs font-semibold text-primary">
+                          {o.numeroOrden}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              (o.estado as string) === 'ENTREGADO' || (o.estado as string) === 'CERRADO'
+                                ? 'success'
+                                : (o.estado as string) === 'CANCELADO' || (o.estado as string) === 'RECHAZADO' || (o.estado as string) === 'DEVUELTO'
+                                  ? 'destructive'
+                                  : (o.estado as string) === 'DIAGNOSTICO' || (o.estado as string) === 'PRESUPUESTO'
+                                    ? 'warning'
+                                    : (o.estado as string) === 'ESPERANDO_APROBACION'
+                                      ? 'info'
+                                      : 'default'
+                            }
+                          >
+                            {o.estado}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {o.clienteEquipo?.tipoEquipo?.nombre ||
+                            (o.clienteEquipo as any)?.tipoEquipoNombre ||
+                            '—'}
+                        </TableCell>
+                        <TableCell>
+                          {o.tecnicoAsignado?.usuario
+                            ? `${o.tecnicoAsignado.usuario.nombres} ${o.tecnicoAsignado.usuario.apellidos || ''}`.trim()
+                            : '—'}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          S/ {Number(o.total ?? 0).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {o.fechaRecepcion
+                            ? new Date(o.fechaRecepcion).toLocaleDateString('es-PE')
+                            : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            )}
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
+
+        {hasPagosOSTab ? (
+          <TabsContent value="pagos-os" className="space-y-4 pt-4">
+            <AuthorizationGate permission="pagosOrdenServicio.write">
+            <Card className="p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <CreditCard className="h-4 w-4 text-primary" /> Pagos · Órdenes Servicio
+                  </CardTitle>
+                  <CardDescription>
+                    Pagos asociados a Órdenes de Servicio del cliente seleccionado.
+                  </CardDescription>
+                </div>
+                <CustomerAutocomplete
+                  customers={dashboard.customers}
+                  value={selectedCustomerId}
+                  onValueChange={(value) => setSelectedCustomerId(value)}
+                  placeholder="Seleccionar cliente"
+                />
+              </div>
+              {selectedCustomer ? (
+                <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground">Cliente</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                        {getCustomerDisplayName(selectedCustomer)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={handleClearSelectedClient}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+
+            {!selectedCustomer ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              </div>
+            ) : pagosOSLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : pagosOS.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Sin pagos por Órdenes</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Los pagos de Órdenes de Servicio se registran en la misma OS.
+                </p>
+              </div>
+            ) : (
+              <Card className="p-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>N° OS</TableHead>
+                      <TableHead>Método</TableHead>
+                      <TableHead>Referencia</TableHead>
+                      <TableHead className="text-right">Monto</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagosOS.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {p.fechaPago
+                            ? new Date(p.fechaPago).toLocaleDateString('es-PE')
+                            : '—'}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs font-semibold text-primary">
+                          {(p as any).numeroOrden || '—'}
+                        </TableCell>
+                        <TableCell>{(p as any).formaPago?.nombre || p.formaPagoId || '—'}</TableCell>
+                        <TableCell>{p.referencia || '—'}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          S/ {Number(p.monto ?? 0).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            )}
+            </AuthorizationGate>
+          </TabsContent>
+        ) : null}
+
+        {hasGarantiasTab ? (
+          <TabsContent value="garantias" className="space-y-4 pt-4">
+            <AuthorizationGate permission="ordenesServicio.read">
+            <Card className="p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-end">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ShieldCheck className="h-4 w-4 text-primary" /> Garantías
+                  </CardTitle>
+                  <CardDescription>
+                    Garantías generadas al entregar Órdenes de Servicio del cliente.
+                  </CardDescription>
+                </div>
+                <CustomerAutocomplete
+                  customers={dashboard.customers}
+                  value={selectedCustomerId}
+                  onValueChange={(value) => setSelectedCustomerId(value)}
+                  placeholder="Seleccionar cliente"
+                />
+              </div>
+              {selectedCustomer ? (
+                <div className="mt-4 rounded-xl border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-muted-foreground">Cliente</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-foreground">
+                        {getCustomerDisplayName(selectedCustomer)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={handleClearSelectedClient}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </Card>
+
+            {!selectedCustomer ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Selecciona un cliente</p>
+              </div>
+            ) : garantiasRTLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader className="h-7 w-7" />
+              </div>
+            ) : garantiasRT.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-8 text-center">
+                <p className="text-sm font-medium text-foreground">Sin garantías activas</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Las garantías se generan al entregar una Orden de Servicio.
+                </p>
+              </div>
+            ) : (
+              <Card className="p-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>N° OS</TableHead>
+                      <TableHead>Inicio</TableHead>
+                      <TableHead>Vence</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Detalle</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {garantiasRT.map((g) => {
+                      const vence = g.fechaFin ? new Date(g.fechaFin) : null
+                      const hoy = new Date()
+                      const vencida = vence ? vence < hoy : false
+                      return (
+                        <TableRow key={g.id}>
+                          <TableCell className="font-mono text-xs font-semibold text-primary">
+                            {(g as any).numeroOrden || '—'}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {g.fechaInicio
+                              ? new Date(g.fechaInicio).toLocaleDateString('es-PE')
+                              : '—'}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {vence ? vence.toLocaleDateString('es-PE') : '—'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={vencida ? 'destructive' : 'success'}>
+                              {vencida ? 'Vencida' : g.estado || 'Vigente'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {g.terminos || '—'}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </Card>
+            )}
+          </AuthorizationGate>
+          </TabsContent>
+        ) : null}
+        </Tabs>
 
       <Dialog
         open={isPaymentDialogOpen}

@@ -153,7 +153,7 @@ export function VentaTicketPage() {
 
     try {
       const fileName = `ticket-${receipt.document.correlativo}.pdf`
-      const blob = createReceiptPdf(receipt)
+      const blob = await createReceiptPdf(receipt)
       const file = new File([blob], fileName, { type: 'application/pdf' })
 
       if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {

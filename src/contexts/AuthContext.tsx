@@ -6,7 +6,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { AUTH_STORAGE_KEY } from '@/config/auth'
+import {
+  AUTH_401_EVENT,
+  AUTH_SESSION_CLEARED_EVENT,
+  AUTH_SESSION_UPDATED_EVENT,
+  AUTH_STORAGE_KEY,
+} from '@/config/auth'
 import { AuthContext, type AuthContextValue } from '@/contexts/auth-context'
 import { authService } from '@/services/authService'
 import type {
@@ -94,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<AuthSession | null>(null)
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const sessionRef = useRef<AuthSession | null>(null)
+  const lastHandled401Ref = useRef<number>(0)
 
   const setSession = useCallback((next: AuthSession | null) => {
     sessionRef.current = next
@@ -102,6 +108,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return next
     })
   }, [])
+
+  const logoutRef = useRef<(reason?: string) => Promise<void>>(async () => {})
+
+  const logout = useCallback(async (reason?: string) => {
+    console.warn(
+      `[AUTH] logout INICIADO. Motivo: ${reason ?? 'sin motivo explícito'}. Sesión actual será destruida (accessToken=${session?.accessToken?.slice(0, 16) ?? 'ninguna'}...)`,
+    )
+    try {
+      await authService.logout(session)
+    } catch (error) {
+      console.warn('No se pudo confirmar el cierre de sesión en la API.', error)
+    } finally {
+      sessionRef.current = null
+      setSessionState(null)
+      clearStoredSession()
+      console.warn('[AUTH] logout COMPLETADO: session=null, storage limpiado.')
+    }
+  }, [session])
+
+  useEffect(() => {
+    logoutRef.current = logout
+  }, [logout])
 
   const syncSessionFromStorage = useCallback(() => {
     const stored = readStoredSession()
@@ -177,12 +205,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener('storage', onStorage)
 
+    const onSessionCleared = () => {
+      const prev = sessionRef.current
+      if (prev !== null) {
+        setSession(null)
+      }
+    }
+    window.addEventListener(AUTH_SESSION_CLEARED_EVENT, onSessionCleared)
+
+    const onSessionUpdated = () => {
+      syncSessionFromStorage()
+    }
+    window.addEventListener(AUTH_SESSION_UPDATED_EVENT, onSessionUpdated)
+
+    const onAuth401 = (event: Event) => {
+      const now = Date.now()
+      if (now - lastHandled401Ref.current < 2500) return
+      lastHandled401Ref.current = now
+      const detail = (event as CustomEvent).detail
+      const message =
+        detail && typeof detail === 'object' && typeof (detail as any).message === 'string'
+          ? (detail as any).message as string
+          : 'Tu sesión ha expirado. Inicia sesión nuevamente para continuar.'
+      const prev = sessionRef.current
+      if (prev !== null) {
+        void logoutRef.current(message).catch(() => {})
+      } else {
+        clearStoredSession()
+        setSession(null)
+      }
+    }
+    window.addEventListener(AUTH_401_EVENT, onAuth401)
+
     const interval = window.setInterval(() => {
       syncSessionFromStorage()
     }, 2000)
 
     return () => {
       window.removeEventListener('storage', onStorage)
+      window.removeEventListener(AUTH_SESSION_CLEARED_EVENT, onSessionCleared)
+      window.removeEventListener(AUTH_SESSION_UPDATED_EVENT, onSessionUpdated)
+      window.removeEventListener(AUTH_401_EVENT, onAuth401)
       window.clearInterval(interval)
     }
   }, [syncSessionFromStorage])
@@ -233,22 +296,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })(),
     )
   }, [setSession])
-
-  const logout = useCallback(async (reason?: string) => {
-    console.warn(
-      `[AUTH] logout INICIADO. Motivo: ${reason ?? 'sin motivo explícito'}. Sesión actual será destruida (accessToken=${session?.accessToken?.slice(0, 16) ?? 'ninguna'}...)`,
-    )
-    try {
-      await authService.logout(session)
-    } catch (error) {
-      console.warn('No se pudo confirmar el cierre de sesión en la API.', error)
-    } finally {
-      sessionRef.current = null
-      setSessionState(null)
-      clearStoredSession()
-      console.warn('[AUTH] logout COMPLETADO: session=null, storage limpiado.')
-    }
-  }, [session])
 
   const requestPasswordReset = useCallback(
     async (payload: ForgotPasswordPayload) => authService.requestPasswordReset(payload),

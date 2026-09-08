@@ -34,6 +34,68 @@ import {
   normalizeUnitSymbol,
 } from '@/utils/masterCatalog'
 
+function stripDiacritics(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+const UNIT_ABBREVIATION_DICTIONARY: Array<{ patterns: string[]; abbreviation: string }> = [
+  { patterns: ['unidad', 'unidade'], abbreviation: 'und' },
+  { patterns: ['caja'], abbreviation: 'cj' },
+  { patterns: ['blister', 'blíster', 'blisters'], abbreviation: 'bl' },
+  { patterns: ['tableta', 'tabletas'], abbreviation: 'tab' },
+  { patterns: ['capsula', 'cápsula', 'capsulas', 'cápsulas'], abbreviation: 'cap' },
+  { patterns: ['mililitro', 'mililitros'], abbreviation: 'ml' },
+  { patterns: ['gramo', 'gramos'], abbreviation: 'g' },
+  { patterns: ['kilogramo', 'kilogramos'], abbreviation: 'kg' },
+  { patterns: ['frasco', 'frascos'], abbreviation: 'fco' },
+  { patterns: ['paquete', 'paquetes'], abbreviation: 'paq' },
+  { patterns: ['pack', 'pck'], abbreviation: 'pack' },
+  { patterns: ['sobre', 'sobres'], abbreviation: 'sob' },
+  { patterns: ['ampolla', 'ampollas'], abbreviation: 'amp' },
+  { patterns: ['tubo', 'tubos'], abbreviation: 'tb' },
+  { patterns: ['jarabe'], abbreviation: 'jar' },
+  { patterns: ['crema'], abbreviation: 'crm' },
+  { patterns: ['pomada'], abbreviation: 'pom' },
+  { patterns: ['gotero', 'gotas'], abbreviation: 'got' },
+  { patterns: ['supositorio', 'supositorios'], abbreviation: 'sup' },
+  { patterns: ['cucharadita'], abbreviation: 'cdta' },
+  { patterns: ['cucharada'], abbreviation: 'cda' },
+  { patterns: ['libra', 'libras'], abbreviation: 'lb' },
+  { patterns: ['onza', 'onzas'], abbreviation: 'oz' },
+  { patterns: ['metro', 'metros'], abbreviation: 'm' },
+  { patterns: ['centimetro', 'centímetro', 'centimetros', 'centímetros'], abbreviation: 'cm' },
+  { patterns: ['milimetro', 'milímetro', 'milimetros', 'milímetros'], abbreviation: 'mm' },
+  { patterns: ['litro', 'litros'], abbreviation: 'l' },
+]
+
+function suggestUnitAbbreviation(name: string): string {
+  const clean = stripDiacritics(name).toLowerCase().trim()
+  if (!clean) return ''
+  for (const entry of UNIT_ABBREVIATION_DICTIONARY) {
+    if (entry.patterns.some((p) => clean === p || clean.startsWith(p + ' ') || clean.endsWith(' ' + p))) {
+      return entry.abbreviation
+    }
+  }
+  const prefixMatch = UNIT_ABBREVIATION_DICTIONARY.find((entry) => entry.patterns.some((p) => clean.startsWith(p)))
+  if (prefixMatch) return prefixMatch.abbreviation
+  const words = clean.split(/\s+/).filter(Boolean)
+  if (words.length >= 2) {
+    return words
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 6)
+  }
+  const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
+  const firstWord = words[0] ?? clean
+  const consonants: string[] = []
+  for (const ch of firstWord) {
+    if (!vowels.has(ch) && /[a-z]/.test(ch)) consonants.push(ch)
+  }
+  if (consonants.length >= 3) return consonants.slice(0, 3).join('')
+  if (consonants.length >= 2) return consonants.slice(0, 2).join('')
+  return firstWord.slice(0, 3)
+}
+
 type UnitRecord = {
   id: string
   code: string
@@ -270,6 +332,7 @@ function UnitForm({
   const symbolRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
   const openKeyRef = useRef(0)
+  const symbolEditedRef = useRef(false)
 
   const resolvedName = useMemo(() => {
     if (!selected) return ''
@@ -293,10 +356,17 @@ function UnitForm({
   useEffect(() => {
     if (!open) return
     openKeyRef.current += 1
+    symbolEditedRef.current = Boolean(selected && (mode === 'edit' || mode === 'duplicate'))
     setActive(selected?.active ?? true)
     setCodePreview(resolveUniqueCodePreview(resolvedName, existingCodes, selected?.code))
     setSymbolPreview(resolvedSymbol)
-  }, [open, resolvedDescription, resolvedName, resolvedSymbol, selected?.active, existingCodes, selected?.code])
+    if (!selected && mode === 'create' && resolvedName) {
+      const initial = suggestUnitAbbreviation(resolvedName)
+      if (initial) {
+        setSymbolPreview(initial)
+      }
+    }
+  }, [mode, open, resolvedDescription, resolvedName, resolvedSymbol, selected?.active, existingCodes, selected?.code, selected])
 
   const title =
     mode === 'edit' ? 'Editar unidad de medida' : mode === 'duplicate' ? 'Duplicar unidad de medida' : 'Nueva unidad de medida'
@@ -330,7 +400,13 @@ function UnitForm({
               key={`unit-name-${openKeyRef.current}`}
               ref={nameRef}
               defaultValue={resolvedName}
-              onInput={(e) => setCodePreview(resolveUniqueCodePreview(e.currentTarget.value, existingCodes, selected?.code))}
+              onInput={(e) => {
+                setCodePreview(resolveUniqueCodePreview(e.currentTarget.value, existingCodes, selected?.code))
+                if (!symbolEditedRef.current) {
+                  const next = suggestUnitAbbreviation(e.currentTarget.value)
+                  if (next) setSymbolPreview(next)
+                }
+              }}
             />
             <p className="text-xs text-muted-foreground">Código generado: {codePreview}</p>
           </div>
@@ -340,9 +416,12 @@ function UnitForm({
             <Input
               key={`unit-symbol-${openKeyRef.current}`}
               ref={symbolRef}
-              defaultValue={resolvedSymbol}
+              value={symbolPreview}
               placeholder="und / ml / g / tab"
-              onInput={(e) => setSymbolPreview(e.currentTarget.value)}
+              onInput={(e) => {
+                symbolEditedRef.current = true
+                setSymbolPreview(e.currentTarget.value)
+              }}
             />
             {isSymbolTaken ? (
               <p className="text-xs text-destructive">La abreviatura ya existe.</p>
@@ -359,7 +438,8 @@ function UnitForm({
               key={`unit-desc-${openKeyRef.current}`}
               ref={descriptionRef}
               defaultValue={resolvedDescription}
-              rows={3}
+              rows={2}
+              className="min-h-0 resize-y"
             />
           </div>
 

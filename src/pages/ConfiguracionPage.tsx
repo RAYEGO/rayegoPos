@@ -4,13 +4,19 @@ import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   Building2,
+  Database,
   Download,
+  GitBranch,
+  Globe2,
   ImageUp,
   MoreHorizontal,
+  Package,
   Plus,
   RefreshCcw,
+  Server,
   Trash2,
   Upload,
+  Wrench,
   X,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -39,20 +45,38 @@ import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/sid
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { AuthorizationGate } from '@/components/auth/AuthorizationGate'
 import { branchesService } from '@/services/branchesService'
 import { implementationService } from '@/services/implementationService'
 import { companyService } from '@/services/companyService'
 import { productsService } from '@/services/productsService'
+import { systemService, getEnvironmentBadge, type SystemEnvironment } from '@/services/systemService'
+import { rtService } from '@/services/rtService'
 import type { InitialInventoryLoadRow } from '@/types/implementation'
 import type { CreateProductPayload, ProductCatalogItem } from '@/types/products'
 import type { Branch } from '@/types/settings'
+import type { TipoEquipo, TipoServicio } from '@/types/rayegotech'
 import { formatImplementationMessage, IMPLEMENTATION_MESSAGES } from '@/modules/implementation/messages'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { toast } from 'sonner'
 import type { CompanyProfile, UpdateCompanyProfilePayload } from '@/types/company'
+import {
+  buildStockAlertRangeLabels,
+  DEFAULT_STOCK_ALERT_CONFIG,
+  evaluateStockLevel,
+  loadStockThresholdBranchConfig,
+  loadStockThresholdCompanyConfig,
+  saveStockThresholdBranchConfig,
+  saveStockThresholdCompanyConfig,
+  type StockThresholdConfig,
+  type StockThresholdConfigInput,
+  validateStockThresholdConfig,
+} from '@/lib/stockThresholds'
 
 function formatDateTime(value: string) {
   const date = new Date(value)
@@ -79,6 +103,28 @@ function getApiErrorMessage(error: unknown) {
   }
 
   return 'No fue posible completar la operación.'
+}
+
+function EnvironmentBadge({ mode }: { mode: SystemEnvironment['environment'] }) {
+  const badge = getEnvironmentBadge(mode)
+  const kindToStyles: Record<(typeof badge)['kind'], string> = {
+    dev: 'bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300',
+    prod: 'bg-rose-500/10 text-rose-700 ring-1 ring-rose-500/30 dark:text-rose-300',
+    other: 'bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300',
+    unknown: 'bg-muted text-muted-foreground ring-1 ring-muted',
+  }
+  const kindToDot: Record<(typeof badge)['kind'], string> = {
+    dev: 'bg-emerald-500',
+    prod: 'bg-rose-500',
+    other: 'bg-amber-500',
+    unknown: 'bg-muted-foreground',
+  }
+  return (
+    <Badge className={`gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${kindToStyles[badge.kind]}`}>
+      <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${kindToDot[badge.kind]}`} />
+      {badge.label}
+    </Badge>
+  )
 }
 
 function getLoadStatusVariant(status: string) {
@@ -288,10 +334,40 @@ export function ConfiguracionPage() {
   const accessToken = session?.accessToken ?? ''
   const branchName = session?.user.branchName ?? ''
   const canEditCompany = authorization.hasRole('ADMIN')
+  const { isFeatureEnabled } = useBusinessFeatures()
+  const hasEquiposTypesTab = isFeatureEnabled('config_tab_equipment_types')
+  const hasServiceTypesTab = isFeatureEnabled('config_tab_service_types')
+  const hasRTGeneralTab = isFeatureEnabled('config_section_technical_service')
 
   const [activeTab, setActiveTab] = useState<
-    'empresa' | 'sucursales' | 'comprobantes' | 'implementacion' | 'herramientas' | 'catalogos'
+    | 'empresa'
+    | 'sucursales'
+    | 'implementacion'
+    | 'entorno'
+    | 'inventario'
+    | 'herramientas'
+    | 'rt-tipos-equipo'
+    | 'rt-tipos-servicio'
+    | 'rt-general'
   >('empresa')
+
+  useEffect(() => {
+    const tabAllowed: Record<typeof activeTab, boolean> = {
+      empresa: true,
+      sucursales: true,
+      implementacion: true,
+      entorno: true,
+      inventario: true,
+      herramientas: true,
+      'rt-tipos-equipo': hasEquiposTypesTab,
+      'rt-tipos-servicio': hasServiceTypesTab,
+      'rt-general': hasRTGeneralTab,
+    }
+    setActiveTab((prev) => (tabAllowed[prev] ? prev : 'empresa'))
+  }, [hasEquiposTypesTab, hasServiceTypesTab, hasRTGeneralTab])
+  const [environment, setEnvironment] = useState<SystemEnvironment | null>(null)
+  const [isEnvironmentLoading, setIsEnvironmentLoading] = useState(false)
+  const [environmentError, setEnvironmentError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loads, setLoads] = useState<InitialInventoryLoadRow[]>([])
@@ -327,6 +403,54 @@ export function ConfiguracionPage() {
   const [isBranchPanelSubmitting, setIsBranchPanelSubmitting] = useState(false)
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
   const [isBranchesRefreshing, setIsBranchesRefreshing] = useState(false)
+
+  // ================ RayegoTech: estados tabs RT ================
+  const [tiposEquipo, setTiposEquipo] = useState<TipoEquipo[]>([])
+  const [tiposEquipoLoading, setTiposEquipoLoading] = useState(false)
+  const [isTipoEquipoPanelOpen, setIsTipoEquipoPanelOpen] = useState(false)
+  const [isTipoEquipoSaving, setIsTipoEquipoSaving] = useState(false)
+  const [nuevoTipoEquipo, setNuevoTipoEquipo] = useState({
+    nombre: '',
+    descripcion: '',
+    activo: true,
+  })
+
+  const [tiposServicio, setTiposServicio] = useState<TipoServicio[]>([])
+  const [tiposServicioLoading, setTiposServicioLoading] = useState(false)
+  const [isTipoServicioPanelOpen, setIsTipoServicioPanelOpen] = useState(false)
+  const [isTipoServicioSaving, setIsTipoServicioSaving] = useState(false)
+  const [nuevoTipoServicio, setNuevoTipoServicio] = useState({
+    nombre: '',
+    descripcion: '',
+    costoBase: 0,
+    activo: true,
+  })
+
+  const [garantiaDefaultDias, setGarantiaDefaultDias] = useState<number>(30)
+  const [garantiaGuardando] = useState(false)
+
+  const companyId = session?.user.companyId ?? null
+  const userBranchId = session?.user.branchId ?? null
+  const [stockAlertScope, setStockAlertScope] = useState<'company' | 'branch'>('company')
+  const [stockAlertBranchId, setStockAlertBranchId] = useState<string | null>(null)
+  const [stockAlertEnabled, setStockAlertEnabled] = useState(DEFAULT_STOCK_ALERT_CONFIG.enabled)
+  const [stockAlertCriticalMax, setStockAlertCriticalMax] = useState<number>(DEFAULT_STOCK_ALERT_CONFIG.criticalMax)
+  const [stockAlertLowMax, setStockAlertLowMax] = useState<number>(DEFAULT_STOCK_ALERT_CONFIG.lowMax)
+  const [stockAlertSavedConfig, setStockAlertSavedConfig] = useState<StockThresholdConfig | null>(null)
+  const [isStockAlertLoading, setIsStockAlertLoading] = useState(false)
+  const [isStockAlertSaving, setIsStockAlertSaving] = useState(false)
+  const [stockAlertDirty, setStockAlertDirty] = useState(false)
+
+  const stockAlertValidation = useMemo(() => {
+    const input: StockThresholdConfigInput = {
+      enabled: stockAlertEnabled,
+      criticalMax: stockAlertCriticalMax,
+      lowMax: stockAlertLowMax,
+    }
+    const validation = validateStockThresholdConfig(input)
+    const previewRanges = buildStockAlertRangeLabels(input)
+    return { input, validation, previewRanges }
+  }, [stockAlertEnabled, stockAlertCriticalMax, stockAlertLowMax])
 
   const csvInputRef = useRef<HTMLInputElement | null>(null)
   const catalogCsvInputRef = useRef<HTMLInputElement | null>(null)
@@ -467,11 +591,197 @@ export function ConfiguracionPage() {
     }
   }
 
+  async function loadEnvironment() {
+    if (!accessToken) return
+    setIsEnvironmentLoading(true)
+    setEnvironmentError(null)
+    try {
+      const env = await systemService.getEnvironment({ accessToken })
+      setEnvironment(env)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      setEnvironmentError(getApiErrorMessage(err))
+    } finally {
+      setIsEnvironmentLoading(false)
+    }
+  }
+
+  // ================ RayegoTech: catálogos RT ================
+  async function loadTiposEquipo() {
+    if (!accessToken) return
+    try {
+      setTiposEquipoLoading(true)
+      const res = await rtService.listTiposEquipo()
+      setTiposEquipo(res.items || [])
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+    } finally {
+      setTiposEquipoLoading(false)
+    }
+  }
+  async function guardarTipoEquipo() {
+    const nombre = nuevoTipoEquipo.nombre.trim()
+    if (!nombre) {
+      toast.error('Ingresa un nombre para el tipo de equipo.')
+      return
+    }
+    try {
+      setIsTipoEquipoSaving(true)
+      await rtService.createTipoEquipo({
+        nombre,
+        descripcion: nuevoTipoEquipo.descripcion.trim() || null,
+        activo: nuevoTipoEquipo.activo,
+      })
+      toast.success('Tipo de equipo creado.')
+      setNuevoTipoEquipo({ nombre: '', descripcion: '', activo: true })
+      setIsTipoEquipoPanelOpen(false)
+      await loadTiposEquipo()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsTipoEquipoSaving(false)
+    }
+  }
+
+  async function loadTiposServicio() {
+    if (!accessToken) return
+    try {
+      setTiposServicioLoading(true)
+      const res = await rtService.listTiposServicio()
+      setTiposServicio(res.items || [])
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      if (!(err instanceof ApiNetworkError) && !(err instanceof ApiError)) throw err
+    } finally {
+      setTiposServicioLoading(false)
+    }
+  }
+  async function guardarTipoServicio() {
+    const nombre = nuevoTipoServicio.nombre.trim()
+    if (!nombre) {
+      toast.error('Ingresa un nombre para el tipo de servicio.')
+      return
+    }
+    const costo = Number(nuevoTipoServicio.costoBase || 0)
+    if (costo < 0) {
+      toast.error('El costo base no puede ser negativo.')
+      return
+    }
+    try {
+      setIsTipoServicioSaving(true)
+      await rtService.createTipoServicio({
+        nombre,
+        descripcion: nuevoTipoServicio.descripcion.trim() || null,
+        costoBase: costo,
+        activo: nuevoTipoServicio.activo,
+      })
+      toast.success('Tipo de servicio creado.')
+      setNuevoTipoServicio({ nombre: '', descripcion: '', costoBase: 0, activo: true })
+      setIsTipoServicioPanelOpen(false)
+      await loadTiposServicio()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await handleUnauthorized()
+        return
+      }
+      toast.error(getApiErrorMessage(err))
+    } finally {
+      setIsTipoServicioSaving(false)
+    }
+  }
+
+  async function guardarConfigGarantia() {
+    const dias = Number(garantiaDefaultDias || 0)
+    if (!Number.isInteger(dias) || dias < 0) {
+      toast.error('Los días de garantía deben ser un número entero ≥ 0.')
+      return
+    }
+    toast.info(`Guardar ${dias} días garantía: endpoint /configuracion próximamente.`)
+  }
+
   useEffect(() => {
     void loadInitialInventoryLoads()
     void loadCompanyProfile()
     void loadBranches()
+    void loadEnvironment()
+    void loadTiposEquipo()
+    void loadTiposServicio()
   }, [accessToken])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setIsStockAlertLoading(true)
+      try {
+        const scopeId =
+          stockAlertScope === 'branch'
+            ? stockAlertBranchId ?? userBranchId
+            : null
+        const loaded =
+          stockAlertScope === 'branch' && scopeId
+            ? loadStockThresholdBranchConfig(scopeId, companyId)
+            : loadStockThresholdCompanyConfig(companyId)
+        if (cancelled) return
+        setStockAlertSavedConfig(loaded)
+        const base = loaded
+          ? { enabled: loaded.enabled, criticalMax: loaded.criticalMax, lowMax: loaded.lowMax }
+          : { ...DEFAULT_STOCK_ALERT_CONFIG }
+        setStockAlertEnabled(base.enabled)
+        setStockAlertCriticalMax(base.criticalMax)
+        setStockAlertLowMax(base.lowMax)
+        setStockAlertDirty(false)
+      } finally {
+        if (!cancelled) setIsStockAlertLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [stockAlertScope, stockAlertBranchId, companyId, userBranchId])
+
+  async function handleSaveStockAlertConfig() {
+    const validation = stockAlertValidation.validation
+    if (!validation.ok) {
+      if (validation.errors.criticalMax) toast.error(validation.errors.criticalMax)
+      if (validation.errors.lowMax) toast.error(validation.errors.lowMax)
+      return
+    }
+    setIsStockAlertSaving(true)
+    try {
+      const input = stockAlertValidation.input
+      const scopeId =
+        stockAlertScope === 'branch'
+          ? stockAlertBranchId ?? userBranchId
+          : null
+      const saved =
+        stockAlertScope === 'branch' && scopeId
+          ? saveStockThresholdBranchConfig(scopeId, input, companyId)
+          : saveStockThresholdCompanyConfig(input, companyId)
+      if (!saved) {
+        toast.error('No fue posible guardar la configuración.')
+        return
+      }
+      setStockAlertSavedConfig(saved)
+      setStockAlertDirty(false)
+      toast.success('Configuración de alertas guardada.')
+    } finally {
+      setIsStockAlertSaving(false)
+    }
+  }
 
   function openCreateBranchPanel() {
     setSelectedBranch(null)
@@ -1685,16 +1995,29 @@ export function ConfiguracionPage() {
         <TabsList>
           <TabsTrigger value="empresa">Empresa</TabsTrigger>
           <TabsTrigger value="sucursales">Sucursales</TabsTrigger>
-          <TabsTrigger value="comprobantes" disabled>
-            Comprobantes
-          </TabsTrigger>
           <TabsTrigger value="implementacion">Implementación</TabsTrigger>
+          <TabsTrigger value="entorno">Entorno</TabsTrigger>
+          <TabsTrigger value="inventario">
+            <Package className="mr-1 h-4 w-4" /> Inventario
+          </TabsTrigger>
           <TabsTrigger value="herramientas" disabled={!company || !isImplementationMode}>
             Herramientas del sistema
           </TabsTrigger>
-          <TabsTrigger value="catalogos" disabled>
-            Catálogos
-          </TabsTrigger>
+          {hasEquiposTypesTab ? (
+            <TabsTrigger value="rt-tipos-equipo">
+              <Wrench className="mr-1 h-4 w-4" /> Tipos de equipo
+            </TabsTrigger>
+          ) : null}
+          {hasServiceTypesTab ? (
+            <TabsTrigger value="rt-tipos-servicio">
+              <Wrench className="mr-1 h-4 w-4" /> Tipos de servicio
+            </TabsTrigger>
+          ) : null}
+          {hasRTGeneralTab ? (
+            <TabsTrigger value="rt-general">
+              <Wrench className="mr-1 h-4 w-4" /> Servicio Técnico
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="empresa" className="space-y-4 pt-4">
@@ -2123,39 +2446,738 @@ export function ConfiguracionPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="comprobantes" className="pt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Comprobantes</CardTitle>
-              <CardDescription>Disponible próximamente.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Esta sección se habilitará luego de cerrar Empresa y Sucursales.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+        {hasEquiposTypesTab ? (
+          <TabsContent value="rt-tipos-equipo" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Tipos de equipo</CardTitle>
+                    <CardDescription>
+                      Catálogo de equipos del Servicio Técnico (Celular, PC, Laptop, Impresora, Audio, etc.).
+                    </CardDescription>
+                  </div>
+                  <AuthorizationGate permission="ordenesServicio.write" fallback={null}>
+                    <Button
+                      size="xl"
+                      className="min-h-[48px]"
+                      onClick={() => {
+                        setNuevoTipoEquipo({ nombre: '', descripcion: '', activo: true })
+                        setIsTipoEquipoPanelOpen(true)
+                      }}
+                    >
+                      <Plus className="mr-2 h-5 w-5" /> Nuevo tipo de equipo
+                    </Button>
+                  </AuthorizationGate>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tiposEquipoLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader className="h-7 w-7" />
+                  </div>
+                ) : tiposEquipo.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-8 text-center">
+                    <p className="text-sm font-medium text-foreground">Sin tipos de equipo registrados</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Crea el primero desde el botón superior.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead>Estado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {tiposEquipo.map((t) => (
+                          <TableRow key={t.id}>
+                            <TableCell className="font-medium">{t.nombre}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {t.descripcion || '—'}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={t.activo ? 'success' : 'outline'}>
+                                {t.activo ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
 
-        <TabsContent value="catalogos" className="pt-4">
+          <SidePanel open={isTipoEquipoPanelOpen} onOpenChange={setIsTipoEquipoPanelOpen}>
+            <SidePanelContent>
+              <div className="flex flex-col gap-6 p-4 sm:p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Nuevo tipo de equipo</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Registra una categoría de equipo para el Servicio Técnico.
+                    </p>
+                  </div>
+                  <SidePanelClose asChild>
+                    <Button variant="ghost" size="icon-xl" className="rounded-xl">
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </SidePanelClose>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Nombre *</label>
+                    <Input
+                      className="h-12 text-base"
+                      placeholder="Ej: Celular"
+                      value={nuevoTipoEquipo.nombre}
+                      onChange={(e) => setNuevoTipoEquipo({ ...nuevoTipoEquipo, nombre: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Descripción</label>
+                    <Textarea
+                      className="min-h-[88px]"
+                      placeholder="Detalles opcionales sobre esta categoría"
+                      value={nuevoTipoEquipo.descripcion}
+                      onChange={(e) => setNuevoTipoEquipo({ ...nuevoTipoEquipo, descripcion: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex h-12 items-center justify-between rounded-xl border px-4">
+                    <span className="text-sm font-medium">Activo</span>
+                    <Switch
+                      checked={nuevoTipoEquipo.activo}
+                      onCheckedChange={(v) => setNuevoTipoEquipo({ ...nuevoTipoEquipo, activo: v })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <SidePanelClose asChild>
+                    <Button variant="secondary" size="xl" className="w-full sm:w-auto">
+                      Cancelar
+                    </Button>
+                  </SidePanelClose>
+                  <Button size="xl" className="w-full sm:w-auto" onClick={() => void guardarTipoEquipo()} disabled={isTipoEquipoSaving}>
+                    {isTipoEquipoSaving ? <Loader className="mr-2 h-5 w-5" /> : null} Guardar
+                  </Button>
+                </div>
+              </div>
+            </SidePanelContent>
+          </SidePanel>
+          </TabsContent>
+        ) : null}
+
+        {hasServiceTypesTab ? (
+          <TabsContent value="rt-tipos-servicio" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle>Tipos de servicio</CardTitle>
+                    <CardDescription>
+                      Catálogo de servicios del taller con costo base referencial.
+                    </CardDescription>
+                  </div>
+                  <AuthorizationGate permission="ordenesServicio.write" fallback={null}>
+                    <Button
+                      size="xl"
+                      className="min-h-[48px]"
+                      onClick={() => {
+                        setNuevoTipoServicio({ nombre: '', descripcion: '', costoBase: 0, activo: true })
+                        setIsTipoServicioPanelOpen(true)
+                      }}
+                    >
+                      <Plus className="mr-2 h-5 w-5" /> Nuevo tipo de servicio
+                    </Button>
+                  </AuthorizationGate>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {tiposServicioLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader className="h-7 w-7" />
+                  </div>
+                ) : tiposServicio.length === 0 ? (
+                  <div className="rounded-xl border border-dashed p-8 text-center">
+                    <p className="text-sm font-medium text-foreground">Sin tipos de servicio registrados</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Crea el primero desde el botón superior.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Nombre</TableHead>
+                          <TableHead>Descripción</TableHead>
+                          <TableHead className="text-right">Costo base</TableHead>
+                          <TableHead>Estado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {tiposServicio.map((t) => (
+                          <TableRow key={t.id}>
+                            <TableCell className="font-medium">{t.nombre}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {t.descripcion || '—'}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              S/ {Number(t.costoBase || 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={t.activo ? 'success' : 'outline'}>
+                                {t.activo ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
+
+          <SidePanel open={isTipoServicioPanelOpen} onOpenChange={setIsTipoServicioPanelOpen}>
+            <SidePanelContent>
+              <div className="flex flex-col gap-6 p-4 sm:p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Nuevo tipo de servicio</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Define un servicio con costo base referencial.
+                    </p>
+                  </div>
+                  <SidePanelClose asChild>
+                    <Button variant="ghost" size="icon-xl" className="rounded-xl">
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </SidePanelClose>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Nombre *</label>
+                    <Input
+                      className="h-12 text-base"
+                      placeholder="Ej: Diagnóstico"
+                      value={nuevoTipoServicio.nombre}
+                      onChange={(e) => setNuevoTipoServicio({ ...nuevoTipoServicio, nombre: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Descripción</label>
+                    <Textarea
+                      className="min-h-[88px]"
+                      placeholder="Detalle opcional del servicio"
+                      value={nuevoTipoServicio.descripcion}
+                      onChange={(e) => setNuevoTipoServicio({ ...nuevoTipoServicio, descripcion: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Costo base (S/) *</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="h-12 text-base"
+                      placeholder="0.00"
+                      value={nuevoTipoServicio.costoBase}
+                      onChange={(e) => setNuevoTipoServicio({ ...nuevoTipoServicio, costoBase: Number(e.target.value || 0) })}
+                    />
+                  </div>
+                  <div className="flex h-12 items-center justify-between rounded-xl border px-4">
+                    <span className="text-sm font-medium">Activo</span>
+                    <Switch
+                      checked={nuevoTipoServicio.activo}
+                      onCheckedChange={(v) => setNuevoTipoServicio({ ...nuevoTipoServicio, activo: v })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <SidePanelClose asChild>
+                    <Button variant="secondary" size="xl" className="w-full sm:w-auto">
+                      Cancelar
+                    </Button>
+                  </SidePanelClose>
+                  <Button size="xl" className="w-full sm:w-auto" onClick={() => void guardarTipoServicio()} disabled={isTipoServicioSaving}>
+                    {isTipoServicioSaving ? <Loader className="mr-2 h-5 w-5" /> : null} Guardar
+                  </Button>
+                </div>
+              </div>
+            </SidePanelContent>
+          </SidePanel>
+        </TabsContent>
+        ) : null}
+
+        {hasRTGeneralTab ? (
+          <TabsContent value="rt-general" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader>
+                <CardTitle>Configuración General · Servicio Técnico</CardTitle>
+                <CardDescription>
+                  Ajustes generales aplicados a Órdenes de Servicio y Garantías.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <AuthorizationGate permission="ordenesServicio.write">
+                  <div className="rounded-xl border p-4 sm:p-6">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-semibold">Días de garantía por defecto</label>
+                      <p className="text-xs text-muted-foreground">
+                        Garantía asignada automáticamente a las Órdenes de Servicio al marcar Entregada.
+                      </p>
+                      <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div className="w-full sm:max-w-[220px] space-y-2">
+                          <label className="text-xs text-muted-foreground">Número de días</label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            className="h-12 text-base"
+                            value={garantiaDefaultDias}
+                            onChange={(e) => setGarantiaDefaultDias(Number(e.target.value || 0))}
+                          />
+                        </div>
+                        <Button size="xl" className="min-h-[48px]" onClick={() => void guardarConfigGarantia()} disabled={garantiaGuardando}>
+                          {garantiaGuardando ? <Loader className="mr-2 h-5 w-5" /> : null} Guardar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </AuthorizationGate>
+
+                <div className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">Información del sistema</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-4">
+                    <li>Los cambios aquí se aplicarán a nivel sucursal para nuevas Órdenes de Servicio.</li>
+                    <li>La persistencia de configuración requiere endpoint <code className="rounded bg-muted px-1.5 py-0.5">/configuracion</code> (próximamente).</li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </AuthorizationGate>
+        </TabsContent>
+        ) : null}
+
+        <TabsContent value="entorno" className="space-y-4 pt-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Catálogos</CardTitle>
-              <CardDescription>Disponible próximamente.</CardDescription>
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Diagnóstico del entorno</CardTitle>
+                <CardDescription>
+                  Información segura del API y la base de datos a la que está conectado Rayego POS en este momento.
+                  Útil para evitar confundir entornos de desarrollo y producción.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadEnvironment()}
+                  disabled={isEnvironmentLoading}
+                >
+                  <RefreshCcw className={`mr-2 h-4 w-4 ${isEnvironmentLoading ? 'animate-spin' : ''}`} />
+                  {isEnvironmentLoading ? 'Actualizando…' : 'Actualizar'}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="rounded-xl border border-dashed p-8 text-center">
-                <p className="text-sm font-medium text-foreground">Disponible próximamente</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Esta sección se habilitará en una fase posterior.
-                </p>
-              </div>
+              {environmentError ? (
+                <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                  {environmentError}
+                </div>
+              ) : isEnvironmentLoading && !environment ? (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="rounded-xl border p-4">
+                      <div className="h-3 w-20 rounded bg-muted" />
+                      <div className="mt-3 h-5 w-40 rounded bg-muted" />
+                    </div>
+                  ))}
+                </div>
+              ) : environment ? (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Globe2 className="h-3.5 w-3.5" />
+                      Entorno
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <EnvironmentBadge mode={environment.environment} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Server className="h-3.5 w-3.5" />
+                      API
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">{environment.api}</div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Database className="h-3.5 w-3.5" />
+                      Base de datos
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">{environment.database}</div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <GitBranch className="h-3.5 w-3.5" />
+                      Rama
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-foreground">
+                      {environment.branch ? (
+                        <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-mono text-xs">
+                          {environment.branch}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border p-4 sm:col-span-2 lg:col-span-1">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <Database className="h-3.5 w-3.5" />
+                      Estado BD
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        className={`inline-block h-2.5 w-2.5 rounded-full ${environment.databaseConnected ? 'bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]' : 'bg-rose-500 shadow-[0_0_0_4px_rgba(244,63,94,0.12)] animate-pulse'}`}
+                      />
+                      <span className="text-sm font-semibold text-foreground">
+                        {environment.databaseConnected ? 'Conectada' : 'No conectada'}
+                      </span>
+                      {!environment.databaseConnected ? (
+                        <span className="text-xs text-muted-foreground">
+                          (revisa credenciales o conexión de Railway)
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
-        </TabsContent>
+          </TabsContent>
+
+        <TabsContent value="inventario" className="space-y-4 pt-4">
+            <AuthorizationGate permission="configuracion.read">
+            <Card>
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <CardTitle>Alertas de stock</CardTitle>
+                  <CardDescription>
+                    Define niveles de stock crítico y bajo para todo el POS. Los mismos límites se usan en
+                    Productos, Inventario, Dashboard, Alertas y Reportes.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {stockAlertSavedConfig?.updatedAt ? (
+                    <Badge variant="outline">
+                      Guardado {formatDateTime(stockAlertSavedConfig.updatedAt)}
+                    </Badge>
+                  ) : null}
+                  {stockAlertDirty ? <Badge variant="warning">Cambios sin guardar</Badge> : null}
+                  <Switch
+                    checked={stockAlertEnabled}
+                    onCheckedChange={(next) => {
+                      setStockAlertEnabled(next)
+                      setStockAlertDirty(true)
+                    }}
+                    aria-label="Activar alertas de stock"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-4 rounded-xl border bg-muted/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {stockAlertEnabled ? 'Alertas de stock activadas' : 'Alertas de stock desactivadas'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {stockAlertEnabled
+                        ? 'Se muestran colores y filtros de stock en todo el sistema.'
+                        : 'Todo stock se muestra como Normal sin resaltar alertas.'}
+                    </p>
+                  </div>
+                  <div className="grid gap-3 w-full sm:w-[340px]">
+                    <div className="space-y-1.5">
+                      <div className="space-y-0.5">
+                        <label className="text-xs font-medium text-foreground">Alcance</label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Define dónde se aplican estos niveles de alerta.
+                        </p>
+                      </div>
+                      <Select
+                        value={stockAlertScope}
+                        onValueChange={(next: 'company' | 'branch') => {
+                          setStockAlertScope(next)
+                          if (next === 'company') setStockAlertBranchId(null)
+                          else if (next === 'branch' && branches.at(0)) setStockAlertBranchId(branches[0].id)
+                        }}
+                        disabled={!canEditCompany}
+                      >
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Seleccionar alcance" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="company">Empresa (por defecto para todas las sucursales)</SelectItem>
+                          <SelectItem value="branch">Sucursal (personalizado)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {stockAlertScope === 'branch' ? (
+                      <div className="space-y-1.5">
+                        <div className="space-y-0.5">
+                          <label className="text-xs font-medium text-foreground">Sucursal</label>
+                          <p className="text-[11px] text-muted-foreground">
+                            Los límites se aplicarán solo a esta sucursal.
+                          </p>
+                        </div>
+                        <Select
+                          value={stockAlertBranchId ?? userBranchId ?? '__none'}
+                          onValueChange={(next) => setStockAlertBranchId(next === '__none' ? null : next)}
+                          disabled={!canEditCompany || branches.length === 0}
+                        >
+                          <SelectTrigger className="h-9 w-full">
+                            <SelectValue placeholder="Seleccionar sucursal" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {branches.map((b) => (
+                              <SelectItem key={b.id} value={b.id}>
+                                {b.codigo} · {b.nombre}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">🔴 Stock crítico (máx)</label>
+                  <span className="text-[11px] text-muted-foreground">
+                    Cantidad máxima considerada urgente
+                  </span>
+                </div>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={stockAlertCriticalMax}
+                  disabled={!canEditCompany || isStockAlertLoading}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '')
+                    const v = raw ? Math.max(0, Number(raw)) : 0
+                    setStockAlertCriticalMax(Number.isInteger(v) ? v : 0)
+                    setStockAlertDirty(true)
+                  }}
+                />
+                {stockAlertValidation.validation.ok ? null : (
+                  <p className="text-xs text-destructive">
+                    {stockAlertValidation.validation.errors?.criticalMax ?? stockAlertValidation.validation.errors?.lowMax}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">🟡 Stock bajo (máx)</label>
+                  <span className="text-[11px] text-muted-foreground">
+                    Cantidad máxima para reposición
+                  </span>
+                </div>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={stockAlertLowMax}
+                  disabled={!canEditCompany || isStockAlertLoading}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '')
+                    const v = raw ? Math.max(0, Number(raw)) : 0
+                    setStockAlertLowMax(Number.isInteger(v) ? v : 0)
+                    setStockAlertDirty(true)
+                  }}
+                />
+                {stockAlertValidation.validation.ok ? null : (
+                  <p className="text-xs text-destructive">
+                    {stockAlertValidation.validation.errors?.lowMax ?? stockAlertValidation.validation.errors?.criticalMax}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border p-4">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-foreground">Vista previa</p>
+                <p className="text-xs text-muted-foreground">
+                  Estos son los rangos y colores que se mostrarán en todo el POS para evaluar el stock.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-rose-50 dark:bg-rose-500/10">
+                  <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-rose-500"></span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🔴 Crítico</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rango {stockAlertValidation.previewRanges.critical?.label ?? '—'}
+                    </p>
+                    <p className="text-xs text-rose-700 dark:text-rose-300">
+                      requiere reposición urgente
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-amber-50 dark:bg-amber-500/10">
+                  <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500"></span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🟡 Bajo</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rango {stockAlertValidation.previewRanges.low?.label ?? '—'}
+                    </p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      considerar reposición
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-emerald-50 dark:bg-emerald-500/10">
+                  <span className="mt-1 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500"></span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">🟢 Normal</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rango {stockAlertValidation.previewRanges.normal?.label ?? '—'}
+                    </p>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                      stock suficiente
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(() => {
+                  const previewConfig: StockThresholdConfigInput = stockAlertValidation.input
+                  const samples = [
+                    { label: '0 unidades', units: 0 },
+                    { label: `${stockAlertCriticalMax} unidades`, units: Math.max(0, stockAlertCriticalMax) },
+                    { label: `${stockAlertLowMax + 5} unidades`, units: Math.max(1, stockAlertLowMax + 5) },
+                  ]
+                  return samples.map((sample) => {
+                    const ev = evaluateStockLevel({
+                      stockUnits: sample.units,
+                      companyConfig: {
+                        ...previewConfig,
+                        updatedAt: null,
+                        scope: 'company',
+                        scopeId: companyId ?? 'preview',
+                      },
+                    })
+                    return (
+                      <div
+                        key={sample.label}
+                        className="flex items-center justify-between rounded-lg border p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs text-muted-foreground">Ejemplo</p>
+                          <p className="text-sm font-medium text-foreground">{sample.label}</p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={[
+                            'ring-1',
+                            ev.level === 'outOfStock' || ev.level === 'critical'
+                              ? 'border-rose-200 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-500/10'
+                              : ev.level === 'low'
+                              ? 'border-amber-200 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10'
+                              : 'border-emerald-200 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10'
+                          ].join(' ')}
+                        >
+                          {ev.levelLabel}
+                        </Badge>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground">Notas</p>
+              <ul className="list-disc space-y-1 pl-4">
+                <li>
+                  <span className="font-medium text-foreground">Arquitectura por sucursal:</span> si no existe configuración personalizada para una sucursal,
+                  se usa la configuración de la empresa.
+                </li>
+                <li>
+                  <span className="font-medium text-foreground">Overrides por producto:</span> la arquitectura ya admite límites personalizados
+                  producto (listos para integrarse en una próxima etapa sin romper datos).
+                </li>
+                <li>
+                  La misma regla evalúa en Productos, Inventario, Dashboard, Alertas y Reportes. No hay valores hardcodeados por módulo.
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const base = stockAlertSavedConfig
+                    ? { enabled: stockAlertSavedConfig.enabled, criticalMax: stockAlertSavedConfig.criticalMax, lowMax: stockAlertSavedConfig.lowMax }
+                    : { ...DEFAULT_STOCK_ALERT_CONFIG }
+                  setStockAlertEnabled(base.enabled)
+                  setStockAlertCriticalMax(base.criticalMax)
+                  setStockAlertLowMax(base.lowMax)
+                  setStockAlertDirty(false)
+                }}
+                disabled={!stockAlertDirty || !canEditCompany || isStockAlertLoading || isStockAlertSaving}
+              >
+                Restablecer
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSaveStockAlertConfig()}
+                disabled={
+                  !canEditCompany ||
+                  isStockAlertLoading ||
+                  isStockAlertSaving ||
+                  !stockAlertDirty ||
+                  !stockAlertValidation.validation.ok
+                }
+              >
+                {isStockAlertSaving ? <Loader className="mr-2 h-4 w-4" /> : null}
+                Guardar configuración
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+          </AuthorizationGate>
+          </TabsContent>
 
         <TabsContent value="herramientas" className="space-y-4 pt-4">
           <Card>
