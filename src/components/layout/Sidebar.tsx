@@ -30,7 +30,7 @@ function computeSplit(
   gapHeight: number,
 ): { mainItems: NavItem[]; moreItems: NavItem[] } {
   if (availableHeight <= 0 || itemHeight <= 0) {
-    return { mainItems: items, moreItems: [] }
+    return { mainItems: [], moreItems: items }
   }
 
   const total = items.length
@@ -41,21 +41,18 @@ function computeSplit(
   const heightForCount = (count: number) =>
     count <= 0 ? 0 : count * itemHeight + Math.max(0, count - 1) * gapHeight
 
-  if (heightForCount(total) <= availableHeight) {
+  const moreEntryHeight = itemHeight + gapHeight
+  const availableAfterMore = availableHeight - moreEntryHeight
+
+  if (availableAfterMore <= 0) {
+    return { mainItems: [], moreItems: items }
+  }
+
+  if (heightForCount(total) + moreEntryHeight <= availableHeight) {
     return { mainItems: items, moreItems: [] }
   }
 
-  const moreEntryHeight = itemHeight + gapHeight
-  let fitWithoutMore = 0
-  for (let k = total; k >= 0; k--) {
-    if (heightForCount(k) <= availableHeight) {
-      fitWithoutMore = k
-      break
-    }
-  }
-
   let fitWithMore = 0
-  const availableAfterMore = availableHeight - moreEntryHeight
   for (let k = total - 1; k >= 0; k--) {
     if (heightForCount(k) <= availableAfterMore) {
       fitWithMore = k
@@ -63,12 +60,11 @@ function computeSplit(
     }
   }
 
-  const useCount = Math.min(total, Math.max(fitWithoutMore, fitWithMore))
-  if (useCount >= total) {
-    return { mainItems: items, moreItems: [] }
+  if (fitWithMore <= 0) {
+    return { mainItems: [], moreItems: items }
   }
 
-  const mainCount = Math.max(0, Math.min(useCount, fitWithMore))
+  const mainCount = Math.max(0, Math.min(total, fitWithMore))
   return {
     mainItems: items.slice(0, mainCount),
     moreItems: items.slice(mainCount),
@@ -172,12 +168,12 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      <div className="px-5 py-5 shrink-0">
+      <div className="px-4 py-5 shrink-0">
         <AppLogo variant="sidebar" />
       </div>
 
-      <nav ref={navContainerRef} className="flex-1 overflow-hidden px-3 pb-5">
-        <div className="h-full overflow-auto">
+      <nav ref={navContainerRef} className="flex-1 min-h-0 overflow-hidden px-4 pb-0">
+        <div className="h-full overflow-hidden">
           <div className="space-y-1 relative">
             {visibleNavItems.length > 0 && (
               <div
@@ -208,20 +204,23 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
               </NavLink>
             ))}
 
-            {moreItems.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      'flex items-center gap-3 rounded-md px-3 py-3 text-sm transition-colors duration-150 min-h-[44px] w-full text-left',
-                      'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground',
-                    )}
-                  >
-                    <MoreHorizontal className="h-4 w-4 shrink-0" />
-                    <span className="truncate">Más</span>
-                  </button>
-                </DropdownMenuTrigger>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  disabled={moreItems.length === 0}
+                  className={cn(
+                    'flex items-center gap-3 rounded-md px-3 py-3 text-sm transition-colors duration-150 min-h-[44px] w-full text-left',
+                    moreItems.length === 0
+                      ? 'text-primary-foreground/50 cursor-default'
+                      : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground',
+                  )}
+                >
+                  <MoreHorizontal className="h-4 w-4 shrink-0" />
+                  <span className="truncate">Más</span>
+                </button>
+              </DropdownMenuTrigger>
+              {moreItems.length > 0 && (
                 <DropdownMenuContent
                   side="bottom"
                   align="start"
@@ -248,13 +247,13 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
                     ))}
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+              )}
+            </DropdownMenu>
           </div>
         </div>
       </nav>
 
-      <div className="border-t border-primary-foreground/10 px-5 py-4 shrink-0">
+      <div className="border-t border-primary-foreground/10 px-4 py-4 shrink-0">
         <div className="text-xs text-primary-foreground/70">Modo oscuro (próximamente)</div>
       </div>
     </>
@@ -267,7 +266,7 @@ export function Sidebar({
 }: SidebarProps) {
   return (
     <>
-      <aside className="sticky top-0 hidden h-dvh w-[280px] shrink-0 border-r bg-primary text-primary-foreground lg:block">
+      <aside className="sticky top-0 left-0 hidden h-dvh w-[280px] shrink-0 border-r bg-primary text-primary-foreground lg:block">
         <div className="flex h-full flex-col">
           <SidebarNavigation />
         </div>

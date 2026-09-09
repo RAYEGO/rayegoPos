@@ -1,3 +1,4 @@
+import { useCallback, useMemo, useRef } from 'react'
 import { AlertTriangle, Clock, LogIn } from 'lucide-react'
 import {
   Dialog,
@@ -13,6 +14,7 @@ import { useInactivityContext } from '@/contexts/InactivityProvider'
 export function SessionWarningModal() {
   const {
     status,
+    warningReason,
     warningCountdownSeconds,
     acknowledgeWarning,
     pendingOperation,
@@ -20,31 +22,80 @@ export function SessionWarningModal() {
     markExpired,
   } = useInactivityContext()
 
-  const open = status === 'warning'
+const open = status === 'warning'
+const handlingContinueRef = useRef(false)
 
-const handleContinue = async () => {
+const handleContinue = useCallback(async () => {
+  if (handlingContinueRef.current) return
+
+  handlingContinueRef.current = true
+
   try {
     await acknowledgeWarning()
   } catch {
     /* no-op */
+  } finally {
+    window.setTimeout(() => {
+      handlingContinueRef.current = false
+    }, 2000)
   }
-}
+}, [acknowledgeWarning])
+
+
+
+  const copy = useMemo(() => {
+    const isAbsolute = warningReason === 'absolute-expiry'
+    const minutesLeft = Math.ceil(warningCountdownSeconds / 60)
+    const hasSingleMinute = warningCountdownSeconds < 90
+    const timeLeft =
+      isAbsolute || hasSingleMinute
+        ? `${warningCountdownSeconds} s`
+        : `${warningCountdownSeconds}s`
+    return {
+      isAbsolute,
+      timeLeft,
+      title: isAbsolute ? 'Tu sesión está por expirar' : 'Tu sesión está por expirar',
+      subtitle: isAbsolute
+        ? 'Tu sesión se acerca al límite de duración permitido. Renueva la sesión para continuar trabajando.'
+        : 'Por inactividad, tu sesión de Rayego POS se cerrará automáticamente.',
+      timeBoxLabel: isAbsolute ? 'Tiempo restante máximo' : 'Cierre automático en',
+      hint: isAbsolute
+        ? 'Para mantener tus trabajos pulsa &ldquo;Continuar sesión&rdquo; antes de que termine el conteo. Se intentará renovar la sesión automáticamente.'
+        : 'Si deseas seguir trabajando, pulsa &ldquo;Continuar sesión&rdquo; antes de que termine el conteo.',
+      idleLine: isAbsolute
+        ? null
+        : `· Tiempo límite de inactividad: ${Math.round(settings.idleTimeoutMs / 60000)} minutos`,
+      absoluteLine: isAbsolute
+        ? minutesLeft <= 1
+          ? '· Tu sesión está a menos de 2 minutos de expirar de forma permanente.'
+          : `· La sesión expirará de forma permanente en ~${minutesLeft} minuto(s) si no se renueva.`
+        : null,
+      continueLabel: isAbsolute ? 'Continuar sesión' : 'Continuar trabajando',
+    }
+  }, [warningReason, warningCountdownSeconds, settings.idleTimeoutMs])
+
+
 
   const handleLogoutNow = () => {
+    console.log('[SESSION WARNING] CLOSE CLICK')
     markExpired({
       reason: 'manual-logout',
       message: 'El usuario solicitó cerrar sesión desde el aviso de inactividad.',
     })
+    console.log('[SESSION WARNING] handleLogoutNow MARK EXPIRED RETURNED')
   }
-
   return open ? (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
+        data-session-warning="true"
         className="sm:max-w-md [&>button[type='button'][aria-label='Cerrar']]:hidden"
         onInteractOutside={(e) => {
           e.preventDefault()
         }}
         onEscapeKeyDown={(e) => {
+          e.preventDefault()
+        }}
+        onOpenAutoFocus={(e) => {
           e.preventDefault()
         }}
       >
@@ -55,10 +106,10 @@ const handleContinue = async () => {
             </div>
             <div className="flex-1">
               <DialogTitle className="text-lg font-semibold">
-                Tu sesión está por expirar
+                {copy.title}
               </DialogTitle>
               <DialogDescription className="mt-1 text-sm">
-                Por inactividad, tu sesión de Rayego POS se cerrará automáticamente.
+                {copy.subtitle}
               </DialogDescription>
             </div>
           </div>
@@ -68,19 +119,19 @@ const handleContinue = async () => {
           <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
             <div className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
               <Clock className="h-4 w-4" aria-hidden="true" />
-              Cierre automático en
+              {copy.timeBoxLabel}
               <span
                 className="inline-flex min-w-[3rem] items-center justify-center rounded-md bg-amber-600 px-2 py-0.5 font-mono text-base font-bold text-white"
                 aria-live="polite"
                 aria-atomic="true"
               >
-                {warningCountdownSeconds}s
+                {copy.timeLeft}
               </span>
             </div>
-            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300/90">
-              Si deseas seguir trabajando, pulsa &ldquo;Continuar trabajando&rdquo; antes de que
-              termine el conteo.
-            </p>
+            <p
+              className="mt-2 text-xs text-amber-700 dark:text-amber-300/90"
+              dangerouslySetInnerHTML={{ __html: copy.hint }}
+            />
           </div>
 
           {pendingOperation ? (
@@ -96,13 +147,14 @@ const handleContinue = async () => {
           ) : null}
 
           <ul className="space-y-1 text-xs text-muted-foreground">
-            <li>
-              · Tiempo límite de inactividad: {Math.round(settings.idleTimeoutMs / 60000)} minutos
-            </li>
-            <li>
-              · Cualquier clic, escritura, scroll o selección cuenta como actividad y reinicia el
-              temporizador.
-            </li>
+            {copy.idleLine ? <li>{copy.idleLine}</li> : null}
+            {copy.absoluteLine ? <li>{copy.absoluteLine}</li> : null}
+            {!copy.isAbsolute ? (
+              <li>
+                · Cualquier clic, escritura, scroll o selección cuenta como actividad y reinicia
+                el temporizador.
+              </li>
+            ) : null}
           </ul>
         </div>
 
@@ -113,7 +165,7 @@ const handleContinue = async () => {
             onClick={handleLogoutNow}
             className="justify-start gap-2 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
           >
-            <LogIn className="h-4 w-4" aria-hidden="true" />
+            <LogIn className="h-4 w-4 rotate-180" aria-hidden="true" />
             Cerrar sesión ahora
           </Button>
           <div className="flex gap-2">
@@ -123,9 +175,8 @@ const handleContinue = async () => {
               size="lg"
               onClick={handleContinue}
               className="gap-2 shadow-sm"
-              autoFocus
             >
-              Continuar trabajando
+              {copy.continueLabel}
             </Button>
           </div>
         </DialogFooter>

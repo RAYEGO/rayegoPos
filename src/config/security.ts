@@ -10,11 +10,17 @@ export type SecurityTimeoutSettings = {
   accessTokenExpiryBufferMs: number
 }
 
-export const DEFAULT_SECURITY_TIMEOUTS: SecurityTimeoutSettings = {
-  idleTimeoutMs: 10 * 60 * 1000,
-  warningCountdownMs: 60 * 1000,
-  accessTokenExpiryBufferMs: 60 * 1000,
-}
+export const DEFAULT_SECURITY_TIMEOUTS: SecurityTimeoutSettings = import.meta.env.DEV
+  ? {
+      idleTimeoutMs: 30 * 1000,
+      warningCountdownMs: 10 * 1000,
+      accessTokenExpiryBufferMs: 60 * 1000,
+    }
+  : {
+      idleTimeoutMs: 10 * 60 * 1000,
+      warningCountdownMs: 2 * 60 * 1000,
+      accessTokenExpiryBufferMs: 60 * 1000,
+    }
 
 export type PendingOperationScope =
   | 'sales.checkout'
@@ -37,17 +43,20 @@ export function readSecurityTimeouts(): SecurityTimeoutSettings {
     const raw = window.localStorage.getItem(SECURITY_SETTINGS_STORAGE_KEY)
     if (!raw) return DEFAULT_SECURITY_TIMEOUTS
     const parsed = JSON.parse(raw) as Partial<SecurityTimeoutSettings>
+    const minIdleMs = import.meta.env.DEV ? 5_000 : 10_000
+    const minWarningMs = import.meta.env.DEV ? 5_000 : 10_000
+    const minBufferMs = 5_000
     return {
       idleTimeoutMs:
-        typeof parsed.idleTimeoutMs === 'number' && parsed.idleTimeoutMs > 10_000
+        typeof parsed.idleTimeoutMs === 'number' && parsed.idleTimeoutMs > minIdleMs
           ? parsed.idleTimeoutMs
           : DEFAULT_SECURITY_TIMEOUTS.idleTimeoutMs,
       warningCountdownMs:
-        typeof parsed.warningCountdownMs === 'number' && parsed.warningCountdownMs >= 10_000
+        typeof parsed.warningCountdownMs === 'number' && parsed.warningCountdownMs >= minWarningMs
           ? parsed.warningCountdownMs
           : DEFAULT_SECURITY_TIMEOUTS.warningCountdownMs,
       accessTokenExpiryBufferMs:
-        typeof parsed.accessTokenExpiryBufferMs === 'number' && parsed.accessTokenExpiryBufferMs >= 5_000
+        typeof parsed.accessTokenExpiryBufferMs === 'number' && parsed.accessTokenExpiryBufferMs >= minBufferMs
           ? parsed.accessTokenExpiryBufferMs
           : DEFAULT_SECURITY_TIMEOUTS.accessTokenExpiryBufferMs,
     }
