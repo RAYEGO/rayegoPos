@@ -2,7 +2,20 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { Edit, MoreVertical, Search, Trash2, UserPlus, Users2, X } from 'lucide-react'
+import {
+  Activity,
+  ChevronLeft,
+  ChevronRight,
+  Edit,
+  MoreVertical,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users2,
+  X,
+} from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -41,15 +54,24 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { roleDefinitions } from '@/config/authorization'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { permissionDefinitions, roleDefinitions, permissionModules } from '@/config/authorization'
+import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
 import { branchesService } from '@/services/branchesService'
+import { auditService, type AuditAction, type AuditListEntry } from '@/services/auditService'
 import {
   usersService,
   type UsersModuleUserRecord,
 } from '@/services/usersService'
-import type { AuthRole, UserStatus } from '@/types/auth'
+import type { AuthPermission, AuthRole, UserStatus } from '@/types/auth'
 import type { Branch } from '@/types/settings'
 import { toast } from 'sonner'
 
@@ -355,7 +377,7 @@ export function UsuariosPage() {
   }
 
   return (
-    <div className="space-y-4 p-4">
+    <Tabs defaultValue="usuarios" className="space-y-4 p-4">
       <AuthorizationGate
         permission="usuarios.read"
         fallback={
@@ -366,6 +388,42 @@ export function UsuariosPage() {
           </Card>
         }
       >
+        <TabsList className="grid w-full grid-cols-1 sm:inline-flex sm:w-auto sm:grid-cols-none">
+          <TabsTrigger value="usuarios" className="inline-flex items-center gap-2">
+            <Users2 className="h-4 w-4" />
+            Usuarios
+          </TabsTrigger>
+          <AuthorizationGate
+            permission="usuarios.manage"
+            fallback={
+              <TabsTrigger value="roles" disabled className="inline-flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4" />
+                Roles y permisos
+              </TabsTrigger>
+            }
+          >
+            <TabsTrigger value="roles" className="inline-flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4" />
+              Roles y permisos
+            </TabsTrigger>
+          </AuthorizationGate>
+          <AuthorizationGate
+            permission="auditoria.read"
+            fallback={
+              <TabsTrigger value="actividad" disabled className="inline-flex items-center gap-2">
+                <Activity className="h-4 w-4" />
+                Actividad
+              </TabsTrigger>
+            }
+          >
+            <TabsTrigger value="actividad" className="inline-flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Actividad
+            </TabsTrigger>
+          </AuthorizationGate>
+        </TabsList>
+
+        <TabsContent value="usuarios">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-xl font-bold text-foreground">Usuarios</h1>
@@ -1052,7 +1110,672 @@ export function UsuariosPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </TabsContent>
+
+        <TabsContent value="roles">
+          <RolesMatrixSection
+            visibleRoleDefinitions={visibleRoleDefinitions}
+            canManage={can('usuarios.manage')}
+            canSeePlatformUsers={canSeePlatformUsers}
+          />
+        </TabsContent>
+
+        <TabsContent value="actividad">
+          <ActivityAuditSection
+            accessToken={accessToken}
+            users={users}
+            branches={branches}
+            canReadAudit={can('auditoria.read')}
+          />
+        </TabsContent>
       </AuthorizationGate>
-    </div>
+    </Tabs>
   )
+}
+
+function RolesMatrixSection({
+  visibleRoleDefinitions,
+  canManage,
+  canSeePlatformUsers,
+}: {
+  visibleRoleDefinitions: typeof roleDefinitions
+  canManage: boolean
+  canSeePlatformUsers: boolean
+}) {
+  const { businessType, isFeatureEnabled } = useBusinessFeatures()
+  const isServicioTecnicoEnabled =
+    businessType === 'SERVICIO_TECNICO' || isFeatureEnabled('module_ordenes_servicio')
+  const [selectedRole, setSelectedRole] = useState<AuthRole>(
+    visibleRoleDefinitions[0]?.key ?? 'ADMIN_EMPRESA',
+  )
+
+  useEffect(() => {
+    if (!visibleRoleDefinitions.some((r) => r.key === selectedRole)) {
+      setSelectedRole(visibleRoleDefinitions[0]?.key ?? 'ADMIN_EMPRESA')
+    }
+  }, [selectedRole, visibleRoleDefinitions])
+
+  const currentRole = useMemo(
+    () => roleDefinitions.find((r) => r.key === selectedRole) ?? visibleRoleDefinitions[0],
+    [selectedRole, visibleRoleDefinitions],
+  )
+
+  const modulesGroupedPermissions = useMemo(() => {
+    const allowedModuleLabels = new Set<string>()
+    for (const perm of permissionDefinitions) {
+      if (!perm.module) continue
+      const isRt =
+        perm.key.startsWith('ordenesServicio') ||
+        perm.key.startsWith('tecnicos') ||
+        perm.key.startsWith('equiposCliente') ||
+        perm.key.startsWith('presupuestosOrdenServicio') ||
+        perm.key.startsWith('pagosOrdenServicio') ||
+        perm.key.startsWith('consumoInventarioRT') ||
+        perm.key.startsWith('garantiasOrdenServicio')
+      if (isRt && !isServicioTecnicoEnabled) continue
+      if (perm.module === 'Administración POS' && !canSeePlatformUsers) continue
+      allowedModuleLabels.add(perm.module)
+    }
+    return permissionModules.filter((mod) => allowedModuleLabels.has(mod))
+  }, [isServicioTecnicoEnabled, canSeePlatformUsers])
+
+  if (!currentRole) return null
+
+  const rolePermissions = new Set<AuthPermission>(currentRole.permissions)
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold text-foreground">Roles y permisos</h1>
+            <p className="text-small text-muted-foreground">
+              Matriz de autorizaciones por módulo. Fase 1: visualización (no editable).
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" size="sm" variant="outline" disabled={!canManage}>
+                  <Settings2 className="h-4 w-4" />
+                  Guardar cambios
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs text-xs">
+                Persistencia de roles y permisos disponible en la próxima actualización.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader className="gap-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <RoleBadge role={currentRole.key} />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-semibold text-foreground">{currentRole.label}</p>
+                  <p className="text-xs text-muted-foreground">{currentRole.description}</p>
+                </div>
+              </div>
+              <div className="w-full md:w-72">
+                <Select
+                  value={selectedRole}
+                  onValueChange={(value) => setSelectedRole(value as AuthRole)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona un rol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {visibleRoleDefinitions.map((role) => (
+                      <SelectItem key={role.key} value={role.key}>
+                        {role.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[200px]">Módulo</TableHead>
+                    <TableHead className="w-[150px] text-center">
+                      Ver
+                      <div className="mt-0.5 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                        (permiso read)
+                      </div>
+                    </TableHead>
+                    <TableHead className="w-[180px] text-center">
+                      Gestionar
+                      <div className="mt-0.5 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                        (crear · editar · eliminar · anular)
+                      </div>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {modulesGroupedPermissions.map((moduleLabel) => {
+                    const permRead = permissionDefinitions.find(
+                      (p) => p.module === moduleLabel && p.key.endsWith('.read'),
+                    )
+                    const permManage = permissionDefinitions.find(
+                      (p) => p.module === moduleLabel && p.key.endsWith('.manage'),
+                    )
+
+                    return (
+                      <TableRow key={moduleLabel}>
+                        <TableCell className="font-medium text-foreground">{moduleLabel}</TableCell>
+                        <TableCell className="text-center">
+                          {permRead ? (
+                            <Checkbox disabled checked={rolePermissions.has(permRead.key)} />
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">
+                              N/A
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {permManage ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex items-center justify-center">
+                                  <Checkbox
+                                    disabled
+                                    checked={rolePermissions.has(permManage.key)}
+                                  />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="right" className="max-w-xs text-xs">
+                                {permManage.description}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">
+                              sin manage
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </TooltipProvider>
+  )
+}
+
+function ActivityAuditSection({
+  accessToken,
+  users,
+  branches,
+  canReadAudit,
+}: {
+  accessToken: string
+  users: UsersModuleUserRecord[]
+  branches: Branch[]
+  canReadAudit: boolean
+}) {
+  type AuditFilters = {
+    search: string
+    userId: 'TODOS' | string
+    tabla: 'TODOS' | string
+    accion: 'TODOS' | AuditAction
+    fechaDesde: string
+    fechaHasta: string
+    branchId: 'TODAS' | string
+  }
+
+  const [filters, setFilters] = useState<AuditFilters>({
+    search: '',
+    userId: 'TODOS',
+    tabla: 'TODOS',
+    accion: 'TODOS',
+    fechaDesde: '',
+    fechaHasta: '',
+    branchId: 'TODAS',
+  })
+  const [offset, setOffset] = useState(0)
+  const [limit] = useState<number>(50)
+  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<AuditListEntry[]>([])
+  const [total, setTotal] = useState(0)
+  const [moduleOptions, setModuleOptions] = useState<string[]>([])
+  const [actionOptions] = useState<AuditAction[]>([
+    'INSERT',
+    'UPDATE',
+    'DELETE',
+    'RESTORE',
+    'LOGIN',
+    'LOGOUT',
+    'ANULAR',
+    'VIEW_RECEIPT',
+    'PRINT_RECEIPT',
+    'DOWNLOAD_RECEIPT_PDF',
+    'SHARE_RECEIPT',
+  ])
+
+  const fetchList = useCallback(
+    async (nextOffset = 0) => {
+      if (!canReadAudit || !accessToken) return
+      try {
+        setLoading(true)
+        const params: Record<string, unknown> = {
+          limit,
+          offset: nextOffset,
+        }
+        if (filters.search.trim()) params.search = filters.search.trim()
+        if (filters.userId !== 'TODOS') params.userId = filters.userId
+        if (filters.tabla !== 'TODOS') params.tabla = filters.tabla
+        if (filters.accion !== 'TODOS') params.accion = filters.accion
+        if (filters.fechaDesde) params.fechaDesde = filters.fechaDesde
+        if (filters.fechaHasta) params.fechaHasta = filters.fechaHasta
+        const res = await auditService.list(accessToken, params as any)
+        setData(res.items)
+        setTotal(res.total)
+        setOffset(nextOffset)
+        const tablas = Array.from(
+          new Set(
+            res.items
+              .map((row) => row.tabla)
+              .filter((t): t is string => Boolean(t) && t.length > 0),
+          ),
+        ).sort()
+        setModuleOptions((prev) => Array.from(new Set([...prev, ...tablas])).sort())
+      } catch (error) {
+        toast.error('No se pudo cargar la actividad del sistema.', {
+          description: error instanceof Error ? error.message : 'Inténtalo de nuevo.',
+        })
+      } finally {
+        setLoading(false)
+      }
+    },
+    [accessToken, canReadAudit, filters, limit],
+  )
+
+  useEffect(() => {
+    void fetchList(0)
+  }, [fetchList])
+
+  const totalPages = Math.max(1, Math.ceil(total / limit))
+  const currentPage = Math.min(totalPages, Math.floor(offset / limit) + 1)
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold text-foreground">Actividad</h1>
+            <p className="text-small text-muted-foreground">
+              Auditoría de acciones importantes realizadas por los usuarios.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{total} registros</Badge>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button type="button" size="sm" variant="outline" disabled>
+                  Exportar CSV
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs text-xs">
+                Exportación disponible en la próxima actualización.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader className="gap-3">
+            <div className="grid gap-3 lg:grid-cols-[1.4fr_0.7fr_0.7fr_0.7fr_0.9fr_0.9fr_0.7fr]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={filters.search}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, search: event.target.value }))
+                  }
+                  placeholder="Buscar usuario, módulo o detalle…"
+                  className="pl-9"
+                />
+              </div>
+
+              <Select
+                value={filters.userId}
+                onValueChange={(value) =>
+                  setFilters((current) => ({ ...current, userId: value as AuditFilters['userId'] }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Usuario" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos los usuarios</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {getUserFullName(user)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={filters.tabla}
+                onValueChange={(value) => setFilters((current) => ({ ...current, tabla: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Módulo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos los módulos</SelectItem>
+                  {moduleOptions.map((module) => (
+                    <SelectItem key={module} value={module}>
+                      {formatModuleLabel(module)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={filters.accion}
+                onValueChange={(value) =>
+                  setFilters((current) => ({
+                    ...current,
+                    accion: value as AuditFilters['accion'],
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Acción" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todas las acciones</SelectItem>
+                  {actionOptions.map((action) => (
+                    <SelectItem key={action} value={action}>
+                      {formatAuditActionLabel(action)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div>
+                <Input
+                  type="date"
+                  value={filters.fechaDesde}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, fechaDesde: event.target.value }))
+                  }
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">Fecha desde</p>
+              </div>
+
+              <div>
+                <Input
+                  type="date"
+                  value={filters.fechaHasta}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, fechaHasta: event.target.value }))
+                  }
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">Fecha hasta</p>
+              </div>
+
+              <Select value={filters.branchId} disabled>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sucursal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODAS">Todas las sucursales</SelectItem>
+                  {branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setFilters({
+                    search: '',
+                    userId: 'TODOS',
+                    tabla: 'TODOS',
+                    accion: 'TODOS',
+                    fechaDesde: '',
+                    fechaHasta: '',
+                    branchId: 'TODAS',
+                  })
+                }}
+              >
+                Limpiar filtros
+              </Button>
+              <Button type="button" size="sm" onClick={() => void fetchList(0)}>
+                Actualizar
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[180px]">Fecha/hora</TableHead>
+                    <TableHead>Usuario</TableHead>
+                    <TableHead>Módulo</TableHead>
+                    <TableHead>Acción</TableHead>
+                    <TableHead>Detalle</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                        Cargando actividad…
+                      </TableCell>
+                    </TableRow>
+                  ) : data.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                        No hay registros de actividad con los filtros seleccionados.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    data.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell className="whitespace-nowrap text-small text-muted-foreground">
+                          {formatAuditDateTime(row.fechaEvento)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-0.5">
+                            <p className="font-medium text-foreground">
+                              {row.usuario
+                                ? `${row.usuario.firstName} ${row.usuario.lastName}`.trim()
+                                : 'Sistema'}
+                            </p>
+                            {row.usuario?.username ? (
+                              <p className="text-[11px] text-muted-foreground">
+                                @{row.usuario.username}
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{formatModuleLabel(row.tabla)}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getAuditActionBadgeVariant(row.accion)}>
+                            {formatAuditActionLabel(row.accion)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[420px] text-small text-muted-foreground">
+                          {formatAuditDetail(row)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                Página {currentPage} de {totalPages} · {total} registros
+              </p>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={currentPage <= 1 || loading}
+                  onClick={() => void fetchList(Math.max(0, offset - limit))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => void fetchList(offset + limit)}
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </TooltipProvider>
+  )
+}
+
+function formatModuleLabel(tabla: string | null | undefined): string {
+  if (!tabla) return 'Sistema'
+  const t = tabla.trim().toLowerCase()
+  const map: Record<string, string> = {
+    ventas: 'Ventas',
+    ventas_ticket: 'Ventas',
+    productos: 'Productos',
+    compras: 'Compras',
+    ordenes_compra: 'Compras',
+    inventario: 'Inventario',
+    movimientos_inventario: 'Inventario',
+    caja: 'Caja',
+    sesiones_caja: 'Caja',
+    clientes: 'Clientes',
+    proveedores: 'Proveedores',
+    usuarios: 'Usuarios',
+    users: 'Usuarios',
+    roles: 'Usuarios',
+    sesiones: 'Sesiones',
+    auditoria: 'Actividad',
+    configuracion: 'Configuración',
+    settings: 'Configuración',
+    empresas: 'Empresas',
+    sucursales: 'Sucursales',
+    branches: 'Sucursales',
+    auth: 'Autenticación',
+    login: 'Autenticación',
+    logout: 'Autenticación',
+  }
+  if (map[t]) return map[t]
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+function formatAuditActionLabel(action: AuditAction | string | null | undefined): string {
+  if (!action) return '—'
+  switch (action) {
+    case 'INSERT':
+      return 'Creación'
+    case 'UPDATE':
+      return 'Edición'
+    case 'DELETE':
+      return 'Eliminación'
+    case 'RESTORE':
+      return 'Restauración'
+    case 'LOGIN':
+      return 'Inicio de sesión'
+    case 'LOGOUT':
+      return 'Cierre de sesión'
+    case 'ANULAR':
+      return 'Anulación'
+    case 'VIEW_RECEIPT':
+      return 'Ver ticket'
+    case 'PRINT_RECEIPT':
+      return 'Imprimir ticket'
+    case 'DOWNLOAD_RECEIPT_PDF':
+      return 'Descargar PDF'
+    case 'SHARE_RECEIPT':
+      return 'Compartir ticket'
+    default:
+      return String(action)
+  }
+}
+
+function getAuditActionBadgeVariant(
+  action: AuditAction | string | null | undefined,
+): 'default' | 'success' | 'warning' | 'destructive' | 'outline' | 'info' {
+  if (!action) return 'outline'
+  switch (action) {
+    case 'LOGIN':
+      return 'success'
+    case 'LOGOUT':
+      return 'info'
+    case 'INSERT':
+      return 'default'
+    case 'UPDATE':
+      return 'default'
+    case 'DELETE':
+      return 'destructive'
+    case 'ANULAR':
+      return 'warning'
+    default:
+      return 'outline'
+  }
+}
+
+function formatAuditDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('es-PE', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return String(iso)
+  }
+}
+
+function formatAuditDetail(row: AuditListEntry): string {
+  const raw = row.valorNuevo as Record<string, unknown> | null
+  if (raw && typeof raw === 'object' && Object.keys(raw).length > 0) {
+    try {
+      return JSON.stringify(raw)
+        .replace(/"/g, '')
+        .replace(/[{}]/g, '')
+        .slice(0, 160)
+    } catch {
+      /* ignore */
+    }
+  }
+  if (row.registroId) return `Registro: ${row.registroId.slice(0, 12)}…`
+  return '—'
 }

@@ -2454,10 +2454,8 @@ export function ProductosPage() {
             const anyChildOpen = isPackagingDialogOpen || isPackagingGuideOpen || masterDialogOpen
             if (!open) {
               if (anyChildOpen || (anyChildGracePeriodRef.current && !isExplicitCreateDialogClosingRef.current)) {
-                if (anyChildOpen) {
-                  if (!isExplicitCreateDialogClosingRef.current) {
-                    queueMicrotask(() => setIsCreateDialogOpen(true))
-                  }
+                if (!isExplicitCreateDialogClosingRef.current) {
+                  queueMicrotask(() => setIsCreateDialogOpen(true))
                 }
                 return
               }
@@ -2873,7 +2871,7 @@ export function ProductosPage() {
       {isPackagingDialogOpen ? (
         <Dialog
           open={isPackagingDialogOpen}
-          modal={false}
+          modal={true}
           onOpenChange={(open) => {
             setIsPackagingDialogOpen(open)
             if (!open) {
@@ -3319,7 +3317,7 @@ export function ProductosPage() {
       {isPackagingGuideOpen ? (
         <Dialog
           open={isPackagingGuideOpen}
-          modal={false}
+          modal={true}
           onOpenChange={(open) => {
             setIsPackagingGuideOpen(open)
           }}
