@@ -89,6 +89,11 @@
 
   html {
     text-rendering: geometricPrecision;
+    scrollbar-gutter: stable;
+  }
+
+  [data-side-panel-content] {
+    scrollbar-gutter: stable;
   }
 
   body {

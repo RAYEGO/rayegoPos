@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { AlertTriangle, Clock, LogIn } from 'lucide-react'
 import {
   Dialog,
@@ -22,7 +22,26 @@ export function SessionWarningModal() {
     markExpired,
   } = useInactivityContext()
 
-  const open = status === 'warning'
+const open = status === 'warning'
+const handlingContinueRef = useRef(false)
+
+const handleContinue = useCallback(async () => {
+  if (handlingContinueRef.current) return
+
+  handlingContinueRef.current = true
+
+  try {
+    await acknowledgeWarning()
+  } catch {
+    /* no-op */
+  } finally {
+    window.setTimeout(() => {
+      handlingContinueRef.current = false
+    }, 2000)
+  }
+}, [acknowledgeWarning])
+
+
 
   const copy = useMemo(() => {
     const isAbsolute = warningReason === 'absolute-expiry'
@@ -55,29 +74,28 @@ export function SessionWarningModal() {
     }
   }, [warningReason, warningCountdownSeconds, settings.idleTimeoutMs])
 
-  const handleContinue = async () => {
-    try {
-      await acknowledgeWarning()
-    } catch {
-      /* no-op */
-    }
-  }
+
 
   const handleLogoutNow = () => {
+    console.log('[SESSION WARNING] CLOSE CLICK')
     markExpired({
       reason: 'manual-logout',
       message: 'El usuario solicitó cerrar sesión desde el aviso de inactividad.',
     })
+    console.log('[SESSION WARNING] handleLogoutNow MARK EXPIRED RETURNED')
   }
-
   return open ? (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
+        data-session-warning="true"
         className="sm:max-w-md [&>button[type='button'][aria-label='Cerrar']]:hidden"
         onInteractOutside={(e) => {
           e.preventDefault()
         }}
         onEscapeKeyDown={(e) => {
+          e.preventDefault()
+        }}
+        onOpenAutoFocus={(e) => {
           e.preventDefault()
         }}
       >
@@ -157,7 +175,6 @@ export function SessionWarningModal() {
               size="lg"
               onClick={handleContinue}
               className="gap-2 shadow-sm"
-              autoFocus
             >
               {copy.continueLabel}
             </Button>

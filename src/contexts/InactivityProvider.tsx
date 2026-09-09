@@ -29,7 +29,6 @@ const ACTIVITY_EVENTS = [
   'click',
   'wheel',
   'input',
-  'focusin',
 ] as const
 
 const ACTIVITY_REPORT_COOLDOWN_MS = 800
@@ -102,11 +101,23 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const logoutInFlightRef = useRef(false)
   const warningIntervalStartedAtRef = useRef(0)
   const userAcknowledgedAtRef = useRef(0)
+  const acknowledgeInFlightRef = useRef(false)
 
   useEffect(() => {
     sessionRef.current = session
     isAuthenticatedRef.current = isAuthenticated
-  }, [session, isAuthenticated])
+    if (isAuthenticated) {
+      logoutInFlightRef.current = false
+      acknowledgeInFlightRef.current = false
+      refreshInFlightRef.current = false
+      userAcknowledgedAtRef.current = 0
+      warningIntervalStartedAtRef.current = 0
+      lastReportAtRef.current = Date.now()
+      idleDeadlineRef.current = Date.now() + settings.idleTimeoutMs
+      lastIdleUpdateRef.current = 0
+      lastAbsoluteWarningShownAtRef.current = 0
+    }
+  }, [session, isAuthenticated, settings.idleTimeoutMs])
 
   useEffect(() => {
     statusRef.current = status
@@ -133,25 +144,61 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const markExpired = useCallback(
     (details: SessionExpirationDetails) => {
+      console.log('[INACTIVITY] markExpired CALLED', details)
+      const HIGH_PRIORITY_REASONS: Array<SessionExpirationDetails['reason']> = [
+        'manual-logout',
+        'idle-timeout',
+        'absolute-expiry',
+      ]
+      const isHighPriority = HIGH_PRIORITY_REASONS.includes(details.reason)
+
       const graceLeft = ACK_GRACE_MS - (Date.now() - userAcknowledgedAtRef.current)
-      if (graceLeft > 0) return
-      if (statusRef.current === 'expired') return
-      if (logoutInFlightRef.current) return
-      logoutInFlightRef.current = true
-      setLastExpirationDetails(details)
-      setStatus('expired')
-      setWarningReason(null)
-      warningReasonRef.current = null
-      clearWarningInterval()
-      clearTickInterval()
-      if (typeof window !== 'undefined') {
-        try {
-          window.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT))
-        } catch {
-          /* ignore */
-        }
+      if (graceLeft > 0 && !isHighPriority) {
+        console.log('[INACTIVITY] markExpired SKIPPED ACK_GRACE', {
+          graceLeftMs: graceLeft,
+          reason: details.reason,
+          userAcknowledgedAt: userAcknowledgedAtRef.current,
+          now: Date.now(),
+        })
+        return
       }
-      void logout(details.message)
+
+      if (statusRef.current === 'expired' && !isHighPriority) {
+        console.log('[INACTIVITY] markExpired SKIPPED STATUS_EXPIRED', details.reason)
+        return
+      }
+
+      if (logoutInFlightRef.current) {
+        if (!isHighPriority) {
+          console.log('[INACTIVITY] markExpired SKIPPED LOGOUT_IN_FLIGHT (soft reason)', details.reason)
+          return
+        }
+        console.log('[INACTIVITY] markExpired BYPASS LOGOUT_IN_FLIGHT (high priority)', details.reason)
+        logoutInFlightRef.current = false
+      }
+
+      console.log('[INACTIVITY] markExpired PROCEEDING (all guards passed)', details.reason)
+      try {
+        logoutInFlightRef.current = true
+        setLastExpirationDetails(details)
+        setStatus('expired')
+        setWarningReason(null)
+        warningReasonRef.current = null
+        clearWarningInterval()
+        clearTickInterval()
+        if (typeof window !== 'undefined') {
+          try {
+            window.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT))
+          } catch {
+            /* ignore */
+          }
+        }
+        console.log('[INACTIVITY] markExpired CALLING LOGOUT', details.reason, details.message)
+        void logout(details.message)
+      } finally {
+        console.log('[INACTIVITY] markExpired FINALLY → logoutInFlightRef reset to false', details.reason)
+        logoutInFlightRef.current = false
+      }
     },
     [clearTickInterval, clearWarningInterval, logout],
   )
@@ -176,6 +223,11 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
           const next = prev - 1
           if (next <= 0) {
             clearWarningInterval()
+            console.log('[INACTIVITY COUNTDOWN ZERO]', {
+              status: statusRef.current,
+              warningReason: warningReasonRef.current,
+              next,
+            })
             if (statusRef.current !== 'warning') return 0
             if (warningReasonRef.current === 'absolute-expiry') {
               markExpired({
@@ -219,9 +271,25 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     }
   }, [clearWarningInterval, settings.idleTimeoutMs])
 
-  const reportActivity = useCallback(() => {
+  const reportActivity = useCallback((eventType?: string) => {
+    if (acknowledgeInFlightRef.current) return
+
+    console.log('[INACTIVITY ACTIVITY]', {
+      status: statusRef.current,
+      warningReason: warningReasonRef.current,
+      eventType: eventType ?? null,
+      stack: new Error().stack,
+    })
+
     const now = Date.now()
     idleDeadlineRef.current = now + settings.idleTimeoutMs
+    console.log('[INACTIVITY DEADLINE RESET]', {
+      status: statusRef.current,
+      warningReason: warningReasonRef.current,
+      eventType: eventType ?? null,
+      idleTimeoutMs: settings.idleTimeoutMs,
+      newDeadline: idleDeadlineRef.current,
+    })
     if (now - lastReportAtRef.current < ACTIVITY_REPORT_COOLDOWN_MS) {
       try {
         const lastSync =
@@ -244,7 +312,14 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     }
     setIdleTimeLeftMs(settings.idleTimeoutMs)
 
-    if (statusRef.current === 'warning' && warningReasonRef.current === 'inactivity') {
+    const hasOpenSessionWarning =
+      typeof document !== 'undefined' &&
+      !!document.querySelector('[data-session-warning="true"]')
+    if (
+      statusRef.current === 'warning' &&
+      warningReasonRef.current === 'inactivity' &&
+      !hasOpenSessionWarning
+    ) {
       closeWarningAndReset()
     }
 
@@ -295,56 +370,79 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
   const acknowledgeWarning = useCallback(async () => {
     if (statusRef.current !== 'warning') return
+    if (acknowledgeInFlightRef.current) return
+    acknowledgeInFlightRef.current = true
+    try {
+      clearWarningInterval()
+      const now = Date.now()
+      userAcknowledgedAtRef.current = now
+      lastReportAtRef.current = now
+      idleDeadlineRef.current = now + settings.idleTimeoutMs
+      lastIdleUpdateRef.current = 0
 
-    clearWarningInterval()
-    userAcknowledgedAtRef.current = Date.now()
-
-    const snapshotReason = warningReasonRef.current
-
-    if (snapshotReason === 'absolute-expiry') {
+      const snapshotReason = warningReasonRef.current
       const cur = sessionRef.current
-      if (cur?.refreshToken && !refreshInFlightRef.current) {
-        refreshInFlightRef.current = true
-        try {
-          const refreshRes = await authService.refreshSession()
-          if (refreshRes.ok) {
-            try {
-              syncSessionFromStorage()
-              if (typeof window !== 'undefined') {
-                try {
-                  window.dispatchEvent(
-                    new CustomEvent(AUTH_SESSION_UPDATED_EVENT, {
-                      detail: { viaInactivityAcknowledge: true, ts: Date.now() },
-                    }),
-                  )
-                } catch {
-                  /* ignore */
-                }
-              }
-            } catch {
-              /* ignore */
-            }
-            lastAbsoluteWarningShownAtRef.current = Date.now()
-            closeWarningAndReset()
-            return
-          } else if (refreshRes.code === 'NETWORK_ERROR') {
-            closeWarningAndReset()
-            return
-          } else {
-            closeWarningAndReset()
-            return
-          }
-        } finally {
-          refreshInFlightRef.current = false
-        }
-      } else if (!cur?.refreshToken) {
-        closeWarningAndReset()
-      }
-      return
-    }
 
-    closeWarningAndReset()
-  }, [clearWarningInterval, closeWarningAndReset, syncSessionFromStorage])
+      const requiresTokenRefresh = (() => {
+        if (!cur?.accessToken) return false
+        if (snapshotReason === 'absolute-expiry') return true
+        const buffer = Math.max(15_000, settings.accessTokenExpiryBufferMs ?? 15_000)
+        if (!isAccessTokenValid(cur.accessToken, buffer)) return true
+        if (cur.refreshToken && !isRefreshTokenValid(cur.refreshToken)) return false
+        return false
+      })()
+
+      if (requiresTokenRefresh) {
+        if (cur?.refreshToken && !refreshInFlightRef.current) {
+          refreshInFlightRef.current = true
+          try {
+            const refreshRes = await authService.refreshSession()
+            if (refreshRes.ok) {
+              sessionRef.current = refreshRes.session
+              try {
+                syncSessionFromStorage()
+                if (typeof window !== 'undefined') {
+                  try {
+                    window.dispatchEvent(
+                      new CustomEvent(AUTH_SESSION_UPDATED_EVENT, {
+                        detail: { viaInactivityAcknowledge: true, ts: Date.now(), reason: snapshotReason },
+                      }),
+                    )
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+              if (snapshotReason === 'absolute-expiry') {
+                lastAbsoluteWarningShownAtRef.current = Date.now()
+              }
+              closeWarningAndReset()
+              return
+            } else if (refreshRes.code === 'NETWORK_ERROR') {
+              userAcknowledgedAtRef.current = Date.now()
+              closeWarningAndReset()
+              return
+            } else {
+              userAcknowledgedAtRef.current = Date.now()
+              closeWarningAndReset()
+              return
+            }
+          } finally {
+            refreshInFlightRef.current = false
+          }
+        } else if (!cur?.refreshToken) {
+          closeWarningAndReset()
+        }
+        return
+      }
+
+      closeWarningAndReset()
+    } finally {
+      acknowledgeInFlightRef.current = false
+    }
+  }, [clearWarningInterval, closeWarningAndReset, settings.accessTokenExpiryBufferMs, settings.idleTimeoutMs, syncSessionFromStorage])
 
   const setPendingOperation = useCallback((snapshot: PendingOperationSnapshot | null) => {
     if (snapshot) {
@@ -361,7 +459,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const refreshSession = useCallback(async (): Promise<AuthSession | null> => {
     const result = await authService.refreshSession()
     if (!result.ok) return null
-    reportActivity()
+    reportActivity('refresh-session')
     return result.session
   }, [reportActivity])
 
@@ -432,6 +530,15 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
 
       const left = idleDeadlineRef.current - Date.now()
       const clampedLeft = left < 0 ? 0 : left
+      console.log('[INACTIVITY DEBUG]', {
+        authenticated: isAuthenticated,
+        status: statusRef.current,
+        leftMs: clampedLeft,
+        warningMs: settings.warningCountdownMs,
+        idleTimeoutMs: settings.idleTimeoutMs,
+        deadline: idleDeadlineRef.current,
+        now: Date.now(),
+      })
       const inIdleWarningWindow =
         clampedLeft <= settings.warningCountdownMs ||
         (statusRef.current === 'warning' && warningReasonRef.current === 'inactivity')
@@ -451,6 +558,12 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         clampedLeft <= settings.warningCountdownMs &&
         warningReasonRef.current !== 'absolute-expiry'
       ) {
+        console.log('[INACTIVITY WARNING TRIGGER]', {
+          leftMs: clampedLeft,
+          warningMs: settings.warningCountdownMs,
+          status: statusRef.current,
+          warningReason: warningReasonRef.current,
+        })
         transitionToWarning('inactivity')
       }
 
@@ -546,8 +659,18 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const onActivity = () => {
-      reportActivity()
+    const isTargetInsideSessionWarningModal = (target: EventTarget | null): boolean => {
+      const el = target instanceof Element ? target : target instanceof Node ? (target as Element | null) : null
+      return !!(el instanceof Element && el.closest?.('[data-session-warning="true"]'))
+    }
+
+    const onActivity = (event: Event) => {
+      console.log('[INACTIVITY EVENT]', event.type)
+      if (statusRef.current === 'warning' && isTargetInsideSessionWarningModal(event.target)) {
+        console.log('[INACTIVITY EVENT] SKIPPED (inside SessionWarningModal during status=warning)', event.type)
+        return
+      }
+      reportActivity(event.type)
     }
 
     const opts: AddEventListenerOptions & EventListenerOptions = {
@@ -560,9 +683,12 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
     }
 
     const visibilityHandler = () => {
-      if (document.visibilityState === 'visible') {
-        reportActivity()
+      if (document.visibilityState !== 'visible') return
+      if (statusRef.current === 'warning') {
+        console.log('[INACTIVITY VISIBILITY] SKIPPED (status=warning; returning to page mid-warning)')
+        return
       }
+      reportActivity('visibilitychange')
     }
     document.addEventListener('visibilitychange', visibilityHandler)
 
