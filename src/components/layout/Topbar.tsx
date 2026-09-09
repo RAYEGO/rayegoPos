@@ -23,6 +23,18 @@ type EnvironmentStatus = {
 
 const statusCache: { value: EnvironmentStatus | null; expiresAt: number } = { value: null, expiresAt: 0 }
 
+function resolveDisplayEnvironment(fallbackFromApi?: EnvironmentMode | null): EnvironmentMode {
+  const vercelEnv = String(import.meta.env.VITE_VERCEL_ENV ?? '').trim().toLowerCase()
+  if (vercelEnv === 'production') return 'production'
+  if (vercelEnv === 'preview' || vercelEnv === 'development') return 'development'
+
+  if (fallbackFromApi && fallbackFromApi !== 'unknown') return fallbackFromApi
+
+  if (import.meta.env.DEV) return 'development'
+  if (import.meta.env.PROD) return 'production'
+  return 'unknown'
+}
+
 function useEnvironmentStatus(accessToken?: string, authenticated = false): EnvironmentStatus | null {
   const [status, setStatus] = useState<EnvironmentStatus | null>(null)
 
@@ -42,14 +54,21 @@ function useEnvironmentStatus(accessToken?: string, authenticated = false): Envi
       try {
         const env = await systemService.getEnvironment(accessToken ? { accessToken } : undefined)
         if (cancelled) return
-        const badge = getEnvironmentBadge(env.environment)
-        const next: EnvironmentStatus = { kind: badge.kind, label: badge.label, mode: env.environment }
+        const visualMode: EnvironmentMode = resolveDisplayEnvironment(env.environment)
+        const badge = getEnvironmentBadge(visualMode)
+        const next: EnvironmentStatus = { kind: badge.kind, label: badge.label, mode: visualMode }
         statusCache.value = next
         statusCache.expiresAt = Date.now() + 60 * 1000
         setStatus(next)
       } catch {
         if (cancelled) return
-        const fallback: EnvironmentStatus = { kind: 'unknown', label: '—', mode: 'unknown' }
+        const fallbackMode = resolveDisplayEnvironment(null)
+        const fallbackBadge = getEnvironmentBadge(fallbackMode)
+        const fallback: EnvironmentStatus = {
+          kind: fallbackBadge.kind,
+          label: fallbackBadge.label,
+          mode: fallbackMode,
+        }
         statusCache.value = fallback
         statusCache.expiresAt = Date.now() + 15 * 1000
         setStatus(fallback)
