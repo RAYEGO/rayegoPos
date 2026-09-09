@@ -1142,7 +1142,9 @@ function RolesMatrixSection({
   canManage: boolean
   canSeePlatformUsers: boolean
 }) {
-  const { isServicioTecnicoEnabled } = useBusinessFeatures()
+  const { businessType, isFeatureEnabled } = useBusinessFeatures()
+  const isServicioTecnicoEnabled =
+    businessType === 'SERVICIO_TECNICO' || isFeatureEnabled('module_ordenes_servicio')
   const [selectedRole, setSelectedRole] = useState<AuthRole>(
     visibleRoleDefinitions[0]?.key ?? 'ADMIN_EMPRESA',
   )
@@ -1726,17 +1728,17 @@ function formatAuditActionLabel(action: AuditAction | string | null | undefined)
 
 function getAuditActionBadgeVariant(
   action: AuditAction | string | null | undefined,
-): 'default' | 'secondary' | 'success' | 'warning' | 'destructive' | 'outline' {
+): 'default' | 'success' | 'warning' | 'destructive' | 'outline' | 'info' {
   if (!action) return 'outline'
   switch (action) {
     case 'LOGIN':
       return 'success'
     case 'LOGOUT':
-      return 'secondary'
+      return 'info'
     case 'INSERT':
       return 'default'
     case 'UPDATE':
-      return 'secondary'
+      return 'default'
     case 'DELETE':
       return 'destructive'
     case 'ANULAR':
