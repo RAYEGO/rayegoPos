@@ -92,6 +92,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const idleDeadlineRef = useRef<number>(Date.now() + settings.idleTimeoutMs)
   const sessionRef = useRef<AuthSession | null>(session)
   const isAuthenticatedRef = useRef<boolean>(isAuthenticated)
+  const prevIsAuthenticatedRef = useRef<boolean>(isAuthenticated)
   const statusRef = useRef<InactivityStatus>('active')
   const warningReasonRef = useRef<WarningReason>(null)
   const lastIdleUpdateRef = useRef<number>(0)
@@ -102,6 +103,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const warningIntervalStartedAtRef = useRef(0)
   const userAcknowledgedAtRef = useRef(0)
   const acknowledgeInFlightRef = useRef(false)
+  const reportActivityRef = useRef<(eventType?: string) => void>(() => {})
 
   useEffect(() => {
     sessionRef.current = session
@@ -112,11 +114,35 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
       refreshInFlightRef.current = false
       userAcknowledgedAtRef.current = 0
       warningIntervalStartedAtRef.current = 0
-      lastReportAtRef.current = Date.now()
-      idleDeadlineRef.current = Date.now() + settings.idleTimeoutMs
-      lastIdleUpdateRef.current = 0
-      lastAbsoluteWarningShownAtRef.current = 0
+      const wasNotAuthenticated = !prevIsAuthenticatedRef.current
+      if (wasNotAuthenticated) {
+        const now = Date.now()
+        const candidateDeadline = now + settings.idleTimeoutMs
+        if (candidateDeadline > idleDeadlineRef.current) {
+          console.log('[INACTIVITY DEADLINE RESET]', {
+            reason: 'session-authenticated (false→true)',
+            eventType: 'auth-transition',
+            oldDeadline: idleDeadlineRef.current,
+            newDeadline: candidateDeadline,
+            timeLeftBeforeMs: Math.max(0, idleDeadlineRef.current - now),
+            timeLeftAfterMs: settings.idleTimeoutMs,
+          })
+          lastReportAtRef.current = now
+          idleDeadlineRef.current = candidateDeadline
+          lastIdleUpdateRef.current = 0
+          lastAbsoluteWarningShownAtRef.current = 0
+        } else {
+          console.log('[INACTIVITY DEADLINE OVERWRITE SKIPPED]', {
+            reason: 'session-authenticated (false→true) candidate <= existing (extended by prior activity pre-auth)',
+            eventType: 'auth-transition',
+            oldDeadline: idleDeadlineRef.current,
+            candidateDeadline,
+            timeLeftPreservedMs: Math.max(0, idleDeadlineRef.current - now),
+          })
+        }
+      }
     }
+    prevIsAuthenticatedRef.current = isAuthenticated
   }, [session, isAuthenticated, settings.idleTimeoutMs])
 
   useEffect(() => {
@@ -274,21 +300,27 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   const reportActivity = useCallback((eventType?: string) => {
     if (acknowledgeInFlightRef.current) return
 
-    console.log('[INACTIVITY ACTIVITY]', {
-      status: statusRef.current,
-      warningReason: warningReasonRef.current,
-      eventType: eventType ?? null,
-      stack: new Error().stack,
-    })
-
     const now = Date.now()
-    idleDeadlineRef.current = now + settings.idleTimeoutMs
-    console.log('[INACTIVITY DEADLINE RESET]', {
-      status: statusRef.current,
-      warningReason: warningReasonRef.current,
+    const oldDeadline = idleDeadlineRef.current
+    const timeLeftBefore = Math.max(0, oldDeadline - now)
+    const newDeadline = now + settings.idleTimeoutMs
+    idleDeadlineRef.current = newDeadline
+    const timeLeftAfter = Math.max(0, newDeadline - now)
+    console.log('[INACTIVITY ACTIVITY]', {
       eventType: eventType ?? null,
-      idleTimeoutMs: settings.idleTimeoutMs,
-      newDeadline: idleDeadlineRef.current,
+      timestamp: now,
+      oldDeadline,
+      newDeadline,
+      timeLeftBefore,
+      timeLeftAfter,
+    })
+    console.log('[INACTIVITY DEADLINE RESET]', {
+      reason: eventType ? `user-interaction (${eventType})` : 'programmatic-reportActivity',
+      eventType: eventType ?? null,
+      oldDeadline,
+      newDeadline,
+      timeLeftBefore,
+      timeLeftAfter,
     })
     if (now - lastReportAtRef.current < ACTIVITY_REPORT_COOLDOWN_MS) {
       try {
@@ -377,8 +409,19 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
       const now = Date.now()
       userAcknowledgedAtRef.current = now
       lastReportAtRef.current = now
-      idleDeadlineRef.current = now + settings.idleTimeoutMs
+      const oldDeadline = idleDeadlineRef.current
+      const timeLeftBefore = Math.max(0, oldDeadline - now)
+      const newDeadline = now + settings.idleTimeoutMs
+      idleDeadlineRef.current = newDeadline
       lastIdleUpdateRef.current = 0
+      console.log('[INACTIVITY DEADLINE RESET]', {
+        reason: 'warning-acknowledge',
+        eventType: 'acknowledgeWarning',
+        oldDeadline,
+        newDeadline,
+        timeLeftBefore,
+        timeLeftAfter: settings.idleTimeoutMs,
+      })
 
       const snapshotReason = warningReasonRef.current
       const cur = sessionRef.current
@@ -466,8 +509,32 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     const newSettings = readSecurityTimeouts()
     setSettings(newSettings)
-    idleDeadlineRef.current = Date.now() + newSettings.idleTimeoutMs
-    setIdleTimeLeftMs(newSettings.idleTimeoutMs)
+    const now = Date.now()
+    const candidateDeadline = now + newSettings.idleTimeoutMs
+    if (candidateDeadline > idleDeadlineRef.current) {
+      console.log('[INACTIVITY DEADLINE RESET]', {
+        reason: 'settings-read-hydration (only future)',
+        eventType: 'settings-hydration',
+        oldDeadline: idleDeadlineRef.current,
+        newDeadline: candidateDeadline,
+        timeLeftBefore: Math.max(0, idleDeadlineRef.current - now),
+        timeLeftAfter: newSettings.idleTimeoutMs,
+      })
+      idleDeadlineRef.current = candidateDeadline
+    } else {
+      console.log('[INACTIVITY DEADLINE OVERWRITE SKIPPED]', {
+        reason: 'settings-read-hydration candidate not future',
+        eventType: 'settings-hydration',
+        oldDeadline: idleDeadlineRef.current,
+        candidateDeadline,
+        timeLeftPreserved: Math.max(0, idleDeadlineRef.current - now),
+      })
+    }
+    setIdleTimeLeftMs(
+      candidateDeadline > idleDeadlineRef.current
+        ? newSettings.idleTimeoutMs
+        : Math.max(0, idleDeadlineRef.current - now),
+    )
   }, [])
 
   useEffect(() => {
@@ -477,13 +544,15 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
       setWarningReason(null)
       warningReasonRef.current = null
       setWarningCountdownSeconds(0)
-      setIdleTimeLeftMs(settings.idleTimeoutMs)
-      idleDeadlineRef.current = Date.now() + settings.idleTimeoutMs
+      const now = Date.now()
+      const candidateDeadline = now + settings.idleTimeoutMs
+      if (candidateDeadline > idleDeadlineRef.current) {
+        idleDeadlineRef.current = candidateDeadline
+      }
+      setIdleTimeLeftMs(Math.max(0, idleDeadlineRef.current - now))
       lastAbsoluteWarningShownAtRef.current = 0
       return
     }
-
-    idleDeadlineRef.current = Date.now() + settings.idleTimeoutMs
 
     tickIntervalRef.current = window.setInterval(() => {
       if (statusRef.current === 'expired') return
@@ -657,6 +726,10 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
   ])
 
   useEffect(() => {
+    reportActivityRef.current = reportActivity
+  }, [reportActivity])
+
+  useEffect(() => {
     if (!isAuthenticated) return
 
     const isTargetInsideSessionWarningModal = (target: EventTarget | null): boolean => {
@@ -670,7 +743,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         console.log('[INACTIVITY EVENT] SKIPPED (inside SessionWarningModal during status=warning)', event.type)
         return
       }
-      reportActivity(event.type)
+      reportActivityRef.current(event.type)
     }
 
     const opts: AddEventListenerOptions & EventListenerOptions = {
@@ -688,7 +761,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
         console.log('[INACTIVITY VISIBILITY] SKIPPED (status=warning; returning to page mid-warning)')
         return
       }
-      reportActivity('visibilitychange')
+      reportActivityRef.current('visibilitychange')
     }
     document.addEventListener('visibilitychange', visibilityHandler)
 
@@ -698,7 +771,7 @@ export function InactivityProvider({ children }: { children: React.ReactNode }) 
       }
       document.removeEventListener('visibilitychange', visibilityHandler)
     }
-  }, [isAuthenticated, reportActivity])
+  }, [isAuthenticated])
 
   const value = useMemo<InactivityContextValue>(
     () => ({
