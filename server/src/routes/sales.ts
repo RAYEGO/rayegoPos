@@ -1,4 +1,4 @@
-import { EstadoVenta, TipoComprobante } from '@prisma/client'
+import { EstadoVenta, TipoComprobante, TipoLineaVenta } from '@prisma/client'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { cancelSale, createSale, getSaleReceipt, getSalesDashboard } from '../modules/sales/sales.service.js'
@@ -13,21 +13,48 @@ const salesDashboardQuerySchema = z.object({
   status: z.nativeEnum(EstadoVenta).optional(),
 })
 
+const saleItemBaseSchema = z.object({
+  cantidad: z.number().int().positive(),
+  descuentoTotal: z.number().min(0).optional(),
+})
+
+const saleProductoRegistradoSchema = saleItemBaseSchema.extend({
+  tipoLinea: z.literal(TipoLineaVenta.PRODUCTO_REGISTRADO),
+  productoId: z.string().uuid(),
+  presentacionId: z.string().uuid(),
+})
+
+const saleVentaRapidaSchema = saleItemBaseSchema.extend({
+  tipoLinea: z.literal(TipoLineaVenta.VENTA_RAPIDA),
+  descripcion: z.string().min(1).max(255),
+  simboloUnidad: z.string().min(1).max(20),
+  precioUnitario: z.number().positive(),
+})
+
+const saleBackwardsCompatibleSchema = saleItemBaseSchema.extend({
+  tipoLinea: z.undefined().optional(),
+  productoId: z.string().uuid(),
+  presentacionId: z.string().uuid(),
+}).transform((item) => ({
+  ...item,
+  tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO,
+}))
+
+const createSaleItemSchema = z.union([
+  saleVentaRapidaSchema,
+  saleProductoRegistradoSchema,
+  saleBackwardsCompatibleSchema,
+]).pipe(z.discriminatedUnion('tipoLinea', [
+  saleProductoRegistradoSchema,
+  saleVentaRapidaSchema,
+]))
+
 const createSaleSchema = z.object({
   sucursalId: z.string().uuid().optional(),
   clienteId: z.string().uuid().optional(),
   tipoComprobante: z.nativeEnum(TipoComprobante).optional(),
   observaciones: z.string().max(255).optional(),
-  items: z
-    .array(
-      z.object({
-        productoId: z.string().uuid(),
-        cantidad: z.number().int().positive(),
-        presentacionId: z.string().uuid(),
-        descuentoTotal: z.number().min(0).optional(),
-      }),
-    )
-    .min(1),
+  items: z.array(createSaleItemSchema).min(1),
   payments: z
     .array(
       z.object({

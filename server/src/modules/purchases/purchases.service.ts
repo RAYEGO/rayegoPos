@@ -2159,6 +2159,7 @@ export async function registerPurchasePayment(
   payload: RegisterPurchasePaymentPayload,
   request: FastifyRequest,
 ) {
+  await requirePermission(request, 'compras.manage')
   const { userId, branchId } = await requireBranchAuthContext(request)
   const amount = Number(payload.monto)
   const paymentDate = payload.fechaPago
@@ -3318,6 +3319,7 @@ export async function returnPurchaseItem(
 }
 
 export async function getPurchaseOrderById(orderId: string, request: FastifyRequest) {
+  await requirePermission(request, 'compras.read')
   const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   const companyPromise = prisma.empresa.findFirst({

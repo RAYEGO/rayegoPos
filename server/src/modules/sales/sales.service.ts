@@ -9,10 +9,11 @@ import {
   Prisma,
   TipoComprobante,
   TipoMovimientoInventario,
+  TipoLineaVenta,
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
   buildPackagingSnapshot,
@@ -116,17 +117,31 @@ type SalesDashboardFilters = {
   availability?: 'TODOS' | 'CON_STOCK' | 'SIN_STOCK'
 }
 
+type CreateSaleItemProductoRegistrado = {
+  tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO
+  productoId: string
+  cantidad: number
+  presentacionId: string
+  descuentoTotal?: number
+}
+
+type CreateSaleItemVentaRapida = {
+  tipoLinea: TipoLineaVenta.VENTA_RAPIDA
+  descripcion: string
+  simboloUnidad: string
+  precioUnitario: number
+  cantidad: number
+  descuentoTotal?: number
+}
+
+type CreateSaleItem = CreateSaleItemProductoRegistrado | CreateSaleItemVentaRapida
+
 type CreateSalePayload = {
   sucursalId?: string
   clienteId?: string
   tipoComprobante?: TipoComprobante
   observaciones?: string
-  items: Array<{
-    productoId: string
-    cantidad: number
-    presentacionId: string
-    descuentoTotal?: number
-  }>
+  items: CreateSaleItem[]
   payments: Array<{
     formaPagoId: string
     monto: number
@@ -356,7 +371,11 @@ function mapRecentSale(sale: SaleWithRelations, codeMap: Map<string, string>) {
 function mapDispensations(sales: SaleWithRelations[], codeMap: Map<string, string>) {
   return sales.flatMap((sale) =>
     sale.detalles
-      .filter((detail) => detail.producto.requiereReceta || detail.producto.esControlado)
+      .filter((detail) =>
+        detail.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO &&
+        detail.producto &&
+        (detail.producto.requiereReceta || detail.producto.esControlado),
+      )
       .map((detail) => ({
         id: detail.id,
         saleId: sale.id,
@@ -364,13 +383,13 @@ function mapDispensations(sales: SaleWithRelations[], codeMap: Map<string, strin
           formatDocumentNumber({ serie: sale.serie, numero: sale.numero }) ??
           codeMap.get(sale.id) ??
           `VNT-${sale.id.slice(0, 6).toUpperCase()}`,
-        productName: detail.producto.nombre,
+        productName: detail.producto!.nombre,
         customerName: getCustomerDisplayName(sale.cliente),
         cashierName: formatFullName(sale.usuarioResponsable),
         dispensedAt: formatDateTime(sale.fechaEmision),
         lotCodes: detail.lotesAsignados.map((item) => item.lote.numeroLote),
-        requiresPrescription: detail.producto.requiereReceta,
-        isControlled: detail.producto.esControlado,
+        requiresPrescription: detail.producto!.requiereReceta,
+        isControlled: detail.producto!.esControlado,
         status: 'VALIDADA' as const,
       })),
   )
@@ -381,6 +400,7 @@ export async function getSalesDashboard(
   request: FastifyRequest,
 ) {
   await ensureDefaultPaymentMethods(prisma)
+  await requirePermission(request, 'ventas.read')
   const { branchId, companyId } = await requireBranchAuthContext(request)
 
   if (filters.branchId && filters.branchId !== branchId) {
@@ -502,12 +522,22 @@ export async function getSalesDashboard(
             {
               detalles: {
                 some: {
-                  producto: {
-                    nombre: {
-                      contains: search,
-                      mode: 'insensitive',
+                  OR: [
+                    {
+                      producto: {
+                        nombre: {
+                          contains: search,
+                          mode: 'insensitive',
+                        },
+                      },
                     },
-                  },
+                    {
+                      descripcion: {
+                        contains: search,
+                        mode: 'insensitive',
+                      },
+                    },
+                  ],
                 },
               },
             },
@@ -808,6 +838,7 @@ export async function getSalesDashboard(
 }
 
 export async function createSale(payload: CreateSalePayload, request: FastifyRequest) {
+  await requirePermission(request, 'ventas.manage')
   const { userId, branchId } = await requireBranchAuthContext(request)
   const targetBranchId = payload.sucursalId ?? branchId
 
@@ -821,13 +852,31 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     throw createHttpError(400, 'La venta debe contener al menos un producto.')
   }
 
-  const duplicatedProducts = payload.items.reduce((map, item) => {
+  const registeredProductItems = payload.items.filter(
+    (item): item is CreateSaleItemProductoRegistrado =>
+      item.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO,
+  )
+  const quickSaleItems = payload.items.filter(
+    (item): item is CreateSaleItemVentaRapida => item.tipoLinea === TipoLineaVenta.VENTA_RAPIDA,
+  )
+
+  const duplicatedProducts = registeredProductItems.reduce((map, item) => {
     map.set(item.productoId, (map.get(item.productoId) ?? 0) + 1)
     return map
   }, new Map<string, number>())
 
   if ([...duplicatedProducts.values()].some((count) => count > 1)) {
     throw createHttpError(400, 'No repitas el mismo producto dentro de la misma venta.')
+  }
+
+  const duplicatedQuickSaleDescriptions = quickSaleItems.reduce((map, item) => {
+    const key = `${item.descripcion.trim().toLowerCase()}|${item.precioUnitario}|${item.simboloUnidad.trim().toLowerCase()}`
+    map.set(key, (map.get(key) ?? 0) + 1)
+    return map
+  }, new Map<string, number>())
+
+  if ([...duplicatedQuickSaleDescriptions.values()].some((count) => count > 1)) {
+    throw createHttpError(400, 'No repitas el mismo artículo rápido dentro de la misma venta.')
   }
 
   const pendingOpening = await prisma.aperturaCaja.findFirst({
@@ -900,52 +949,54 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
             },
           })
         : Promise.resolve(null),
-      tx.producto.findMany({
-        where: {
-          id: {
-            in: payload.items.map((item) => item.productoId),
-          },
-          deletedAt: null,
-          estado: 'ACTIVO',
-        },
-        select: {
-          id: true,
-          nombre: true,
-          sku: true,
-          precioVenta: true,
-          costoReferencia: true,
-          requiereReceta: true,
-          esControlado: true,
-          presentacionesEmpaque: {
-            where: { deletedAt: null },
+      registeredProductItems.length > 0
+        ? tx.producto.findMany({
+            where: {
+              id: {
+                in: registeredProductItems.map((item) => item.productoId),
+              },
+              deletedAt: null,
+              estado: 'ACTIVO',
+            },
             select: {
-              esBase: true,
-              permiteCompra: true,
-              permiteVenta: true,
+              id: true,
+              nombre: true,
+              sku: true,
               precioVenta: true,
-              presentacion: {
+              costoReferencia: true,
+              requiereReceta: true,
+              esControlado: true,
+              presentacionesEmpaque: {
+                where: { deletedAt: null },
                 select: {
-                  id: true,
-                  nombre: true,
+                  esBase: true,
+                  permiteCompra: true,
+                  permiteVenta: true,
+                  precioVenta: true,
+                  presentacion: {
+                    select: {
+                      id: true,
+                      nombre: true,
+                    },
+                  },
+                },
+              },
+              conversionesEmpaque: {
+                where: { deletedAt: null },
+                select: {
+                  desdePresentacionId: true,
+                  haciaPresentacionId: true,
+                  cantidad: true,
+                },
+              },
+              unidadMedida: {
+                select: {
+                  simbolo: true,
                 },
               },
             },
-          },
-          conversionesEmpaque: {
-            where: { deletedAt: null },
-            select: {
-              desdePresentacionId: true,
-              haciaPresentacionId: true,
-              cantidad: true,
-            },
-          },
-          unidadMedida: {
-            select: {
-              simbolo: true,
-            },
-          },
-        },
-      }),
+          })
+        : Promise.resolve([]),
       tx.formaPago.findMany({
         where: {
           id: {
@@ -978,7 +1029,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       throw createHttpError(404, 'El cliente seleccionado no está disponible.')
     }
 
-    if (products.length !== payload.items.length) {
+    if (products.length !== registeredProductItems.length) {
       throw createHttpError(
         404,
         'Uno o más productos seleccionados ya no están disponibles para la venta.',
@@ -1099,10 +1150,28 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     const productMap = new Map(products.map((product) => [product.id, product]))
     const paymentMethodMap = new Map(paymentMethods.map((method) => [method.id, method]))
 
-    const lineItems = payload.items.map((item) => {
+    type ProcessedLineBase = {
+      tipoLinea: TipoLineaVenta
+      quantity: number
+      discountTotal: number
+      unitPrice: number
+      subtotal: number
+      total: number
+      presentacion?: {
+        id: string
+        name: string
+        quantity: number
+        factor: number
+      } | null
+      simboloUnidad?: string | null
+      descripcion?: string | null
+      producto?: any | null
+      productoId?: string | null
+    }
+
+    const lineItems: ProcessedLineBase[] = payload.items.map((item) => {
       const requestedQuantity = Number(item.cantidad)
       const discountTotal = Number(item.descuentoTotal ?? 0)
-      const product = productMap.get(item.productoId)!
 
       if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
         throw createHttpError(400, 'La cantidad de cada línea debe ser mayor a 0.')
@@ -1112,43 +1181,89 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
       }
 
-      const packagingContext = resolvePackagingOperationContext({
-        operation: 'SALE',
-        presentationId: item.presentacionId,
-        presentations: product.presentacionesEmpaque ?? [],
-        conversions: product.conversionesEmpaque ?? [],
-      })
+      if (item.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO) {
+        const product = productMap.get(item.productoId)!
+        const packagingContext = resolvePackagingOperationContext({
+          operation: 'SALE',
+          presentationId: item.presentacionId,
+          presentations: product.presentacionesEmpaque ?? [],
+          conversions: product.conversionesEmpaque ?? [],
+        })
 
-      if (!packagingContext.ok) {
-        throw createHttpError(400, packagingContext.error)
+        if (!packagingContext.ok) {
+          throw createHttpError(400, packagingContext.error)
+        }
+
+        const quantity = convertQuantityToBaseUnits({
+          quantity: requestedQuantity,
+          factorToBase: packagingContext.factorToBase,
+        })
+        if (quantity === null) {
+          throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+        }
+
+        const presentationPrice =
+          packagingContext.selectedPresentation.precioVenta === null ||
+          packagingContext.selectedPresentation.precioVenta === undefined
+            ? null
+            : decimalToNumber(packagingContext.selectedPresentation.precioVenta)
+
+        if (presentationPrice === null) {
+          throw createHttpError(400, 'La presentación seleccionada no tiene un precio de venta configurado.')
+        }
+
+        const unitPrice = convertAmountToBaseUnit({
+          amount: presentationPrice,
+          factorToBase: packagingContext.factorToBase,
+        })
+        if (unitPrice === null) {
+          throw createHttpError(400, 'No fue posible calcular el precio unitario en base.')
+        }
+        const grossAmount = quantity * unitPrice
+
+        if (!Number.isFinite(discountTotal) || discountTotal < 0 || discountTotal > grossAmount) {
+          throw createHttpError(
+            400,
+            'El descuento de una línea no puede ser negativo ni superar el total bruto.',
+          )
+        }
+
+        return {
+          tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO,
+          productoId: item.productoId,
+          producto: product,
+          descripcion: null,
+          simboloUnidad: null,
+          quantity,
+          discountTotal,
+          unitPrice,
+          subtotal: grossAmount - discountTotal,
+          total: grossAmount - discountTotal,
+          presentacion: {
+            id: item.presentacionId,
+            name: packagingContext.selectedPresentation.presentacion.nombre,
+            quantity: requestedQuantity,
+            factor: packagingContext.factorToBase,
+          },
+        }
       }
 
-      const quantity = convertQuantityToBaseUnits({
-        quantity: requestedQuantity,
-        factorToBase: packagingContext.factorToBase,
-      })
-      if (quantity === null) {
-        throw createHttpError(400, 'No fue posible calcular la cantidad en unidad base.')
+      const precioUnitarioVR = Number(item.precioUnitario)
+      if (!Number.isFinite(precioUnitarioVR) || precioUnitarioVR <= 0) {
+        throw createHttpError(400, 'El precio unitario del artículo rápido debe ser mayor a 0.')
       }
 
-      const presentationPrice =
-        packagingContext.selectedPresentation.precioVenta === null ||
-        packagingContext.selectedPresentation.precioVenta === undefined
-          ? null
-          : decimalToNumber(packagingContext.selectedPresentation.precioVenta)
-
-      if (presentationPrice === null) {
-        throw createHttpError(400, 'La presentación seleccionada no tiene un precio de venta configurado.')
+      const descripcionVR = item.descripcion.trim()
+      if (!descripcionVR || descripcionVR.length > 255) {
+        throw createHttpError(400, 'La descripción del artículo rápido es inválida.')
       }
 
-      const unitPrice = convertAmountToBaseUnit({
-        amount: presentationPrice,
-        factorToBase: packagingContext.factorToBase,
-      })
-      if (unitPrice === null) {
-        throw createHttpError(400, 'No fue posible calcular el precio unitario en base.')
+      const simboloUnidadVR = item.simboloUnidad.trim()
+      if (!simboloUnidadVR || simboloUnidadVR.length > 20) {
+        throw createHttpError(400, 'El símbolo de unidad del artículo rápido es inválido.')
       }
-      const grossAmount = quantity * unitPrice
+
+      const grossAmount = requestedQuantity * precioUnitarioVR
 
       if (!Number.isFinite(discountTotal) || discountTotal < 0 || discountTotal > grossAmount) {
         throw createHttpError(
@@ -1158,19 +1273,17 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       }
 
       return {
-        productoId: item.productoId,
-        quantity,
+        tipoLinea: TipoLineaVenta.VENTA_RAPIDA,
+        productoId: null,
+        producto: null,
+        descripcion: descripcionVR,
+        simboloUnidad: simboloUnidadVR,
+        quantity: requestedQuantity,
         discountTotal,
-        unitPrice,
+        unitPrice: precioUnitarioVR,
         subtotal: grossAmount - discountTotal,
         total: grossAmount - discountTotal,
-        product,
-        presentation: {
-          id: item.presentacionId,
-          name: packagingContext.selectedPresentation.presentacion.nombre,
-          quantity: requestedQuantity,
-          factor: packagingContext.factorToBase,
-        },
+        presentacion: null,
       }
     })
 
@@ -1238,30 +1351,32 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       }
     }
 
-    const lots = await tx.lote.findMany({
-      where: {
-        deletedAt: null,
-        sucursalId: targetBranchId,
-        productoId: {
-          in: lineItems.map((item) => item.productoId),
-        },
-        stockDisponible: {
-          gt: 0,
-        },
-      },
-      select: {
-        id: true,
-        productoId: true,
-        numeroLote: true,
-        fechaVencimiento: true,
-        costoUnitario: true,
-        stockDisponible: true,
-        stockReservado: true,
-        stockBloqueado: true,
-        estado: true,
-      },
-      orderBy: [{ fechaVencimiento: 'asc' }, { createdAt: 'asc' }],
-    })
+    const lots = registeredProductItems.length > 0
+      ? await tx.lote.findMany({
+          where: {
+            deletedAt: null,
+            sucursalId: targetBranchId,
+            productoId: {
+              in: registeredProductItems.map((item) => item.productoId),
+            },
+            stockDisponible: {
+              gt: 0,
+            },
+          },
+          select: {
+            id: true,
+            productoId: true,
+            numeroLote: true,
+            fechaVencimiento: true,
+            costoUnitario: true,
+            stockDisponible: true,
+            stockReservado: true,
+            stockBloqueado: true,
+            estado: true,
+          },
+          orderBy: [{ fechaVencimiento: 'asc' }, { createdAt: 'asc' }],
+        })
+      : []
 
     const availableLotsByProduct = lots.reduce((map, lot) => {
       const current = map.get(lot.productoId) ?? []
@@ -1299,20 +1414,23 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         updatedById: userId,
         detalles: {
           create: lineItems.map((item) => ({
-            productoId: item.productoId,
+            tipoLinea: item.tipoLinea,
+            productoId: item.productoId ?? null,
+            descripcion: item.descripcion ?? null,
+            simboloUnidad: item.simboloUnidad ?? null,
             cantidad: item.quantity,
-            presentacionId: item.presentation.id,
+            presentacionId: item.presentacion?.id ?? null,
             cantidadPresentacion:
-              item.presentation.quantity === null || item.presentation.quantity === undefined
+              item.presentacion?.quantity === null || item.presentacion?.quantity === undefined
                 ? undefined
-                : Math.trunc(item.presentation.quantity),
-            factorPresentacion: Math.trunc(item.presentation.factor),
+                : Math.trunc(item.presentacion.quantity),
+            factorPresentacion: item.presentacion ? Math.trunc(item.presentacion.factor) : undefined,
             precioUnitario: toDecimal(item.unitPrice, 6),
             descuentoTotal: toDecimal(item.discountTotal, 2),
             impuestoTotal: toDecimal(0, 2),
             subtotal: toDecimal(item.subtotal, 2),
             total: toDecimal(item.total, 2),
-            costoReferencia: item.product.costoReferencia,
+            costoReferencia: item.producto?.costoReferencia ?? null,
             createdById: userId,
             updatedById: userId,
           })),
@@ -1343,7 +1461,11 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       })
     }
 
-    const detailMap = new Map(sale.detalles.map((detail) => [detail.productoId, detail]))
+    const detailMap = new Map(
+      sale.detalles
+        .filter((detail) => detail.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO && detail.productoId)
+        .map((detail) => [detail.productoId!, detail]),
+    )
     const lotAvailabilityMap = new Map(
       lots.map((lot) => [
         lot.id,
@@ -1359,7 +1481,12 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       ]),
     )
 
-    for (const item of lineItems) {
+    const registeredLineItems = lineItems.filter(
+      (item): item is ProcessedLineBase & { tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO; productoId: string; producto: any } =>
+        item.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO,
+    )
+
+    for (const item of registeredLineItems) {
       const detail = detailMap.get(item.productoId)
 
       if (!detail) {
@@ -1518,6 +1645,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
 export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
   await getAuthenticatedUserId(request)
+  await requirePermission(request, 'ventas.read')
   const { companyId } = await requireBranchAuthContext(request)
 
   const sale = await prisma.venta.findFirst({
@@ -1582,6 +1710,9 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
         orderBy: [{ createdAt: 'asc' }],
         select: {
           id: true,
+          tipoLinea: true,
+          descripcion: true,
+          simboloUnidad: true,
           cantidad: true,
           empaque: true,
           cantidadEmpaque: true,
@@ -1676,14 +1807,20 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
       const baseUnitPrice = decimalToNumber(detail.precioUnitario)
       const factor = detail.factorPresentacion ?? detail.factorEmpaque ?? 1
       const packQuantity = detail.cantidadPresentacion ?? detail.cantidadEmpaque ?? baseQuantity
-      const unitSymbol = detail.presentacion?.nombre ?? detail.producto.unidadMedida.simbolo
+      const productoName = detail.producto?.nombre ?? null
+      const productoSku = detail.producto?.sku ?? null
+      const productoUnitSymbol = detail.producto?.unidadMedida?.simbolo ?? null
+      const presentationName = detail.presentacion?.nombre ?? null
+      const itemName = productoName ?? detail.descripcion ?? 'Artículo'
+      const itemUnitSymbol =
+        presentationName ?? productoUnitSymbol ?? detail.simboloUnidad ?? 'u'
       const unitPrice = baseUnitPrice * factor
 
       return {
         id: detail.id,
-        sku: detail.producto.sku,
-        name: detail.producto.nombre,
-        unitSymbol,
+        sku: productoSku,
+        name: itemName,
+        unitSymbol: itemUnitSymbol,
         quantity: packQuantity,
         unitPrice,
         discountAmount: decimalToNumber(detail.descuentoTotal),
@@ -1712,6 +1849,7 @@ export async function getSaleReceipt(saleId: string, request: FastifyRequest) {
 }
 
 export async function cancelSale(saleId: string, request: FastifyRequest, observaciones?: string) {
+  await requirePermission(request, 'ventas.manage')
   const userId = await getAuthenticatedUserId(request)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -1785,6 +1923,13 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
     })
 
     for (const detail of sale.detalles) {
+      if (
+        detail.tipoLinea !== TipoLineaVenta.PRODUCTO_REGISTRADO ||
+        !detail.productoId
+      ) {
+        continue
+      }
+
       for (const lotAssignment of detail.lotesAsignados) {
         const lot = await tx.lote.findFirst({
           where: { id: lotAssignment.loteId, deletedAt: null },

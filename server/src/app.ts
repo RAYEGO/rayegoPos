@@ -22,6 +22,7 @@ import { adminPosRoutes } from './routes/admin-pos.js'
 import { systemRoutes } from './routes/system.js'
 import usersRoutes from './routes/users.js'
 import { rtRoutes } from './routes/rt.js'
+import rolesRoutes from './routes/roles.js'
 
 const performanceDebugConfig = (() => {
   const fallback = {
@@ -109,7 +110,12 @@ export function createApp() {
           : statusCode === 401
             ? 'La sesión ya no es válida.'
             : 'No fue posible validar la sesión.'
-      reply.code(statusCode).send({ message })
+      const code =
+        error instanceof Error &&
+        typeof (error as unknown as { code?: unknown }).code === 'string'
+          ? (error as unknown as { code: string }).code
+          : undefined
+      void reply.code(statusCode).send({ message, ...(code ? { code } : {}) })
     }
   })
 
@@ -208,6 +214,10 @@ export function createApp() {
       prefix: '/api/users',
     })
 
+    instance.register(rolesRoutes, {
+      prefix: '/api/roles',
+    })
+
     instance.register(systemRoutes, {
       prefix: '/api/system',
     })
@@ -294,6 +304,10 @@ export function createApp() {
         'message' in error && typeof error.message === 'string'
           ? error.message
           : 'La API respondió con un error.'
+      const code =
+        'code' in error && typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : undefined
       const stack =
         exposeErrors &&
         'stack' in error &&
@@ -303,6 +317,7 @@ export function createApp() {
 
       return reply.code(error.statusCode).send({
         message,
+        ...(code ? { code } : {}),
         ...(requestId ? { requestId } : {}),
         ...(stack ? { stack } : {}),
       })

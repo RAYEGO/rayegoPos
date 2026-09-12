@@ -266,6 +266,7 @@ export async function updateSupplier(
 }
 
 export async function deleteSupplier(supplierId: string, request: FastifyRequest) {
+  await requirePermission(request, 'proveedores.manage')
   const { userId, companyId } = await requireBranchAuthContext(request)
 
   const supplier = await prisma.proveedor.findFirst({

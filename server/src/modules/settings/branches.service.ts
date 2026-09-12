@@ -76,6 +76,7 @@ async function writeAudit(
 }
 
 export async function listBranchesForCompany(request: FastifyRequest): Promise<BranchListItem[]> {
+  requirePermission(request, 'configuracion.read')
   const { companyId } = await requireBranchAuthContext(request)
   return prisma.sucursal.findMany({
     where: {
@@ -103,6 +104,7 @@ export async function getBranchDetail(
   branchId: string,
   request: FastifyRequest,
 ): Promise<BranchDetail> {
+  requirePermission(request, 'configuracion.read')
   const { companyId } = await requireBranchAuthContext(request)
   const branch = await prisma.sucursal.findFirst({
     where: {
@@ -282,6 +284,7 @@ export async function toggleBranchStatus(
   branchId: string,
   request: FastifyRequest,
 ): Promise<BranchDetail> {
+  requirePermission(request, 'configuracion.read')
   const { companyId } = await requireBranchAuthContext(request)
   const existing = await prisma.sucursal.findFirst({
     where: {

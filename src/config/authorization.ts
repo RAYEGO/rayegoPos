@@ -274,6 +274,23 @@ export const roleDefinitions: RoleDefinition[] = [
     badgeVariant: 'outline',
     permissions: ['dashboard.read', 'compras.read', 'inventario.read', 'productos.read'],
   },
+  {
+    key: 'TECNICO',
+    label: 'Técnico',
+    description: 'Gestiona órdenes de servicio, equipos de clientes y consumo de inventario RT.',
+    badgeVariant: 'secondary',
+    permissions: [
+      'dashboard.read',
+      'ordenesServicio.read',
+      'ordenesServicio.write',
+      'ordenesServicio.cambioEstado',
+      'tecnicos.read',
+      'equiposCliente.read',
+      'equiposCliente.write',
+      'consumoInventarioRT.write',
+      'garantiasOrdenServicio.read',
+    ],
+  },
 ]
 
 export const permissionDefinitionMap = Object.fromEntries(

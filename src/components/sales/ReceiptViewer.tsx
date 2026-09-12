@@ -109,7 +109,7 @@ export function ReceiptViewer({ receipt, className }: ReceiptViewerProps) {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="break-words font-semibold">{item.name}</p>
-                <p className="text-[10px]">{item.sku}</p>
+                {item.sku && item.sku.trim() && <p className="text-[10px]">{item.sku}</p>}
               </div>
               <p className="whitespace-nowrap font-semibold">{formatCurrency(item.total)}</p>
             </div>

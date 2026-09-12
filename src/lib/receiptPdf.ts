@@ -186,7 +186,9 @@ export async function createReceiptPdf(receipt: SaleReceiptResponse) {
 
   for (const item of receipt.items) {
     addLine(item.name, { bold: true })
-    addLine(item.sku, { size: 9 })
+    if (item.sku && item.sku.trim()) {
+      addLine(item.sku, { size: 9 })
+    }
     const qty = Number.isFinite(item.quantity) ? item.quantity : 0
     addRow(`${qty} ${item.unitSymbol} x ${item.unitPrice.toFixed(2)}`, item.total.toFixed(2))
     if (item.discountAmount > 0) {

@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client'
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -82,6 +82,7 @@ function mapCompany(company: {
 
 export async function getCompanyProfile(request: FastifyRequest) {
   assertAdmin(request)
+  requirePermission(request, 'configuracion.read')
   const { companyId } = await requireBranchAuthContext(request)
 
   const company = await prisma.empresa.findFirst({
@@ -132,6 +133,7 @@ export async function updateCompanyProfile(
   request: FastifyRequest,
 ) {
   assertAdmin(request)
+  requirePermission(request, 'configuracion.read')
   const { companyId, userId } = await requireBranchAuthContext(request)
 
   const existing = await prisma.empresa.findFirst({
@@ -195,6 +197,7 @@ export async function updateCompanyOperationMode(
   request: FastifyRequest,
 ) {
   assertAdmin(request)
+  requirePermission(request, 'configuracion.read')
   const { companyId, userId } = await requireBranchAuthContext(request)
 
   const existing = await prisma.empresa.findFirst({
@@ -336,6 +339,7 @@ function extractR2ObjectKey(logoUrl: string, publicBaseUrl: string) {
 
 export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, request: FastifyRequest) {
   assertAdmin(request)
+  requirePermission(request, 'configuracion.read')
   const { companyId, userId } = await requireBranchAuthContext(request)
   const r2Config = getR2Config()
   const client = getR2Client(r2Config)
@@ -477,6 +481,7 @@ export async function uploadCompanyLogo(payload: UploadCompanyLogoPayload, reque
 
 export async function deleteCompanyLogo(request: FastifyRequest) {
   assertAdmin(request)
+  requirePermission(request, 'configuracion.read')
   const { companyId, userId } = await requireBranchAuthContext(request)
   const r2Config = getR2Config()
   const client = getR2Client(r2Config)

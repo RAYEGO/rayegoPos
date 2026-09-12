@@ -309,6 +309,7 @@ export async function updateCustomer(
   payload: UpdateCustomerPayload,
   request: FastifyRequest,
 ) {
+  await requirePermission(request, 'clientes.manage')
   const { userId, companyId } = await requireBranchAuthContext(request)
 
   const existingCustomer = await prisma.cliente.findFirst({

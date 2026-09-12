@@ -118,17 +118,31 @@ export type SalesDashboardResponse = {
   }
 }
 
+export type CreateSaleProductoRegistradoItem = {
+  tipoLinea: 'PRODUCTO_REGISTRADO'
+  productoId: string
+  cantidad: number
+  presentacionId: string
+  descuentoTotal?: number
+}
+
+export type CreateSaleVentaRapidaItem = {
+  tipoLinea: 'VENTA_RAPIDA'
+  descripcion: string
+  simboloUnidad: string
+  precioUnitario: number
+  cantidad: number
+  descuentoTotal?: number
+}
+
+export type CreateSaleItem = CreateSaleProductoRegistradoItem | CreateSaleVentaRapidaItem
+
 export type CreateSalePayload = {
   sucursalId?: string
   clienteId?: string
   tipoComprobante?: 'TICKET' | 'BOLETA' | 'FACTURA'
   observaciones?: string
-  items: Array<{
-    productoId: string
-    cantidad: number
-    presentacionId: string
-    descuentoTotal?: number
-  }>
+  items: CreateSaleItem[]
   payments: Array<{
     formaPagoId: string
     monto: number
@@ -169,7 +183,7 @@ export type SaleReceiptResponse = {
   cashierName: string
   items: Array<{
     id: string
-    sku: string
+    sku: string | null
     name: string
     unitSymbol: string
     quantity: number

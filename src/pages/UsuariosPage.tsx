@@ -71,6 +71,10 @@ import {
   usersService,
   type UsersModuleUserRecord,
 } from '@/services/usersService'
+import {
+  rolesService,
+  type RolePermissionsDetail as RolePermissionsDetailData,
+} from '@/services/rolesService'
 import type { AuthPermission, AuthRole, UserStatus } from '@/types/auth'
 import type { Branch } from '@/types/settings'
 import { toast } from 'sonner'
@@ -1142,18 +1146,73 @@ function RolesMatrixSection({
   canManage: boolean
   canSeePlatformUsers: boolean
 }) {
+  const { session } = useAuth()
+  const accessToken = session?.accessToken ?? ''
   const { businessType, isFeatureEnabled } = useBusinessFeatures()
   const isServicioTecnicoEnabled =
     businessType === 'SERVICIO_TECNICO' || isFeatureEnabled('module_ordenes_servicio')
   const [selectedRole, setSelectedRole] = useState<AuthRole>(
     visibleRoleDefinitions[0]?.key ?? 'ADMIN_EMPRESA',
   )
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [serverDetail, setServerDetail] = useState<RolePermissionsDetailData | null>(null)
+  const [pendingPermissions, setPendingPermissions] = useState<Set<AuthPermission> | null>(null)
 
   useEffect(() => {
     if (!visibleRoleDefinitions.some((r) => r.key === selectedRole)) {
       setSelectedRole(visibleRoleDefinitions[0]?.key ?? 'ADMIN_EMPRESA')
     }
   }, [selectedRole, visibleRoleDefinitions])
+
+  const loadRoleDetail = useCallback(
+    async (roleCodigo: AuthRole, opts?: { force?: boolean }) => {
+      if (!accessToken) return
+      const fallback = roleDefinitions.find((r) => r.key === roleCodigo) ?? visibleRoleDefinitions[0]
+      if (!fallback) return
+      setIsLoadingDetail(true)
+      try {
+        const data = await rolesService.getRolePermissions(accessToken, roleCodigo)
+        setServerDetail(data)
+        if (!pendingPermissions || opts?.force) {
+          setPendingPermissions(new Set(data.permisos as AuthPermission[]))
+        }
+      } catch (error) {
+        console.warn('[Roles] Error cargando permisos desde BD, usando local.', error)
+        const fallbackPermisos =
+          roleDefinitions.find((r) => r.key === roleCodigo)?.permissions ?? fallback.permissions
+        const fallbackData: RolePermissionsDetailData = {
+          codigo: fallback.key,
+          nombre: fallback.label,
+          descripcion: fallback.description,
+          isPlatformOnly: fallback.key === 'ADMIN_POS',
+          permisos: fallbackPermisos,
+          permisosDisponibles: permissionDefinitions.map((p) => ({
+            codigo: p.key,
+            modulo: p.module,
+            nombre: p.label,
+            descripcion: p.description,
+            tipo: p.key.endsWith('.read')
+              ? 'read'
+              : p.key.endsWith('.manage')
+                ? 'manage'
+                : 'otro',
+          })),
+        }
+        setServerDetail(fallbackData)
+        if (!pendingPermissions || opts?.force) {
+          setPendingPermissions(new Set(fallbackPermisos))
+        }
+      } finally {
+        setIsLoadingDetail(false)
+      }
+    },
+    [accessToken, pendingPermissions, visibleRoleDefinitions],
+  )
+
+  useEffect(() => {
+    void loadRoleDetail(selectedRole)
+  }, [selectedRole, loadRoleDetail])
 
   const currentRole = useMemo(
     () => roleDefinitions.find((r) => r.key === selectedRole) ?? visibleRoleDefinitions[0],
@@ -1179,9 +1238,79 @@ function RolesMatrixSection({
     return permissionModules.filter((mod) => allowedModuleLabels.has(mod))
   }, [isServicioTecnicoEnabled, canSeePlatformUsers])
 
+  const isDirty = useMemo(() => {
+    if (!serverDetail || !pendingPermissions) return false
+    const base = new Set(serverDetail.permisos)
+    if (base.size !== pendingPermissions.size) return true
+    for (const p of base) if (!pendingPermissions.has(p)) return true
+    return false
+  }, [serverDetail, pendingPermissions])
+
   if (!currentRole) return null
 
-  const rolePermissions = new Set<AuthPermission>(currentRole.permissions)
+  const rolePermissions = pendingPermissions ?? new Set<AuthPermission>(currentRole.permissions)
+
+  const togglePermission = useCallback(
+    (permissionKey: AuthPermission, next: boolean) => {
+      if (!canManage) return
+      if (serverDetail && serverDetail.isPlatformOnly && !canSeePlatformUsers) return
+      setPendingPermissions((prev) => {
+        const base = prev ? new Set(prev) : new Set<AuthPermission>(currentRole.permissions)
+        if (next) {
+          base.add(permissionKey)
+          if (permissionKey.endsWith('.manage')) {
+            const readKey = permissionKey.replace(/\.manage$/, '.read') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === readKey)) {
+              base.add(readKey)
+            }
+          }
+        } else {
+          base.delete(permissionKey)
+          if (permissionKey.endsWith('.read')) {
+            const manageKey = permissionKey.replace(/\.read$/, '.manage') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === manageKey)) {
+              base.delete(manageKey)
+            }
+          }
+        }
+        return base
+      })
+    },
+    [canManage, canSeePlatformUsers, currentRole.permissions, serverDetail],
+  )
+
+  const onSaveChanges = useCallback(async () => {
+    if (!canManage || !serverDetail || !pendingPermissions || !accessToken) return
+    if (!isDirty) {
+      toast.message('No hay cambios pendientes por guardar.')
+      return
+    }
+    setIsSaving(true)
+    try {
+      const permisos = Array.from(pendingPermissions) as AuthPermission[]
+      const result = await rolesService.updateRolePermissions(accessToken, serverDetail.codigo, permisos)
+      await loadRoleDetail(serverDetail.codigo, { force: true })
+      toast.success(
+        result.affectedUsers > 0
+          ? `Cambios guardados. Se actualizaron permisos y se invalidaron ${result.affectedUsers} sesiones activas.`
+          : 'Cambios guardados correctamente.',
+        { id: `roles-saved-${serverDetail.codigo}` },
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Inténtalo nuevamente.'
+      toast.error(`No fue posible guardar los cambios. ${message}`, {
+        id: `roles-save-error-${serverDetail.codigo}`,
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }, [accessToken, canManage, isDirty, loadRoleDetail, pendingPermissions, serverDetail])
+
+  const subtitle = !canManage
+    ? 'Vista de la matriz de autorizaciones por módulo. Contacta a un administrador para realizar cambios.'
+    : isDirty
+      ? 'Tienes cambios pendientes. Presiona Guardar cambios para confirmarlos.'
+      : 'Matriz de autorizaciones por módulo. Los cambios se reflejan inmediatamente para los usuarios afectados.'
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -1189,22 +1318,55 @@ function RolesMatrixSection({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-xl font-bold text-foreground">Roles y permisos</h1>
-            <p className="text-small text-muted-foreground">
-              Matriz de autorizaciones por módulo. Fase 1: visualización (no editable).
-            </p>
+            <p className="text-small text-muted-foreground">{subtitle}</p>
+            {isDirty && (
+              <Badge variant="warning" className="mt-2">
+                Cambios pendientes
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button type="button" size="sm" variant="outline" disabled={!canManage}>
-                  <Settings2 className="h-4 w-4" />
-                  Guardar cambios
+            {canManage && (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!isDirty || isSaving || isLoadingDetail}
+                  onClick={() => {
+                    if (!serverDetail) return
+                    setPendingPermissions(new Set(serverDetail.permisos as AuthPermission[]))
+                  }}
+                >
+                  Deshacer
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-xs text-xs">
-                Persistencia de roles y permisos disponible en la próxima actualización.
-              </TooltipContent>
-            </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!isDirty || isSaving || isLoadingDetail}
+                        onClick={() => void onSaveChanges()}
+                      >
+                        <Settings2 className="h-4 w-4" />
+                        {isSaving ? 'Guardando…' : 'Guardar cambios'}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!canManage && (
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      No tienes autorización para modificar roles y permisos.
+                    </TooltipContent>
+                  )}
+                  {canManage && !isDirty && (
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      Modifica la matriz de permisos para habilitar el guardado.
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </>
+            )}
           </div>
         </div>
 
@@ -1217,11 +1379,17 @@ function RolesMatrixSection({
                   <p className="text-sm font-semibold text-foreground">{currentRole.label}</p>
                   <p className="text-xs text-muted-foreground">{currentRole.description}</p>
                 </div>
+                {serverDetail && (
+                  <Badge variant="outline">
+                    {rolePermissions.size} permisos asignados
+                  </Badge>
+                )}
               </div>
               <div className="w-full md:w-72">
                 <Select
                   value={selectedRole}
                   onValueChange={(value) => setSelectedRole(value as AuthRole)}
+                  disabled={isSaving}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecciona un rol" />
@@ -1265,13 +1433,22 @@ function RolesMatrixSection({
                     const permManage = permissionDefinitions.find(
                       (p) => p.module === moduleLabel && p.key.endsWith('.manage'),
                     )
+                    const disabledForPlatformOnly =
+                      serverDetail?.isPlatformOnly && !canSeePlatformUsers
+                    const checkDisabled = !canManage || isSaving || disabledForPlatformOnly
 
                     return (
                       <TableRow key={moduleLabel}>
                         <TableCell className="font-medium text-foreground">{moduleLabel}</TableCell>
                         <TableCell className="text-center">
                           {permRead ? (
-                            <Checkbox disabled checked={rolePermissions.has(permRead.key)} />
+                            <Checkbox
+                              disabled={checkDisabled}
+                              checked={rolePermissions.has(permRead.key)}
+                              onCheckedChange={(value) =>
+                                togglePermission(permRead.key as AuthPermission, Boolean(value))
+                              }
+                            />
                           ) : (
                             <Badge variant="outline" className="text-[10px]">
                               N/A
@@ -1284,8 +1461,11 @@ function RolesMatrixSection({
                               <TooltipTrigger asChild>
                                 <span className="inline-flex items-center justify-center">
                                   <Checkbox
-                                    disabled
+                                    disabled={checkDisabled}
                                     checked={rolePermissions.has(permManage.key)}
+                                    onCheckedChange={(value) =>
+                                      togglePermission(permManage.key as AuthPermission, Boolean(value))
+                                    }
                                   />
                                 </span>
                               </TooltipTrigger>

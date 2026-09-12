@@ -1116,6 +1116,7 @@ export async function adjustInventoryLot(
   payload: AdjustInventoryLotPayload,
   request: FastifyRequest,
 ) {
+  await requirePermission(request, 'inventario.manage')
   const { userId, branchId } = await requireBranchAuthContext(request)
   const requestedQuantity = Number(payload.quantity)
 

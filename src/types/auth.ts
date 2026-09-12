@@ -5,6 +5,7 @@ export type AuthRole =
   | 'SUPERVISOR'
   | 'CAJERO'
   | 'ALMACEN'
+  | 'TECNICO'
 
 export type UserStatus = 'ACTIVO' | 'BLOQUEADO' | 'INVITADO'
 

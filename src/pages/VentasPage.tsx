@@ -15,6 +15,7 @@ import {
   ClipboardList,
   X,
   MessageSquarePlus,
+  Zap,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,7 +23,15 @@ import {
   Card,
   CardContent,
 } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Loader } from '@/components/ui/loader'
 import {
   Select,
@@ -71,6 +80,27 @@ const saleCheckoutSchema = z.object({
 
 type SaleCheckoutFormValues = z.infer<typeof saleCheckoutSchema>
 
+const ventaRapidaSchema = z
+  .object({
+    descripcion: z.string().trim().min(1, 'Agrega una descripción.').max(255, 'Máximo 255 caracteres.'),
+    simboloUnidad: z.string().trim().min(1, 'Agrega un símbolo.').max(20, 'Máximo 20 caracteres.').default('u'),
+    precioUnitario: z.coerce.number().positive('El precio debe ser mayor a 0.'),
+    cantidad: z.coerce.number().int().positive('La cantidad debe ser mayor a 0.'),
+    descuentoTotal: z.coerce.number().min(0, 'El descuento no puede ser negativo.').optional().default(0),
+  })
+  .superRefine((value, ctx) => {
+    const bruto = value.precioUnitario * value.cantidad
+    if (value.descuentoTotal > bruto) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'El descuento no puede superar el subtotal de la línea.',
+        path: ['descuentoTotal'],
+      })
+    }
+  })
+
+type VentaRapidaFormValues = z.infer<typeof ventaRapidaSchema>
+
 type LocalCartPresentationOption = {
   id: string
   name: string
@@ -78,7 +108,9 @@ type LocalCartPresentationOption = {
   factorToBase: number
 }
 
-type LocalCartItem = {
+type LocalCartItemProductoRegistrado = {
+  tipoLinea: 'PRODUCTO_REGISTRADO'
+  cartKey: string
   productId: string
   name: string
   sku: string
@@ -89,12 +121,44 @@ type LocalCartItem = {
   presentationFactorToBase: number | null
   presentationOptions: LocalCartPresentationOption[]
   quantity: number
+  discountTotal: number
   availableUnits: number
   requiresPrescription: boolean
   isControlled: boolean
   coldChain: boolean
   suggestedLotCode: string
   suggestedLotExpiryDate: string | null
+}
+
+type LocalCartItemVentaRapida = {
+  tipoLinea: 'VENTA_RAPIDA'
+  cartKey: string
+  descripcion: string
+  simboloUnidad: string
+  unitPrice: number
+  quantity: number
+  discountTotal: number
+}
+
+type LocalCartItem = LocalCartItemProductoRegistrado | LocalCartItemVentaRapida
+
+function isLocalCartProductoRegistrado(item: LocalCartItem): item is LocalCartItemProductoRegistrado {
+  return item.tipoLinea === 'PRODUCTO_REGISTRADO'
+}
+
+function isLocalCartVentaRapida(item: LocalCartItem): item is LocalCartItemVentaRapida {
+  return item.tipoLinea === 'VENTA_RAPIDA'
+}
+
+function makeProductoRegistradoCartKey(productId: string) {
+  return `pr:${productId}`
+}
+
+function makeVentaRapidaCartKey(params: { descripcion: string; simboloUnidad: string; precioUnitario: number }) {
+  const descripcion = params.descripcion.trim().toLowerCase()
+  const simbolo = params.simboloUnidad.trim().toLowerCase()
+  const precio = Number.isFinite(params.precioUnitario) ? params.precioUnitario : 0
+  return `vr:${descripcion}|${simbolo}|${precio.toFixed(6)}`
 }
 
 const defaultCheckoutFormValues: SaleCheckoutFormValues = {
@@ -110,6 +174,20 @@ const defaultCheckoutFormValues: SaleCheckoutFormValues = {
     },
   ],
 }
+
+const VENTA_RAPIDA_UNIDADES_MEDIDA = [
+  { codigo: 'UND', nombre: 'Unidad', simbolo: 'und' },
+  { codigo: 'CAJ', nombre: 'Caja', simbolo: 'caj' },
+  { codigo: 'BLI', nombre: 'Blíster', simbolo: 'blis' },
+  { codigo: 'SOB', nombre: 'Sobre', simbolo: 'sob' },
+  { codigo: 'FRA', nombre: 'Frasco', simbolo: 'fra' },
+  { codigo: 'PAQ', nombre: 'Paquete', simbolo: 'paq' },
+  { codigo: 'PACK', nombre: 'Pack', simbolo: 'pack' },
+  { codigo: 'BOL', nombre: 'Bolsa', simbolo: 'bol' },
+  { codigo: 'OTR', nombre: 'Otro', simbolo: 'otr' },
+] as const
+
+const VENTA_RAPIDA_DEFAULT_SIMBOLO = VENTA_RAPIDA_UNIDADES_MEDIDA[0].simbolo
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('es-PE', {
@@ -182,11 +260,13 @@ function clampQuantity(value: number, max: number) {
   if (!Number.isFinite(value)) {
     return 1
   }
-
-  return Math.min(Math.max(1, value), Math.max(1, Math.floor(max)))
+  return Math.min(Math.max(1, Math.floor(value)), Math.max(1, Math.floor(max)))
 }
 
 function getCartItemMax(item: LocalCartItem) {
+  if (isLocalCartVentaRapida(item)) {
+    return 9999
+  }
   const factor = item.presentationFactorToBase ?? null
   if (!factor || !Number.isFinite(factor) || factor <= 0) {
     return Math.max(0, Math.floor(item.availableUnits))
@@ -195,6 +275,9 @@ function getCartItemMax(item: LocalCartItem) {
 }
 
 function getCartItemUnitPrice(item: LocalCartItem) {
+  if (isLocalCartVentaRapida(item)) {
+    return item.unitPrice
+  }
   if (typeof item.presentationPrice === 'number') {
     return item.presentationPrice
   }
@@ -202,6 +285,9 @@ function getCartItemUnitPrice(item: LocalCartItem) {
 }
 
 function getCartItemReservedUnits(item: LocalCartItem) {
+  if (isLocalCartVentaRapida(item)) {
+    return item.quantity
+  }
   const factor = item.presentationFactorToBase ?? null
   if (!factor || !Number.isFinite(factor) || factor <= 0) {
     return item.quantity
@@ -209,7 +295,11 @@ function getCartItemReservedUnits(item: LocalCartItem) {
   return item.quantity * factor
 }
 
-function getStockVariant(product: any) {
+function getCartItemLineSubtotal(item: LocalCartItem) {
+  return item.quantity * getCartItemUnitPrice(item) - item.discountTotal
+}
+
+function getStockVariant(product: SalesDashboardResponse['products'][number]) {
   if (product.availableUnits === 0) return 'destructive'
   if (product.availableUnits <= 20) return 'warning'
   return 'success'
@@ -234,7 +324,11 @@ export function VentasPage() {
   const [receiptPayload, setReceiptPayload] = useState<SaleReceiptResponse | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSaleObservaciones, setShowSaleObservaciones] = useState(false)
+  const [cartPulseNonce, setCartPulseNonce] = useState(0)
+  const [isCartJustAdded, setIsCartJustAdded] = useState(false)
+  const [isVentaRapidaSubmittingAnim, setIsVentaRapidaSubmittingAnim] = useState(false)
   const [expandedPaymentNotes, setExpandedPaymentNotes] = useState<Record<number, boolean>>({})
+  const [isVentaRapidaDialogOpen, setIsVentaRapidaDialogOpen] = useState(false)
 
   const handleUnauthorized = useHandleUnauthorized('VentasPage')
 
@@ -256,6 +350,36 @@ export function VentasPage() {
     control: checkoutForm.control,
     name: 'payments',
   })
+
+  const ventaRapidaForm = useForm<VentaRapidaFormValues>({
+    resolver: zodResolver(ventaRapidaSchema),
+    defaultValues: {
+      descripcion: '',
+      simboloUnidad: VENTA_RAPIDA_DEFAULT_SIMBOLO,
+      precioUnitario: 0,
+      cantidad: 1,
+      descuentoTotal: 0,
+    },
+  })
+
+  function handleAddVentaRapida(values: VentaRapidaFormValues) {
+    try {
+      addVentaRapidaToCart(values)
+      toast.success('⚡ Venta rápida agregada al carrito.')
+      setIsVentaRapidaSubmittingAnim(true)
+      window.setTimeout(() => setIsVentaRapidaSubmittingAnim(false), 220)
+      setIsVentaRapidaDialogOpen(false)
+      ventaRapidaForm.reset({
+        descripcion: '',
+        simboloUnidad: VENTA_RAPIDA_DEFAULT_SIMBOLO,
+        precioUnitario: 0,
+        cantidad: 1,
+        descuentoTotal: 0,
+      })
+    } catch (nextError) {
+      toast.error(getApiErrorMessage(nextError))
+    }
+  }
 
   const watchedPayments =
     useWatch({
@@ -317,18 +441,19 @@ export function VentasPage() {
   const dispensations = dashboard?.dispensations ?? []
 
   const cartMetrics = useMemo(() => {
-    const subtotal = cartItems.reduce(
-      (sum, item) => sum + item.quantity * getCartItemUnitPrice(item),
-      0,
-    )
+    const subtotal = cartItems.reduce((sum, item) => sum + getCartItemLineSubtotal(item), 0)
+    const pr = cartItems.filter(isLocalCartProductoRegistrado)
+    const vr = cartItems.filter(isLocalCartVentaRapida)
 
     return {
       itemCount: cartItems.length,
+      prCount: pr.length,
+      vrCount: vr.length,
       totalUnits: cartItems.reduce((sum, item) => sum + getCartItemReservedUnits(item), 0),
       subtotal,
       total: subtotal,
-      prescriptionItems: cartItems.filter((item) => item.requiresPrescription).length,
-      controlledItems: cartItems.filter((item) => item.isControlled).length,
+      prescriptionItems: pr.filter((item) => item.requiresPrescription).length,
+      controlledItems: pr.filter((item) => item.isControlled).length,
     }
   }, [cartItems])
 
@@ -337,6 +462,13 @@ export function VentasPage() {
       setIsCartPanelOpen(false)
     }
   }, [cartItems.length])
+
+  useEffect(() => {
+    if (cartPulseNonce === 0) return
+    setIsCartJustAdded(true)
+    const handle = window.setTimeout(() => setIsCartJustAdded(false), 420)
+    return () => window.clearTimeout(handle)
+  }, [cartPulseNonce])
 
   const watchedPaymentTotal = watchedPayments.reduce(
     (sum, payment) => sum + (Number.isFinite(payment?.monto) ? payment.monto : 0),
@@ -383,9 +515,9 @@ export function VentasPage() {
         : null
 
   function syncCartWithProduct(
-    current: LocalCartItem,
+    current: LocalCartItemProductoRegistrado,
     nextProduct?: SalesDashboardResponse['products'][number],
-  ) {
+  ): LocalCartItemProductoRegistrado {
     if (!nextProduct) {
       return current
     }
@@ -450,6 +582,9 @@ export function VentasPage() {
     setCartItems((current) =>
       current
         .map((item) => {
+          if (isLocalCartVentaRapida(item)) {
+            return item
+          }
           const product = productMap.get(item.productId)
 
           if (!product) {
@@ -462,7 +597,7 @@ export function VentasPage() {
             quantity: clampQuantity(item.quantity, getCartItemMax(synced)),
           }
         })
-        .filter((item) => item.availableUnits > 0),
+        .filter((item) => (isLocalCartVentaRapida(item) ? true : item.availableUnits > 0)),
     )
   }, [availableProducts])
 
@@ -473,11 +608,12 @@ export function VentasPage() {
     }
 
     const suggestedLot = product.suggestedLot
+    const cartKey = makeProductoRegistradoCartKey(product.id)
 
     setCartItems((current) => {
-      const existing = current.find((item) => item.productId === product.id)
+      const existing = current.find((item) => item.cartKey === cartKey)
 
-      if (existing) {
+      if (existing && isLocalCartProductoRegistrado(existing)) {
         const synced = syncCartWithProduct(existing, product)
         if (existing.quantity >= getCartItemMax(synced)) {
           toast.error('Ya alcanzaste el stock disponible para este producto.')
@@ -485,7 +621,7 @@ export function VentasPage() {
         }
 
         return current.map((item) =>
-          item.productId === product.id
+          item.cartKey === cartKey && isLocalCartProductoRegistrado(item)
             ? syncCartWithProduct(
                 {
                   ...item,
@@ -530,6 +666,8 @@ export function VentasPage() {
       return [
         ...current,
         {
+          tipoLinea: 'PRODUCTO_REGISTRADO',
+          cartKey,
           productId: product.id,
           name: product.name,
           sku: product.sku,
@@ -540,6 +678,7 @@ export function VentasPage() {
           presentationFactorToBase: selectedPresentation?.factorToBase ?? null,
           presentationOptions,
           quantity: 1,
+          discountTotal: 0,
           availableUnits: product.availableUnits,
           requiresPrescription: product.requiresPrescription,
           isControlled: product.isControlled,
@@ -551,10 +690,42 @@ export function VentasPage() {
     })
   }
 
-  function updateCartQuantity(productId: string, nextQuantity: number) {
+  function addVentaRapidaToCart(values: VentaRapidaFormValues) {
+    const cartKey = makeVentaRapidaCartKey({
+      descripcion: values.descripcion,
+      simboloUnidad: values.simboloUnidad,
+      precioUnitario: values.precioUnitario,
+    })
+
+    let added = false
+    setCartItems((current) => {
+      const existing = current.find((item) => item.cartKey === cartKey)
+      if (existing && isLocalCartVentaRapida(existing)) {
+        toast.warning('⚡ Esta venta rápida ya está en el carrito; ajusta la cantidad desde allí.')
+        return current
+      }
+
+      const next: LocalCartItemVentaRapida = {
+        tipoLinea: 'VENTA_RAPIDA',
+        cartKey,
+        descripcion: values.descripcion.trim(),
+        simboloUnidad: values.simboloUnidad.trim(),
+        unitPrice: Number.isFinite(values.precioUnitario) ? values.precioUnitario : 0,
+        quantity: Number.isInteger(values.cantidad) ? Math.max(1, values.cantidad) : 1,
+        discountTotal: Number.isFinite(values.descuentoTotal) ? Math.max(0, values.descuentoTotal) : 0,
+      }
+      added = true
+      return [...current, next]
+    })
+    if (added) {
+      setCartPulseNonce((n) => n + 1)
+    }
+  }
+
+  function updateCartQuantity(cartKey: string, nextQuantity: number) {
     setCartItems((current) =>
       current.map((item) =>
-        item.productId === productId
+        item.cartKey === cartKey
           ? {
               ...item,
               quantity: clampQuantity(nextQuantity, getCartItemMax(item)),
@@ -564,16 +735,17 @@ export function VentasPage() {
     )
   }
 
-  function updateCartPresentation(productId: string, presentationId: string) {
+  function updateCartPresentation(productCartKey: string, presentationId: string) {
     setCartItems((current) =>
       current.map((item) => {
-        if (item.productId !== productId) return item
+        if (item.cartKey !== productCartKey) return item
+        if (!isLocalCartProductoRegistrado(item)) return item
         if (!item.presentationOptions.length) return item
 
         const selected = item.presentationOptions.find((option) => option.id === presentationId) ?? null
         if (!selected) return item
 
-        const next = {
+        const next: LocalCartItemProductoRegistrado = {
           ...item,
           presentationId: selected.id,
           presentationName: selected.name,
@@ -589,8 +761,8 @@ export function VentasPage() {
     )
   }
 
-  function removeFromCart(productId: string) {
-    setCartItems((current) => current.filter((item) => item.productId !== productId))
+  function removeFromCart(cartKey: string) {
+    setCartItems((current) => current.filter((item) => item.cartKey !== cartKey))
   }
 
   function openCartPanel() {
@@ -683,11 +855,25 @@ export function VentasPage() {
       clienteId: values.clienteId && values.clienteId !== 'SHOWROOM' ? values.clienteId : undefined,
       tipoComprobante: values.tipoComprobante,
       observaciones: values.observaciones,
-      items: cartItems.map((item) => ({
-        productoId: item.productId,
-        cantidad: item.quantity,
-        presentacionId: item.presentationId ?? '',
-      })),
+      items: cartItems.map((item) => {
+        if (isLocalCartVentaRapida(item)) {
+          return {
+            tipoLinea: 'VENTA_RAPIDA',
+            descripcion: item.descripcion,
+            simboloUnidad: item.simboloUnidad,
+            precioUnitario: item.unitPrice,
+            cantidad: item.quantity,
+            descuentoTotal: item.discountTotal > 0 ? item.discountTotal : undefined,
+          } as const
+        }
+        return {
+          tipoLinea: 'PRODUCTO_REGISTRADO',
+          productoId: item.productId,
+          presentacionId: item.presentationId ?? '',
+          cantidad: item.quantity,
+          descuentoTotal: item.discountTotal > 0 ? item.discountTotal : undefined,
+        } as const
+      }),
       payments: values.payments.map((payment) => {
         const reference = payment.referenciaExterna?.trim()
         return {
@@ -755,7 +941,7 @@ export function VentasPage() {
 
         <TabsContent value="mostrador" className="space-y-4 pt-4">
           <Card className="p-4">
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_220px]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_220px_auto]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -788,6 +974,15 @@ export function VentasPage() {
                   <SelectItem value="SIN_STOCK">Sin stock disponible</SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => setIsVentaRapidaDialogOpen(true)}
+                className="justify-center gap-2 h-9 bg-green-600 hover:bg-green-700 text-white active:scale-95 shadow-md shadow-green-100 rounded-xl transition-all duration-200"
+              >
+                <Zap className="h-4 w-4 fill-white/90" />
+                ⚡ Venta rápida
+              </Button>
             </div>
           </Card>
 
@@ -812,7 +1007,9 @@ export function VentasPage() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {availableProducts.map((product) => {
-                  const cartEntry = cartItems.find((item) => item.productId === product.id)
+                  const cartEntry = cartItems.find(
+                    (item) => isLocalCartProductoRegistrado(item) && item.productId === product.id,
+                  )
                   const reservedUnits = cartEntry ? getCartItemReservedUnits(cartEntry) : 0
                   const remainingUnits = product.availableUnits - reservedUnits
                   const sellablePresentationPrices =
@@ -884,15 +1081,22 @@ export function VentasPage() {
             <button
               type="button"
               onClick={openCartPanel}
-              className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-2xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80"
+              className={
+                'fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-2xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 transition-all duration-300 ease-out ' +
+                (isCartJustAdded
+                  ? 'ring-2 ring-green-500 ring-offset-2 scale-105 -translate-y-0.5 shadow-xl shadow-green-200/60'
+                  : '')
+              }
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-600 text-white shadow-md shadow-green-200/60">
                 <ShoppingBasket className="h-5 w-5" />
               </div>
               <div className="text-left">
-                <p className="text-sm font-semibold text-foreground">Carrito</p>
+                <p className="text-sm font-semibold text-foreground">🛒 Carrito</p>
                 <p className="text-xs text-muted-foreground">
-                  Productos: {cartMetrics.itemCount} · Total: {formatCurrency(cartMetrics.total)}
+                  {cartMetrics.vrCount > 0
+                    ? `Productos: ${cartMetrics.prCount} · ⚡ VR: ${cartMetrics.vrCount} · Total: ${formatCurrency(cartMetrics.total)}`
+                    : `Productos: ${cartMetrics.itemCount} · Total: ${formatCurrency(cartMetrics.total)}`}
                 </p>
               </div>
             </button>
@@ -1176,9 +1380,11 @@ export function VentasPage() {
           >
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">Carrito</p>
+                <p className="text-base font-semibold text-foreground">🛒 Carrito</p>
                 <p className="text-sm text-muted-foreground">
-                  Productos: {cartMetrics.itemCount} · Total: {formatCurrency(cartMetrics.total)}
+                  {cartMetrics.vrCount > 0
+                    ? `Productos: ${cartMetrics.prCount} · ⚡ VR: ${cartMetrics.vrCount} · Total: ${formatCurrency(cartMetrics.total)}`
+                    : `Productos: ${cartMetrics.itemCount} · Total: ${formatCurrency(cartMetrics.total)}`}
                 </p>
               </div>
               <SidePanelClose asChild>
@@ -1194,7 +1400,7 @@ export function VentasPage() {
                 <Card className="p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="font-medium text-foreground">Productos agregados</p>
+                      <p className="font-medium text-foreground">Ítems agregados</p>
                       <p className="text-xs text-muted-foreground">
                         Ajusta cantidades, presentación y elimina ítems si es necesario.
                       </p>
@@ -1213,28 +1419,39 @@ export function VentasPage() {
                   {cartItems.length === 0 ? (
                     <div className="mt-4 rounded-lg border border-dashed p-6 text-center">
                       <p className="text-sm font-medium text-foreground">
-                        Aún no hay productos en el carrito
+                        Aún no hay ítems en el carrito
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Agrega productos desde el catálogo
+                        Agrega productos desde el catálogo o ⚡ ventas rápidas.
                       </p>
                     </div>
                   ) : (
                     <div className="mt-4 space-y-3">
                       {cartItems.map((item) => (
-                        <div key={item.productId} className="rounded-lg border p-3">
+                        <div key={item.cartKey} className="rounded-lg border p-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
-                              <p className="truncate font-medium text-foreground">{item.name}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate font-medium text-foreground">
+                                  {isLocalCartProductoRegistrado(item) ? item.name : item.descripcion}
+                                </p>
+                                {isLocalCartVentaRapida(item) ? (
+                                  <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700 text-[11px]">
+                                    ⚡ Venta rápida
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground break-words">
                                 {formatCurrency(getCartItemUnitPrice(item))} /{' '}
-                                {item.presentationName ?? item.unitSymbol}
+                                {isLocalCartProductoRegistrado(item)
+                                  ? item.presentationName ?? item.unitSymbol
+                                  : item.simboloUnidad}
                               </p>
-                              {item.presentationOptions.length > 1 ? (
+                              {isLocalCartProductoRegistrado(item) && item.presentationOptions.length > 1 ? (
                                 <div className="mt-2 w-full max-w-[220px]">
                                   <Select
                                     value={item.presentationId ?? ''}
-                                    onValueChange={(value) => updateCartPresentation(item.productId, value)}
+                                    onValueChange={(value) => updateCartPresentation(item.cartKey, value)}
                                   >
                                     <SelectTrigger className="h-8">
                                       <SelectValue placeholder="Presentación" />
@@ -1253,11 +1470,18 @@ export function VentasPage() {
 
                             <div className="text-right">
                               <p className="font-medium text-foreground">
-                                {formatCurrency(item.quantity * getCartItemUnitPrice(item))}
+                                {formatCurrency(getCartItemLineSubtotal(item))}
                               </p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Lote: {item.suggestedLotCode}
-                              </p>
+                              {isLocalCartProductoRegistrado(item) ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Lote: {item.suggestedLotCode}
+                                </p>
+                              ) : null}
+                              {item.discountTotal > 0 ? (
+                                <p className="mt-1 text-xs text-destructive">
+                                  Desc: {formatCurrency(item.discountTotal)}
+                                </p>
+                              ) : null}
                             </div>
                           </div>
 
@@ -1268,7 +1492,7 @@ export function VentasPage() {
                                 variant="outline"
                                 size="icon"
                                 className="h-8 w-8"
-                                onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
+                                onClick={() => updateCartQuantity(item.cartKey, item.quantity - 1)}
                               >
                                 <Minus className="h-4 w-4" />
                               </Button>
@@ -1279,7 +1503,7 @@ export function VentasPage() {
                                 value={item.quantity}
                                 onChange={(event) =>
                                   updateCartQuantity(
-                                    item.productId,
+                                    item.cartKey,
                                     Number(event.target.value || item.quantity),
                                   )
                                 }
@@ -1290,7 +1514,7 @@ export function VentasPage() {
                                 variant="outline"
                                 size="icon"
                                 className="h-8 w-8"
-                                onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
+                                onClick={() => updateCartQuantity(item.cartKey, item.quantity + 1)}
                                 disabled={item.quantity >= getCartItemMax(item)}
                               >
                                 <Plus className="h-4 w-4" />
@@ -1301,7 +1525,7 @@ export function VentasPage() {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              onClick={() => removeFromCart(item.productId)}
+                              onClick={() => removeFromCart(item.cartKey)}
                               className="h-8 px-2"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1657,6 +1881,194 @@ export function VentasPage() {
           </form>
         </SidePanelContent>
       </SidePanel>
+
+      <Dialog
+        open={isVentaRapidaDialogOpen}
+        onOpenChange={(nextOpen) => {
+          setIsVentaRapidaDialogOpen(nextOpen)
+          if (!nextOpen) {
+            ventaRapidaForm.reset({
+              descripcion: '',
+              simboloUnidad: VENTA_RAPIDA_DEFAULT_SIMBOLO,
+              precioUnitario: 0,
+              cantidad: 1,
+              descuentoTotal: 0,
+            })
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Agregar ⚡ Venta rápida</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Ítem ocasional sin catálogo (servicios, delivery, envoltura, etc.). No genera
+              movimiento de inventario ni lotes.
+            </p>
+          </DialogHeader>
+          <form
+            onSubmit={ventaRapidaForm.handleSubmit(handleAddVentaRapida)}
+            className="grid gap-4"
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="venta-rapida-descripcion">
+                Descripción <span className="text-rose-600">*</span>
+              </Label>
+              <Input
+                id="venta-rapida-descripcion"
+                autoComplete="off"
+                placeholder="Ej. Servicio delivery, Envoltura para regalo..."
+                {...ventaRapidaForm.register('descripcion')}
+              />
+              <FieldError message={ventaRapidaForm.formState.errors.descripcion?.message} />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="venta-rapida-unidad">
+                  Unidad de medida <span className="text-rose-600">*</span>
+                </Label>
+                <Controller
+                  control={ventaRapidaForm.control}
+                  name="simboloUnidad"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger id="venta-rapida-unidad" className="h-9">
+                        <SelectValue placeholder="Seleccionar unidad" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {VENTA_RAPIDA_UNIDADES_MEDIDA.map((u) => (
+                          <SelectItem key={u.codigo} value={u.simbolo}>
+                            {u.nombre} ({u.simbolo})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                <FieldError message={ventaRapidaForm.formState.errors.simboloUnidad?.message} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="venta-rapida-precio">
+                  Precio unitario <span className="text-rose-600">*</span>
+                </Label>
+                <Input
+                  id="venta-rapida-precio"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  className="h-9"
+                  {...ventaRapidaForm.register('precioUnitario', { valueAsNumber: true })}
+                  onBlur={(event) => {
+                    const raw = Number(event.currentTarget.value)
+                    if (Number.isFinite(raw)) {
+                      ventaRapidaForm.setValue(
+                        'precioUnitario',
+                        Number(raw.toFixed(2)),
+                        { shouldDirty: false },
+                      )
+                    }
+                  }}
+                />
+                <FieldError message={ventaRapidaForm.formState.errors.precioUnitario?.message} />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="venta-rapida-cantidad">
+                  Cantidad <span className="text-rose-600">*</span>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => {
+                      const current = Number(ventaRapidaForm.getValues('cantidad') ?? 1)
+                      ventaRapidaForm.setValue(
+                        'cantidad',
+                        Math.max(1, Math.floor(current) - 1),
+                        { shouldDirty: true, shouldTouch: true },
+                      )
+                    }}
+                  >
+                    <Minus className="h-4 w-4" />
+                  </Button>
+                  <Input
+                    id="venta-rapida-cantidad"
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="h-9 text-center"
+                    {...ventaRapidaForm.register('cantidad', { valueAsNumber: true })}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => {
+                      const current = Number(ventaRapidaForm.getValues('cantidad') ?? 1)
+                      ventaRapidaForm.setValue(
+                        'cantidad',
+                        Math.max(1, Math.floor(current) + 1),
+                        { shouldDirty: true, shouldTouch: true },
+                      )
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <FieldError message={ventaRapidaForm.formState.errors.cantidad?.message} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="venta-rapida-descuento">Descuento total (opcional)</Label>
+                <Input
+                  id="venta-rapida-descuento"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  className="h-9"
+                  {...ventaRapidaForm.register('descuentoTotal', { valueAsNumber: true })}
+                />
+                <FieldError message={ventaRapidaForm.formState.errors.descuentoTotal?.message} />
+              </div>
+            </div>
+
+            <DialogFooter className="sm:justify-end pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsVentaRapidaDialogOpen(false)}
+                className="h-9"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={ventaRapidaForm.formState.isSubmitting}
+                className={
+                  'h-9 gap-2 bg-green-600 hover:bg-green-700 text-white shadow-md shadow-green-100 transition-all duration-150 ' +
+                  (isVentaRapidaSubmittingAnim ? 'scale-95' : 'active:scale-[0.97]')
+                }
+              >
+                {ventaRapidaForm.formState.isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Agregando...
+                  </>
+                ) : (
+                  <>
+                    <ShoppingBasket className="h-4 w-4" />
+                    🛒 Agregar al carrito
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <ReceiptDialog
         open={isReceiptDialogOpen}

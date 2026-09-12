@@ -8,7 +8,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 
 type ReportsFilters = {
   branchId?: string
@@ -86,6 +86,7 @@ async function getAuthenticatedUserId(request: FastifyRequest) {
 }
 
 export async function getReportsOverview(filters: ReportsFilters, request: FastifyRequest) {
+  await requirePermission(request, 'reportes.read')
   await getAuthenticatedUserId(request)
 
   const { branchId, from, to, branches } = await getReportContext(filters, request)
@@ -261,6 +262,7 @@ export async function getReportsOverview(filters: ReportsFilters, request: Fasti
 }
 
 export async function getSalesReport(filters: ReportsFilters, request: FastifyRequest) {
+  await requirePermission(request, 'reportes.read')
   await getAuthenticatedUserId(request)
   const { branchId, from, to, branches } = await getReportContext(filters, request)
 
@@ -416,6 +418,7 @@ export async function getPurchasesReport(filters: ReportsFilters, request: Fasti
 }
 
 export async function getInventoryReport(filters: ReportsFilters, request: FastifyRequest) {
+  await requirePermission(request, 'reportes.read')
   await getAuthenticatedUserId(request)
   const { branchId, to, branches } = await getReportContext(filters, request)
   const expiringUntil = new Date(to.getTime() + 1000 * 60 * 60 * 24 * 30)
@@ -805,6 +808,7 @@ export async function getCashierReport(filters: ReportsFilters, request: Fastify
 }
 
 export async function getCustomersReport(filters: ReportsFilters, request: FastifyRequest) {
+  await requirePermission(request, 'reportes.read')
   await getAuthenticatedUserId(request)
   const { branches } = await getReportContext(filters, request)
 
@@ -818,6 +822,7 @@ export async function getCustomersReport(filters: ReportsFilters, request: Fasti
 }
 
 export async function getProductsReport(filters: ReportsFilters, request: FastifyRequest) {
+  await requirePermission(request, 'reportes.read')
   await getAuthenticatedUserId(request)
   const { branches } = await getReportContext(filters, request)
 
@@ -831,6 +836,7 @@ export async function getProductsReport(filters: ReportsFilters, request: Fastif
 }
 
 export async function getUtilitiesReport(filters: ReportsFilters, request: FastifyRequest) {
+  await requirePermission(request, 'reportes.read')
   await getAuthenticatedUserId(request)
   const { branches } = await getReportContext(filters, request)
 

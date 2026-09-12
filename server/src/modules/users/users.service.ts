@@ -27,6 +27,7 @@ export const AUTH_ROLE_CODES = [
   'SUPERVISOR',
   'CAJERO',
   'ALMACEN',
+  'TECNICO',
 ] as const
 
 export const createUserSchema = z.object({
