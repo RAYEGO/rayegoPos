@@ -21,7 +21,7 @@
     "start:server": "node server/dist/index.js",
     "start:server:dev": "node scripts/run-with-project-env.mjs --env development -- node server/dist/index.js",
     "start:server:prod-local": "node scripts/run-with-project-env.mjs --env production -- node server/dist/index.js",
-    "start:railway": "npm run start:server",
+    "start:railway": "npm run prisma:migrate:deploy && npm run start:server",
     "railway:build": "npm run prisma:generate:railway && npm run build:server:railway",
     "lint": "oxlint",
     "preview": "node scripts/run-with-project-env.mjs -- vite preview",
