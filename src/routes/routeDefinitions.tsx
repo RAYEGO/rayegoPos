@@ -1,20 +1,20 @@
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  BarChart3,
   Boxes,
   Building2,
-  ClipboardCheck,
-  CreditCard,
-  LayoutDashboard,
+  ChartNoAxesCombined,
+  ClipboardList,
+  House,
   Layers,
-  PackageOpen,
+  Package,
   Settings,
   ShieldCheck,
-  ShoppingBasket,
   ShoppingCart,
   Truck,
   Users,
+  UsersRound,
+  Wallet,
   Wrench,
 } from 'lucide-react'
 import { CajaPage } from '@/pages/CajaPage'
@@ -83,7 +83,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     component: DashboardPage,
     index: true,
     navLabel: 'Inicio',
-    navIcon: LayoutDashboard,
+    navIcon: House,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
@@ -95,7 +95,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.ordenesServicio,
     component: OrdenesServicioPage,
     navLabel: 'Servicio Técnico',
-    navIcon: ClipboardCheck,
+    navIcon: ClipboardList,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
@@ -143,7 +143,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.caja,
     component: CajaPage,
     navLabel: 'Caja',
-    navIcon: CreditCard,
+    navIcon: Wallet,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
@@ -155,7 +155,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.reportes,
     component: ReportesPage,
     navLabel: 'Reportes',
-    navIcon: BarChart3,
+    navIcon: ChartNoAxesCombined,
     navSection: 'Reportes',
     access: {
       requiresAuth: true,
@@ -196,7 +196,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.productos,
     component: ProductosPage,
     navLabel: 'Productos',
-    navIcon: ShoppingBasket,
+    navIcon: Package,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
@@ -208,7 +208,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.compras,
     component: ComprasPage,
     navLabel: 'Compras',
-    navIcon: PackageOpen,
+    navIcon: ClipboardList,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
@@ -232,7 +232,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.usuarios,
     component: UsuariosPage,
     navLabel: 'Usuarios',
-    navIcon: Users,
+    navIcon: UsersRound,
     navSection: 'Seguridad',
     access: {
       requiresAuth: true,

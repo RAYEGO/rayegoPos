@@ -8,7 +8,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
@@ -586,6 +586,7 @@ export async function openCashDrawer(
     observations?: string
   },
 ) {
+  await requirePermission(request, 'caja.manage')
   const { userId, branchId } = await requireBranchAuthContext(request)
   const targetBranchId = data.branchId ?? branchId
 
@@ -1095,6 +1096,7 @@ export async function getCashReconciliationPreview(
   request: FastifyRequest,
   query: CashReconciliationPreviewQuery,
 ) {
+  await requirePermission(request, 'caja.read')
   const userId = await getAuthenticatedUserId(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
@@ -1382,6 +1384,7 @@ export async function createCashCount(request: FastifyRequest, payload: CashCoun
 }
 
 export async function getCashCounts(request: FastifyRequest, query: CashCountsQuery) {
+  await requirePermission(request, 'caja.read')
   const userId = await getAuthenticatedUserId(request)
 
   const opening = await prisma.aperturaCaja.findFirst({

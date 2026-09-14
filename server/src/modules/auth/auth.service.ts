@@ -453,6 +453,7 @@ async function signSessionTokens(
   companyId: string | null,
   branchId: string | null,
   roles: string[],
+  permissions: string[],
 ) {
   const payload = {
     sub: user.id,
@@ -460,6 +461,7 @@ async function signSessionTokens(
     companyId,
     branchId,
     roles,
+    permissions,
   }
 
   const accessToken = await request.server.jwt.sign(
@@ -473,7 +475,11 @@ async function signSessionTokens(
   )
   const refreshToken = await request.server.jwt.sign(
     {
-      ...payload,
+      sub: payload.sub,
+      email: payload.email,
+      companyId: payload.companyId,
+      branchId: payload.branchId,
+      roles: payload.roles,
       typ: 'refresh',
     },
     {
@@ -510,6 +516,7 @@ export async function login(
   if (isPlatformAdmin && !payload.branchId) {
     const globalCtx = resolveGlobalRoles(user)
     const roles = globalCtx.roles
+    const permissions = globalCtx.permissions
 
     const { accessToken, refreshToken } = await signSessionTokens(
       request,
@@ -517,9 +524,10 @@ export async function login(
       user.empresaId,
       null,
       roles,
+      permissions,
     )
 
-    await prisma.usuario.update({
+    await prisma.usuario.updateMany({
       where: { id: user.id },
       data: { ultimoAccesoAt: new Date() },
     })
@@ -564,7 +572,7 @@ export async function login(
     })
   }
 
-  const { roles } = resolveRoleContext(user, activeBranch.id)
+  const { roles, permissions } = resolveRoleContext(user, activeBranch.id)
 
   const { accessToken, refreshToken } = await signSessionTokens(
     request,
@@ -572,6 +580,7 @@ export async function login(
     activeBranch.companyId,
     activeBranch.id,
     roles,
+    permissions,
   )
 
   await prisma.usuario.update({
@@ -927,6 +936,7 @@ export async function refreshSession(
   if (isPlatformAdmin && !activeBranchId) {
     const globalCtx = resolveGlobalRoles(user as NonNullable<AuthenticatedUser>)
     const roles = globalCtx.roles
+    const permissions = globalCtx.permissions
 
     const { accessToken, refreshToken } = await signSessionTokens(
       request,
@@ -934,9 +944,10 @@ export async function refreshSession(
       user.empresaId,
       null,
       roles,
+      permissions,
     )
 
-    await prisma.usuario.update({
+    await prisma.usuario.updateMany({
       where: { id: user.id },
       data: { ultimoAccesoAt: new Date() },
     })
@@ -972,7 +983,7 @@ export async function refreshSession(
     })
   }
 
-  const { roles } = resolveRoleContext(user as NonNullable<AuthenticatedUser>, selectedBranch.id)
+  const { roles, permissions } = resolveRoleContext(user as NonNullable<AuthenticatedUser>, selectedBranch.id)
 
   const { accessToken, refreshToken } = await signSessionTokens(
     request,
@@ -980,6 +991,7 @@ export async function refreshSession(
     selectedBranch.companyId,
     selectedBranch.id,
     roles,
+    permissions,
   )
 
   await prisma.usuario.update({

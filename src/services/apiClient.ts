@@ -223,6 +223,20 @@ export async function apiRequest<T>(
           accessToken: refresh.session.accessToken,
           skipRefresh: true,
         })
+        if (!result.ok && result.code === 'TOKEN_OLD_REQUIRES_REFRESH') {
+          console.warn(
+            `[API] 401 post-refresh en ${path} conserva code=${result.code} (status=${result.status}). Destruyendo sesión.`,
+          )
+          clearAllSessionStorage()
+          broadcastAuthSessionCleared({ endpoint: path, viaRefresh: true })
+          broadcastAuth401({
+            endpoint: path,
+            status: result.status,
+            message: result.errorMessage || 'Tu sesión no es válida después de renovar. Inicia sesión nuevamente.',
+            refreshTried: true,
+            refreshFailed: true,
+          })
+        }
       }
       if (!refresh.ok && refresh.code === 'REFRESH_INVALID') {
         console.warn(

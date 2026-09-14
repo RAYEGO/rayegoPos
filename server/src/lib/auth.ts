@@ -10,6 +10,14 @@ type AuthTokenPayload = {
   companyId?: string | null
   branchId?: string | null
   roles?: string[]
+  permissions?: string[]
+  iat?: number
+  exp?: number
+}
+
+type AuthHttpError = Error & {
+  statusCode: number
+  code?: string
 }
 
 export type PlatformAuthContext = {
@@ -17,6 +25,7 @@ export type PlatformAuthContext = {
   companyId: string
   branchId: string
   roles: AuthRole[]
+  permissions: string[]
   companyTypeId: string | null
   companyTypeCode: string | null
   enabledModules: string[]
@@ -28,6 +37,7 @@ export type BranchlessAuthContext = {
   companyId: null
   branchId: null
   roles: AuthRole[]
+  permissions: string[]
   companyTypeId: null
   companyTypeCode: null
   enabledModules: string[]
@@ -36,9 +46,10 @@ export type BranchlessAuthContext = {
 
 export type AuthContext = PlatformAuthContext | BranchlessAuthContext
 
-function createHttpError(statusCode: number, message: string) {
-  const error = new Error(message) as Error & { statusCode: number }
+function createHttpError(statusCode: number, message: string, code?: string): AuthHttpError {
+  const error = new Error(message) as AuthHttpError
   error.statusCode = statusCode
+  if (code) error.code = code
   return error
 }
 
@@ -71,26 +82,47 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
 
   const decoded = await request.server.jwt.verify<AuthTokenPayload>(token)
   if (decoded.typ !== 'access') {
-    throw createHttpError(401, 'El token de acceso no es válido.')
+    throw createHttpError(401, 'El token de acceso no es válido.', 'ACCESS_TOKEN_INVALID')
   }
 
   const userId = decoded.sub
   const roles = normalizeRoles(decoded.roles)
+  const rawTokenPermissions = Array.isArray(decoded.permissions) ? decoded.permissions : []
   const isPlatformAdmin = hasPlatformRole(roles)
+  const tokenIatSec = typeof decoded.iat === 'number' ? decoded.iat : null
 
   if (isPlatformAdmin) {
     const user = await prisma.usuario.findFirst({
       where: { id: userId, deletedAt: null, activo: true },
-      select: { id: true },
+      select: { id: true, updatedAt: true },
     })
     if (!user) {
       throw createHttpError(401, 'El usuario asociado a la sesión no está disponible.')
+    }
+    if (rawTokenPermissions.length === 0) {
+      throw createHttpError(
+        401,
+        'Tu sesión fue creada antes de una actualización de seguridad. Tu sesión se renovará automáticamente.',
+        'TOKEN_OLD_REQUIRES_REFRESH',
+      )
+    }
+    const tokenPermissions = rawTokenPermissions
+    if (tokenIatSec && user.updatedAt) {
+      const updatedAtSec = Math.floor(user.updatedAt.getTime() / 1000)
+      if (updatedAtSec > tokenIatSec) {
+        throw createHttpError(
+          401,
+          'Tu perfil fue modificado recientemente. Tu sesión se renovará automáticamente para reflejar los cambios.',
+          'TOKEN_OLD_REQUIRES_REFRESH',
+        )
+      }
     }
     const ctx: BranchlessAuthContext = {
       userId,
       companyId: null,
       branchId: null,
       roles,
+      permissions: tokenPermissions.length > 0 ? tokenPermissions : ['*'],
       companyTypeId: null,
       companyTypeCode: null,
       enabledModules: [
@@ -130,7 +162,7 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
     }),
     prisma.usuario.findFirst({
       where: { id: userId, deletedAt: null, activo: true, empresaId: companyId },
-      select: { id: true, sucursalId: true },
+      select: { id: true, sucursalId: true, updatedAt: true },
     }),
     prisma.empresa
       .findFirst({
@@ -173,6 +205,26 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
   if (!userCompanyMatch) {
     throw createHttpError(401, 'El usuario no pertenece a la empresa de la sesión.')
   }
+
+  if (rawTokenPermissions.length === 0) {
+    throw createHttpError(
+      401,
+      'Tu sesión fue creada antes de una actualización de seguridad. Tu sesión se renovará automáticamente.',
+      'TOKEN_OLD_REQUIRES_REFRESH',
+    )
+  }
+  if (tokenIatSec && userCompanyMatch.updatedAt) {
+    const updatedAtSec = Math.floor(userCompanyMatch.updatedAt.getTime() / 1000)
+    if (updatedAtSec > tokenIatSec) {
+      throw createHttpError(
+        401,
+        'Tu perfil fue modificado recientemente. Tu sesión se renovará automáticamente para reflejar los cambios.',
+        'TOKEN_OLD_REQUIRES_REFRESH',
+      )
+    }
+  }
+  const tokenPermissions = rawTokenPermissions
+
   const hasExplicitMembership = Boolean(membership)
   const hasLegacyBranchAssoc = userCompanyMatch.sucursalId === branchId
   if (!hasExplicitMembership && !hasLegacyBranchAssoc) {
@@ -184,6 +236,7 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
     companyId,
     branchId,
     roles,
+    permissions: tokenPermissions,
     companyTypeId: companyType.companyTypeId,
     companyTypeCode: companyType.companyTypeCode,
     enabledModules: Array.isArray(companyType.enabledModules) ? companyType.enabledModules : ([] as string[]),
@@ -252,14 +305,26 @@ export async function requirePermission(request: FastifyRequest, permissionCode:
     )
   }
 
-  if (ctxEnabledModules.length === 0 && ctx.isPlatformAdmin) return ctx
-  const requiredModule = permissionToModuleCode(permissionCode)
-  if (permissionCode.endsWith('.read') || permissionCode.endsWith('.manage')) {
+  if (permissionCode.endsWith('.read') || permissionCode.endsWith('.manage') || permissionCode.endsWith('.revoke') || permissionCode.endsWith('.write') || permissionCode.endsWith('.cambioEstado')) {
     if (!ctx.isPlatformAdmin) {
-      if (!ctxEnabledModules.includes(requiredModule) && requiredModule !== permissionCode) {
+      if (!ctxEnabledModules.includes(moduleCode) && moduleCode !== permissionCode) {
         throw createHttpError(403, 'No tienes autorización para usar este módulo.')
       }
     }
+  }
+
+  const ctxPermissions = Array.isArray(ctx.permissions) ? ctx.permissions : []
+  if (ctxPermissions.includes('*')) {
+    return ctx
+  }
+  if (!ctxPermissions.includes(permissionCode)) {
+    const label = moduleCode === permissionCode
+      ? `el recurso "${permissionCode}"`
+      : `el permiso "${permissionCode}"`
+    throw createHttpError(
+      403,
+      `No tienes autorización para realizar esta acción. Requiere ${label}.`,
+    )
   }
   return ctx
 }

@@ -10,7 +10,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
 type CustomersFilters = {
@@ -309,6 +309,7 @@ export async function updateCustomer(
   payload: UpdateCustomerPayload,
   request: FastifyRequest,
 ) {
+  await requirePermission(request, 'clientes.manage')
   const { userId, companyId } = await requireBranchAuthContext(request)
 
   const existingCustomer = await prisma.cliente.findFirst({

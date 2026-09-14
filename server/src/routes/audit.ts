@@ -54,8 +54,8 @@ export async function auditRoutes(app: FastifyInstance) {
       ? {
           OR: [
             { usuario: { is: null } },
-            { usuario: { firstName: { contains: search, mode: 'insensitive' } } },
-            { usuario: { lastName: { contains: search, mode: 'insensitive' } } },
+            { usuario: { nombres: { contains: search, mode: 'insensitive' } } },
+            { usuario: { apellidos: { contains: search, mode: 'insensitive' } } },
             { usuario: { username: { contains: search, mode: 'insensitive' } } },
             { usuario: { email: { contains: search, mode: 'insensitive' } } },
           ],
@@ -91,15 +91,15 @@ export async function auditRoutes(app: FastifyInstance) {
       usuario: {
         select: {
           id: true,
-          firstName: true,
-          lastName: true,
+          nombres: true,
+          apellidos: true,
           username: true,
           email: true,
         },
       },
     }
 
-    const [items, total] = await prisma.$transaction([
+    const [rawItems, total] = await prisma.$transaction([
       prisma.auditoria.findMany({
         where,
         orderBy,
@@ -109,6 +109,19 @@ export async function auditRoutes(app: FastifyInstance) {
       }),
       prisma.auditoria.count({ where }),
     ])
+
+    const items = rawItems.map((row: any) => ({
+      ...row,
+      usuario: row.usuario
+        ? {
+            id: row.usuario.id,
+            firstName: row.usuario.nombres,
+            lastName: row.usuario.apellidos,
+            username: row.usuario.username,
+            email: row.usuario.email,
+          }
+        : null,
+    }))
 
     return reply.code(200).send({
       items,

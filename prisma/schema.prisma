@@ -9,23 +9,23 @@ datasource db {
 
 /// Módulo: Configuración / Empresa
 model TipoEmpresa {
-  id              String              @id @default(uuid()) @db.Uuid
-  codigo          String              @unique @db.VarChar(50)
-  nombre          String              @db.VarChar(120)
-  descripcion     String?             @db.VarChar(255)
-  icono           String?             @db.VarChar(50)
-  color           String?             @db.VarChar(20)
-  orden           Int                 @default(0)
-  activo          Boolean             @default(true)
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
-  deletedAt       DateTime?           @map("deleted_at")
-  createdById     String?             @map("created_by") @db.Uuid
-  updatedById     String?             @map("updated_by") @db.Uuid
-  empresas        Empresa[]
-  modulos         TipoEmpresaModulo[]
-  createdBy       Usuario?            @relation("TipoEmpresaCreatedBy", fields: [createdById], references: [id])
-  updatedBy       Usuario?            @relation("TipoEmpresaUpdatedBy", fields: [updatedById], references: [id])
+  id          String              @id @default(uuid()) @db.Uuid
+  codigo      String              @unique @db.VarChar(50)
+  nombre      String              @db.VarChar(120)
+  descripcion String?             @db.VarChar(255)
+  icono       String?             @db.VarChar(50)
+  color       String?             @db.VarChar(20)
+  orden       Int                 @default(0)
+  activo      Boolean             @default(true)
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  deletedAt   DateTime?           @map("deleted_at")
+  createdById String?             @map("created_by") @db.Uuid
+  updatedById String?             @map("updated_by") @db.Uuid
+  empresas    Empresa[]
+  modulos     TipoEmpresaModulo[]
+  createdBy   Usuario?            @relation("TipoEmpresaCreatedBy", fields: [createdById], references: [id])
+  updatedBy   Usuario?            @relation("TipoEmpresaUpdatedBy", fields: [updatedById], references: [id])
 
   @@index([activo])
   @@index([orden])
@@ -35,22 +35,22 @@ model TipoEmpresa {
 
 /// Catálogo maestro de módulos de la plataforma.
 model Modulo {
-  id              String              @id @default(uuid()) @db.Uuid
-  codigo          String              @unique @db.VarChar(50)
-  nombre          String              @db.VarChar(120)
-  descripcion     String?             @db.VarChar(255)
-  icono           String?             @db.VarChar(50)
-  orden           Int                 @default(0)
-  categoria       String?             @db.VarChar(50)
-  activo          Boolean             @default(true)
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
-  deletedAt       DateTime?           @map("deleted_at")
-  createdById     String?             @map("created_by") @db.Uuid
-  updatedById     String?             @map("updated_by") @db.Uuid
-  tiposEmpresa    TipoEmpresaModulo[]
-  createdBy       Usuario?            @relation("ModuloCreatedBy", fields: [createdById], references: [id])
-  updatedBy       Usuario?            @relation("ModuloUpdatedBy", fields: [updatedById], references: [id])
+  id           String              @id @default(uuid()) @db.Uuid
+  codigo       String              @unique @db.VarChar(50)
+  nombre       String              @db.VarChar(120)
+  descripcion  String?             @db.VarChar(255)
+  icono        String?             @db.VarChar(50)
+  orden        Int                 @default(0)
+  categoria    String?             @db.VarChar(50)
+  activo       Boolean             @default(true)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  deletedAt    DateTime?           @map("deleted_at")
+  createdById  String?             @map("created_by") @db.Uuid
+  updatedById  String?             @map("updated_by") @db.Uuid
+  tiposEmpresa TipoEmpresaModulo[]
+  createdBy    Usuario?            @relation("ModuloCreatedBy", fields: [createdById], references: [id])
+  updatedBy    Usuario?            @relation("ModuloUpdatedBy", fields: [updatedById], references: [id])
 
   @@index([activo])
   @@index([orden])
@@ -61,15 +61,15 @@ model Modulo {
 
 /// Relación N:N entre TipoEmpresa y los módulos que tiene habilitados.
 model TipoEmpresaModulo {
-  id              String      @id @default(uuid()) @db.Uuid
-  tipoEmpresaId   String      @map("tipo_empresa_id") @db.Uuid
-  moduloCodigo    String      @map("modulo_codigo") @db.VarChar(50)
-  orden           Int         @default(0)
-  activo          Boolean     @default(true)
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
-  tipoEmpresa     TipoEmpresa @relation(fields: [tipoEmpresaId], references: [id], onDelete: Cascade)
-  modulo          Modulo      @relation(fields: [moduloCodigo], references: [codigo], onDelete: Cascade)
+  id            String      @id @default(uuid()) @db.Uuid
+  tipoEmpresaId String      @map("tipo_empresa_id") @db.Uuid
+  moduloCodigo  String      @map("modulo_codigo") @db.VarChar(50)
+  orden         Int         @default(0)
+  activo        Boolean     @default(true)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  tipoEmpresa   TipoEmpresa @relation(fields: [tipoEmpresaId], references: [id], onDelete: Cascade)
+  modulo        Modulo      @relation(fields: [moduloCodigo], references: [codigo], onDelete: Cascade)
 
   @@unique([tipoEmpresaId, moduloCodigo])
   @@index([moduloCodigo])
@@ -77,48 +77,48 @@ model TipoEmpresaModulo {
 }
 
 model Empresa {
-  id                String                 @id @default(uuid()) @db.Uuid
-  tipoEmpresaId     String                 @map("tipo_empresa_id") @db.Uuid
-  razonSocial       String                 @map("razon_social") @db.VarChar(200)
-  nombreComercial   String?                @map("nombre_comercial") @db.VarChar(200)
-  tipoDocumento     TipoDocumentoIdentidad @default(RUC) @map("tipo_documento")
-  numeroDocumento   String                 @unique @map("numero_documento") @db.VarChar(20)
-  email             String?                @db.VarChar(150)
-  telefono          String?                @db.VarChar(30)
-  direccion         String?                @db.VarChar(255)
-  ubigeo            String?                @db.VarChar(6)
-  monedaBase        String                 @default("PEN") @map("moneda_base") @db.VarChar(3)
-  zonaHoraria       String                 @default("America/Lima") @map("zona_horaria") @db.VarChar(60)
-  activo            Boolean                @default(true)
-  createdAt         DateTime               @default(now()) @map("created_at")
-  updatedAt         DateTime               @updatedAt @map("updated_at")
-  deletedAt         DateTime?              @map("deleted_at")
-  createdById       String?                @map("created_by") @db.Uuid
-  updatedById       String?                @map("updated_by") @db.Uuid
-  logoUrl           String?                @map("logo_url") @db.VarChar(500)
-  igvPorDefecto     Decimal                @default(18) @map("igv_por_defecto") @db.Decimal(7, 4)
-  modoOperacion     ModoOperacionEmpresa   @default(IMPLEMENTACION) @map("modo_operacion")
-  tipoEmpresa       TipoEmpresa            @relation(fields: [tipoEmpresaId], references: [id])
-  categorias        Categoria[]
-  clientes          Cliente[]
-  configuraciones   Configuracion[]
-  createdBy         Usuario?               @relation("EmpresaCreatedBy", fields: [createdById], references: [id])
-  updatedBy         Usuario?               @relation("EmpresaUpdatedBy", fields: [updatedById], references: [id])
-  impuestos         Impuesto[]
-  laboratorios      Laboratorio[]
-  presentaciones    Presentacion[]
-  principiosActivos PrincipioActivo[]
-  productos         Producto[]
-  proveedores       Proveedor[]
-  seriesDocumentos  SerieDocumento[]
-  sucursales        Sucursal[]
-  tiposComerciales  TipoComercial[]
-  unidadesMedida    UnidadMedida[]
-  usuarios          Usuario[]
-  tiposEquipoCliente TipoEquipoCliente[]
+  id                   String                 @id @default(uuid()) @db.Uuid
+  tipoEmpresaId        String                 @map("tipo_empresa_id") @db.Uuid
+  razonSocial          String                 @map("razon_social") @db.VarChar(200)
+  nombreComercial      String?                @map("nombre_comercial") @db.VarChar(200)
+  tipoDocumento        TipoDocumentoIdentidad @default(RUC) @map("tipo_documento")
+  numeroDocumento      String                 @unique @map("numero_documento") @db.VarChar(20)
+  email                String?                @db.VarChar(150)
+  telefono             String?                @db.VarChar(30)
+  direccion            String?                @db.VarChar(255)
+  ubigeo               String?                @db.VarChar(6)
+  monedaBase           String                 @default("PEN") @map("moneda_base") @db.VarChar(3)
+  zonaHoraria          String                 @default("America/Lima") @map("zona_horaria") @db.VarChar(60)
+  activo               Boolean                @default(true)
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  deletedAt            DateTime?              @map("deleted_at")
+  createdById          String?                @map("created_by") @db.Uuid
+  updatedById          String?                @map("updated_by") @db.Uuid
+  logoUrl              String?                @map("logo_url") @db.VarChar(500)
+  igvPorDefecto        Decimal                @default(18) @map("igv_por_defecto") @db.Decimal(7, 4)
+  modoOperacion        ModoOperacionEmpresa   @default(IMPLEMENTACION) @map("modo_operacion")
+  tipoEmpresa          TipoEmpresa            @relation(fields: [tipoEmpresaId], references: [id])
+  categorias           Categoria[]
+  clientes             Cliente[]
+  configuraciones      Configuracion[]
+  createdBy            Usuario?               @relation("EmpresaCreatedBy", fields: [createdById], references: [id])
+  updatedBy            Usuario?               @relation("EmpresaUpdatedBy", fields: [updatedById], references: [id])
+  impuestos            Impuesto[]
+  laboratorios         Laboratorio[]
+  presentaciones       Presentacion[]
+  principiosActivos    PrincipioActivo[]
+  productos            Producto[]
+  proveedores          Proveedor[]
+  seriesDocumentos     SerieDocumento[]
+  sucursales           Sucursal[]
+  tiposComerciales     TipoComercial[]
+  unidadesMedida       UnidadMedida[]
+  usuarios             Usuario[]
+  tiposEquipoCliente   TipoEquipoCliente[]
   tiposServicioTecnico TipoServicioTecnico[]
-  clienteEquipos    ClienteEquipo[]
-  ordenesServicio   OrdenServicio[]
+  clienteEquipos       ClienteEquipo[]
+  ordenesServicio      OrdenServicio[]
 
   @@index([deletedAt])
   @@index([modoOperacion])
@@ -303,18 +303,18 @@ model Usuario {
   tecnicosActualizados                        Tecnico[]                       @relation("TecnicoUpdatedBy")
   tiposEquipoClienteCreados                   TipoEquipoCliente[]             @relation("TipoEquipoCreatedBy")
   tiposEquipoClienteActualizados              TipoEquipoCliente[]             @relation("TipoEquipoUpdatedBy")
-  tiposServicioTecnicoCreados               TipoServicioTecnico[]           @relation("TipoServicioCreatedBy")
-  tiposServicioTecnicoActualizados          TipoServicioTecnico[]           @relation("TipoServicioUpdatedBy")
-  clienteEquiposCreados                      ClienteEquipo[]                 @relation("ClienteEquipoCreatedBy")
-  clienteEquiposActualizados                 ClienteEquipo[]                 @relation("ClienteEquipoUpdatedBy")
-  secuenciasOrdenServicioCreadas             SecuenciaOrdenServicio[]        @relation("SecuenciaOrdenCreatedBy")
-  secuenciasOrdenServicioActualizadas        SecuenciaOrdenServicio[]        @relation("SecuenciaOrdenUpdatedBy")
-  ordenesServicioCreadas                     OrdenServicio[]                 @relation("OrdenServicioCreatedBy")
-  ordenesServicioActualizadas                OrdenServicio[]                 @relation("OrdenServicioUpdatedBy")
-  ordenesServicioAprobadas                   OrdenServicio[]
-  historialEstadosRealizados                   OrdenEstadoHistorial[]
+  tiposServicioTecnicoCreados                 TipoServicioTecnico[]           @relation("TipoServicioCreatedBy")
+  tiposServicioTecnicoActualizados            TipoServicioTecnico[]           @relation("TipoServicioUpdatedBy")
+  clienteEquiposCreados                       ClienteEquipo[]                 @relation("ClienteEquipoCreatedBy")
+  clienteEquiposActualizados                  ClienteEquipo[]                 @relation("ClienteEquipoUpdatedBy")
+  secuenciasOrdenServicioCreadas              SecuenciaOrdenServicio[]        @relation("SecuenciaOrdenCreatedBy")
+  secuenciasOrdenServicioActualizadas         SecuenciaOrdenServicio[]        @relation("SecuenciaOrdenUpdatedBy")
+  ordenesServicioCreadas                      OrdenServicio[]                 @relation("OrdenServicioCreatedBy")
+  ordenesServicioActualizadas                 OrdenServicio[]                 @relation("OrdenServicioUpdatedBy")
+  ordenesServicioAprobadas                    OrdenServicio[]
+  historialEstadosRealizados                  OrdenEstadoHistorial[]
   diagnosticosCreados                         OrdenDiagnostico[]              @relation("DiagnosticoCreadoPor")
-  presupuestosCreados                        OrdenPresupuestoVersion[]       @relation("PresupuestoCreadoPor")
+  presupuestosCreados                         OrdenPresupuestoVersion[]       @relation("PresupuestoCreadoPor")
   ordenesAsignacionesRealizadas               OrdenAsignacionTecnico[]
   itemsOrdenServicioCreados                   OrdenItemServicio[]             @relation("ItemOrdenCreadoPor")
   itemsOrdenServicioActualizados              OrdenItemServicio[]             @relation("ItemOrdenActualizadoPor")
@@ -853,40 +853,40 @@ model MotivoMovimientoInventario {
 
 /// Kardex de inventario con granularidad de lote.
 model MovimientoInventario {
-  id                 String                      @id @default(uuid()) @db.Uuid
-  sucursalId         String                      @map("sucursal_id") @db.Uuid
-  productoId         String                      @map("producto_id") @db.Uuid
-  loteId             String?                     @map("lote_id") @db.Uuid
-  motivoId           String?                     @map("motivo_id") @db.Uuid
-  detalleCompraId    String?                     @map("detalle_compra_id") @db.Uuid
-  detalleVentaId     String?                     @map("detalle_venta_id") @db.Uuid
-  detalleVentaLoteId String?                     @map("detalle_venta_lote_id") @db.Uuid
-  ordenServicioId    String?                     @map("orden_servicio_id") @db.Uuid
-  itemOrdenServicioId String?                    @map("item_orden_servicio_id") @db.Uuid
-  tipo               TipoMovimientoInventario
-  origen             OrigenMovimientoInventario
-  fechaMovimiento    DateTime                    @default(now()) @map("fecha_movimiento")
-  cantidad           Int
-  costoUnitario      Decimal?                    @map("costo_unitario") @db.Decimal(14, 6)
-  stockResultante    Int?                        @map("stock_resultante")
-  referencia         String?                     @db.VarChar(120)
-  observaciones      String?                     @db.VarChar(255)
-  createdAt          DateTime                    @default(now()) @map("created_at")
-  updatedAt          DateTime                    @updatedAt @map("updated_at")
-  deletedAt          DateTime?                   @map("deleted_at")
-  createdById        String?                     @map("created_by") @db.Uuid
-  updatedById        String?                     @map("updated_by") @db.Uuid
-  createdBy          Usuario?                    @relation("MovimientoInventarioCreatedBy", fields: [createdById], references: [id])
-  detalleCompra      DetalleCompra?              @relation(fields: [detalleCompraId], references: [id])
-  detalleVenta       DetalleVenta?               @relation(fields: [detalleVentaId], references: [id])
-  detalleVentaLote   DetalleVentaLote?           @relation(fields: [detalleVentaLoteId], references: [id])
-  lote               Lote?                       @relation(fields: [loteId], references: [id])
-  motivo             MotivoMovimientoInventario? @relation(fields: [motivoId], references: [id])
-  ordenServicio      OrdenServicio?              @relation(fields: [ordenServicioId], references: [id])
-  itemOrdenServicio  OrdenItemServicio?          @relation(fields: [itemOrdenServicioId], references: [id])
-  producto           Producto                    @relation(fields: [productoId], references: [id])
-  sucursal           Sucursal                    @relation(fields: [sucursalId], references: [id])
-  updatedBy          Usuario?                    @relation("MovimientoInventarioUpdatedBy", fields: [updatedById], references: [id])
+  id                  String                      @id @default(uuid()) @db.Uuid
+  sucursalId          String                      @map("sucursal_id") @db.Uuid
+  productoId          String                      @map("producto_id") @db.Uuid
+  loteId              String?                     @map("lote_id") @db.Uuid
+  motivoId            String?                     @map("motivo_id") @db.Uuid
+  detalleCompraId     String?                     @map("detalle_compra_id") @db.Uuid
+  detalleVentaId      String?                     @map("detalle_venta_id") @db.Uuid
+  detalleVentaLoteId  String?                     @map("detalle_venta_lote_id") @db.Uuid
+  ordenServicioId     String?                     @map("orden_servicio_id") @db.Uuid
+  itemOrdenServicioId String?                     @map("item_orden_servicio_id") @db.Uuid
+  tipo                TipoMovimientoInventario
+  origen              OrigenMovimientoInventario
+  fechaMovimiento     DateTime                    @default(now()) @map("fecha_movimiento")
+  cantidad            Int
+  costoUnitario       Decimal?                    @map("costo_unitario") @db.Decimal(14, 6)
+  stockResultante     Int?                        @map("stock_resultante")
+  referencia          String?                     @db.VarChar(120)
+  observaciones       String?                     @db.VarChar(255)
+  createdAt           DateTime                    @default(now()) @map("created_at")
+  updatedAt           DateTime                    @updatedAt @map("updated_at")
+  deletedAt           DateTime?                   @map("deleted_at")
+  createdById         String?                     @map("created_by") @db.Uuid
+  updatedById         String?                     @map("updated_by") @db.Uuid
+  createdBy           Usuario?                    @relation("MovimientoInventarioCreatedBy", fields: [createdById], references: [id])
+  detalleCompra       DetalleCompra?              @relation(fields: [detalleCompraId], references: [id])
+  detalleVenta        DetalleVenta?               @relation(fields: [detalleVentaId], references: [id])
+  detalleVentaLote    DetalleVentaLote?           @relation(fields: [detalleVentaLoteId], references: [id])
+  lote                Lote?                       @relation(fields: [loteId], references: [id])
+  motivo              MotivoMovimientoInventario? @relation(fields: [motivoId], references: [id])
+  ordenServicio       OrdenServicio?              @relation(fields: [ordenServicioId], references: [id])
+  itemOrdenServicio   OrdenItemServicio?          @relation(fields: [itemOrdenServicioId], references: [id])
+  producto            Producto                    @relation(fields: [productoId], references: [id])
+  sucursal            Sucursal                    @relation(fields: [sucursalId], references: [id])
+  updatedBy           Usuario?                    @relation("MovimientoInventarioUpdatedBy", fields: [updatedById], references: [id])
 
   @@index([sucursalId, fechaMovimiento])
   @@index([productoId, fechaMovimiento])
@@ -1190,7 +1190,10 @@ model Venta {
 model DetalleVenta {
   id                    String                 @id @default(uuid()) @db.Uuid
   ventaId               String                 @map("venta_id") @db.Uuid
-  productoId            String                 @map("producto_id") @db.Uuid
+  tipoLinea             TipoLineaVenta         @default(PRODUCTO_REGISTRADO) @map("tipo_linea")
+  productoId            String?                @map("producto_id") @db.Uuid
+  descripcion           String?                @map("descripcion") @db.VarChar(255)
+  simboloUnidad         String?                @map("simbolo_unidad") @db.VarChar(20)
   cantidad              Int
   precioUnitario        Decimal                @map("precio_unitario") @db.Decimal(14, 6)
   descuentoTotal        Decimal                @default(0) @map("descuento_total") @db.Decimal(14, 2)
@@ -1212,7 +1215,7 @@ model DetalleVenta {
   factorPresentacion    Int?                   @map("factor_presentacion")
   createdBy             Usuario?               @relation("DetalleVentaCreatedBy", fields: [createdById], references: [id])
   presentacion          Presentacion?          @relation("DetalleVentaPresentacion", fields: [presentacionId], references: [id], onDelete: Restrict)
-  producto              Producto               @relation(fields: [productoId], references: [id])
+  producto              Producto?              @relation(fields: [productoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   updatedBy             Usuario?               @relation("DetalleVentaUpdatedBy", fields: [updatedById], references: [id])
   venta                 Venta                  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
   lotesAsignados        DetalleVentaLote[]
@@ -1220,6 +1223,7 @@ model DetalleVenta {
 
   @@index([ventaId])
   @@index([productoId])
+  @@index([tipoLinea])
   @@index([deletedAt])
   @@map("detalle_venta")
 }
@@ -1249,24 +1253,24 @@ model DetalleVentaLote {
 }
 
 model FormaPago {
-  id                 String                    @id @default(uuid()) @db.Uuid
-  codigo             CodigoFormaPago           @unique
-  nombre             String                    @unique @db.VarChar(80)
-  requiereReferencia Boolean                   @default(false) @map("requiere_referencia")
-  permiteVuelto      Boolean                   @default(false) @map("permite_vuelto")
-  orden              Int                       @default(0)
-  activo             Boolean                   @default(true)
-  createdAt          DateTime                  @default(now()) @map("created_at")
-  updatedAt          DateTime                  @updatedAt @map("updated_at")
-  deletedAt          DateTime?                 @map("deleted_at")
-  createdById        String?                   @map("created_by") @db.Uuid
-  updatedById        String?                   @map("updated_by") @db.Uuid
-  compraPagos        CompraPago[]
-  conciliacionesCaja ConciliacionCajaDetalle[]
-  createdBy          Usuario?                  @relation("FormaPagoCreatedBy", fields: [createdById], references: [id])
-  updatedBy          Usuario?                  @relation("FormaPagoUpdatedBy", fields: [updatedById], references: [id])
-  movimientosCaja    MovimientoCaja[]
-  ventaPagos         VentaPago[]
+  id                   String                    @id @default(uuid()) @db.Uuid
+  codigo               CodigoFormaPago           @unique
+  nombre               String                    @unique @db.VarChar(80)
+  requiereReferencia   Boolean                   @default(false) @map("requiere_referencia")
+  permiteVuelto        Boolean                   @default(false) @map("permite_vuelto")
+  orden                Int                       @default(0)
+  activo               Boolean                   @default(true)
+  createdAt            DateTime                  @default(now()) @map("created_at")
+  updatedAt            DateTime                  @updatedAt @map("updated_at")
+  deletedAt            DateTime?                 @map("deleted_at")
+  createdById          String?                   @map("created_by") @db.Uuid
+  updatedById          String?                   @map("updated_by") @db.Uuid
+  compraPagos          CompraPago[]
+  conciliacionesCaja   ConciliacionCajaDetalle[]
+  createdBy            Usuario?                  @relation("FormaPagoCreatedBy", fields: [createdById], references: [id])
+  updatedBy            Usuario?                  @relation("FormaPagoUpdatedBy", fields: [updatedById], references: [id])
+  movimientosCaja      MovimientoCaja[]
+  ventaPagos           VentaPago[]
   ordenesServicioPagos OrdenServicioPago[]
 
   @@index([activo, orden])
@@ -1454,29 +1458,29 @@ model CierreCaja {
 
 /// Libro de caja consolidado para ingresos, egresos y ventas.
 model MovimientoCaja {
-  id              String             @id @default(uuid()) @db.Uuid
-  aperturaCajaId  String             @map("apertura_caja_id") @db.Uuid
-  formaPagoId     String?            @map("forma_pago_id") @db.Uuid
-  ventaPagoId     String?            @map("venta_pago_id") @db.Uuid
-  tipo            TipoMovimientoCaja
-  operacion       OperacionCaja
-  fechaMovimiento DateTime           @default(now()) @map("fecha_movimiento")
-  monto           Decimal            @db.Decimal(14, 2)
-  saldoResultante Decimal?           @map("saldo_resultante") @db.Decimal(14, 2)
-  referencia      String?            @db.VarChar(120)
-  observaciones   String?            @db.VarChar(255)
-  createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @updatedAt @map("updated_at")
-  deletedAt       DateTime?          @map("deleted_at")
-  createdById     String?            @map("created_by") @db.Uuid
-  updatedById     String?            @map("updated_by") @db.Uuid
-  egreso          Egreso?
-  ingreso         Ingreso?
-  aperturaCaja    AperturaCaja       @relation(fields: [aperturaCajaId], references: [id])
-  createdBy       Usuario?           @relation("MovimientoCajaCreatedBy", fields: [createdById], references: [id])
-  formaPago       FormaPago?         @relation(fields: [formaPagoId], references: [id])
-  updatedBy       Usuario?           @relation("MovimientoCajaUpdatedBy", fields: [updatedById], references: [id])
-  ventaPago       VentaPago?         @relation(fields: [ventaPagoId], references: [id])
+  id                String             @id @default(uuid()) @db.Uuid
+  aperturaCajaId    String             @map("apertura_caja_id") @db.Uuid
+  formaPagoId       String?            @map("forma_pago_id") @db.Uuid
+  ventaPagoId       String?            @map("venta_pago_id") @db.Uuid
+  tipo              TipoMovimientoCaja
+  operacion         OperacionCaja
+  fechaMovimiento   DateTime           @default(now()) @map("fecha_movimiento")
+  monto             Decimal            @db.Decimal(14, 2)
+  saldoResultante   Decimal?           @map("saldo_resultante") @db.Decimal(14, 2)
+  referencia        String?            @db.VarChar(120)
+  observaciones     String?            @db.VarChar(255)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  deletedAt         DateTime?          @map("deleted_at")
+  createdById       String?            @map("created_by") @db.Uuid
+  updatedById       String?            @map("updated_by") @db.Uuid
+  egreso            Egreso?
+  ingreso           Ingreso?
+  aperturaCaja      AperturaCaja       @relation(fields: [aperturaCajaId], references: [id])
+  createdBy         Usuario?           @relation("MovimientoCajaCreatedBy", fields: [createdById], references: [id])
+  formaPago         FormaPago?         @relation(fields: [formaPagoId], references: [id])
+  updatedBy         Usuario?           @relation("MovimientoCajaUpdatedBy", fields: [updatedById], references: [id])
+  ventaPago         VentaPago?         @relation(fields: [ventaPagoId], references: [id])
   ordenServicioPago OrdenServicioPago?
 
   @@index([aperturaCajaId, fechaMovimiento])
@@ -1771,6 +1775,16 @@ enum TipoComprobante {
   NOTA_DEBITO
 }
 
+/// Discriminador de una línea del detalle de venta.
+/// PRODUCTO_REGISTRADO = línea de producto del catálogo (requiere productoId).
+/// VENTA_RAPIDA = línea de artículo ocasional / venta rápida (requiere descripcion, sin producto ni inventario).
+enum TipoLineaVenta {
+  PRODUCTO_REGISTRADO
+  VENTA_RAPIDA
+
+  @@map("tipo_linea_venta")
+}
+
 /// Tipos de movimiento de stock.
 enum TipoMovimientoInventario {
   ENTRADA
@@ -1870,27 +1884,27 @@ enum ModoOperacionEmpresa {
 
 /// Extensión de Usuario: 1 Usuario puede tener 0 ó 1 perfil de Técnico.
 model Tecnico {
-  id               String    @id @default(uuid()) @db.Uuid
-  usuarioId        String    @unique @map("usuario_id") @db.Uuid
-  legajo           String?   @unique @map("legajo") @db.VarChar(30)
-  especialidad     String?   @map("especialidad") @db.VarChar(120)
-  telefono         String?   @map("telefono") @db.VarChar(30)
-  emailContacto    String?   @map("email_contacto") @db.VarChar(150)
-  estado           String    @default("ACTIVO") @map("estado") @db.VarChar(30)
-  observaciones    String?   @map("observaciones") @db.VarChar(255)
-  activo           Boolean   @default(true)
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  deletedAt        DateTime? @map("deleted_at")
-  createdById      String?   @map("created_by") @db.Uuid
-  updatedById      String?   @map("updated_by") @db.Uuid
-  createdBy        Usuario?  @relation("TecnicoCreatedBy", fields: [createdById], references: [id])
-  updatedBy        Usuario?  @relation("TecnicoUpdatedBy", fields: [updatedById], references: [id])
-  usuario          Usuario   @relation("UsuarioTecnico", fields: [usuarioId], references: [id], onDelete: Cascade)
-  asignaciones     OrdenAsignacionTecnico[]
-  ordenesDiagnosticadas OrdenDiagnostico[]
-  itemsManoObra    OrdenItemServicio[]
-  ordenesServicioAsignadas OrdenServicio[] @relation("OrdenServicioTecnicoAsignado")
+  id                       String                   @id @default(uuid()) @db.Uuid
+  usuarioId                String                   @unique @map("usuario_id") @db.Uuid
+  legajo                   String?                  @unique @map("legajo") @db.VarChar(30)
+  especialidad             String?                  @map("especialidad") @db.VarChar(120)
+  telefono                 String?                  @map("telefono") @db.VarChar(30)
+  emailContacto            String?                  @map("email_contacto") @db.VarChar(150)
+  estado                   String                   @default("ACTIVO") @map("estado") @db.VarChar(30)
+  observaciones            String?                  @map("observaciones") @db.VarChar(255)
+  activo                   Boolean                  @default(true)
+  createdAt                DateTime                 @default(now()) @map("created_at")
+  updatedAt                DateTime                 @updatedAt @map("updated_at")
+  deletedAt                DateTime?                @map("deleted_at")
+  createdById              String?                  @map("created_by") @db.Uuid
+  updatedById              String?                  @map("updated_by") @db.Uuid
+  createdBy                Usuario?                 @relation("TecnicoCreatedBy", fields: [createdById], references: [id])
+  updatedBy                Usuario?                 @relation("TecnicoUpdatedBy", fields: [updatedById], references: [id])
+  usuario                  Usuario                  @relation("UsuarioTecnico", fields: [usuarioId], references: [id], onDelete: Cascade)
+  asignaciones             OrdenAsignacionTecnico[]
+  ordenesDiagnosticadas    OrdenDiagnostico[]
+  itemsManoObra            OrdenItemServicio[]
+  ordenesServicioAsignadas OrdenServicio[]          @relation("OrdenServicioTecnicoAsignado")
 
   @@index([estado, activo])
   @@index([deletedAt])
@@ -1899,22 +1913,22 @@ model Tecnico {
 
 /// Tipos de equipo cliente (configurables por empresa en Configuración).
 model TipoEquipoCliente {
-  id              String    @id @default(uuid()) @db.Uuid
-  empresaId       String    @map("empresa_id") @db.Uuid
-  codigo          String    @map("codigo") @db.VarChar(30)
-  nombre          String    @map("nombre") @db.VarChar(120)
-  descripcion     String?   @map("descripcion") @db.VarChar(255)
-  orden           Int       @default(0)
-  activo          Boolean   @default(true)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  deletedAt       DateTime? @map("deleted_at")
-  createdById     String?   @map("created_by") @db.Uuid
-  updatedById     String?   @map("updated_by") @db.Uuid
-  createdBy       Usuario?  @relation("TipoEquipoCreatedBy", fields: [createdById], references: [id])
-  updatedBy       Usuario?  @relation("TipoEquipoUpdatedBy", fields: [updatedById], references: [id])
-  empresa         Empresa   @relation(fields: [empresaId], references: [id])
-  equipos         ClienteEquipo[]
+  id          String          @id @default(uuid()) @db.Uuid
+  empresaId   String          @map("empresa_id") @db.Uuid
+  codigo      String          @map("codigo") @db.VarChar(30)
+  nombre      String          @map("nombre") @db.VarChar(120)
+  descripcion String?         @map("descripcion") @db.VarChar(255)
+  orden       Int             @default(0)
+  activo      Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  deletedAt   DateTime?       @map("deleted_at")
+  createdById String?         @map("created_by") @db.Uuid
+  updatedById String?         @map("updated_by") @db.Uuid
+  createdBy   Usuario?        @relation("TipoEquipoCreatedBy", fields: [createdById], references: [id])
+  updatedBy   Usuario?        @relation("TipoEquipoUpdatedBy", fields: [updatedById], references: [id])
+  empresa     Empresa         @relation(fields: [empresaId], references: [id])
+  equipos     ClienteEquipo[]
 
   @@unique([empresaId, codigo])
   @@index([empresaId, activo])
@@ -1924,23 +1938,23 @@ model TipoEquipoCliente {
 
 /// Tipos de servicio técnico (configurable por empresa).
 model TipoServicioTecnico {
-  id              String    @id @default(uuid()) @db.Uuid
-  empresaId       String    @map("empresa_id") @db.Uuid
-  codigo          String    @map("codigo") @db.VarChar(30)
-  nombre          String    @map("nombre") @db.VarChar(120)
-  descripcion     String?   @map("descripcion") @db.VarChar(255)
-  tarifaSugerida  Decimal?  @default(0) @map("tarifa_sugerida") @db.Decimal(14, 2)
-  orden           Int       @default(0)
-  activo          Boolean   @default(true)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  deletedAt       DateTime? @map("deleted_at")
-  createdById     String?   @map("created_by") @db.Uuid
-  updatedById     String?   @map("updated_by") @db.Uuid
-  createdBy       Usuario?  @relation("TipoServicioCreatedBy", fields: [createdById], references: [id])
-  updatedBy       Usuario?  @relation("TipoServicioUpdatedBy", fields: [updatedById], references: [id])
-  empresa         Empresa   @relation(fields: [empresaId], references: [id])
-  itemsManoObra   OrdenItemServicio[]
+  id             String              @id @default(uuid()) @db.Uuid
+  empresaId      String              @map("empresa_id") @db.Uuid
+  codigo         String              @map("codigo") @db.VarChar(30)
+  nombre         String              @map("nombre") @db.VarChar(120)
+  descripcion    String?             @map("descripcion") @db.VarChar(255)
+  tarifaSugerida Decimal?            @default(0) @map("tarifa_sugerida") @db.Decimal(14, 2)
+  orden          Int                 @default(0)
+  activo         Boolean             @default(true)
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  deletedAt      DateTime?           @map("deleted_at")
+  createdById    String?             @map("created_by") @db.Uuid
+  updatedById    String?             @map("updated_by") @db.Uuid
+  createdBy      Usuario?            @relation("TipoServicioCreatedBy", fields: [createdById], references: [id])
+  updatedBy      Usuario?            @relation("TipoServicioUpdatedBy", fields: [updatedById], references: [id])
+  empresa        Empresa             @relation(fields: [empresaId], references: [id])
+  itemsManoObra  OrdenItemServicio[]
 
   @@unique([empresaId, codigo])
   @@index([empresaId, activo])
@@ -1950,25 +1964,25 @@ model TipoServicioTecnico {
 
 /// Equipos asociados a un cliente (NO es un módulo principal).
 model ClienteEquipo {
-  id              String    @id @default(uuid()) @db.Uuid
-  empresaId       String    @map("empresa_id") @db.Uuid
-  clienteId       String    @map("cliente_id") @db.Uuid
-  tipoEquipoId    String    @map("tipo_equipo_id") @db.Uuid
-  marca           String?   @map("marca") @db.VarChar(80)
-  modelo          String?   @map("modelo") @db.VarChar(120)
-  numeroSerie     String?   @map("numero_serie") @db.VarChar(120)
-  accesorios      String?   @map("accesorios") @db.VarChar(500)
-  notasInternas   String?   @map("notas_internas") @db.VarChar(500)
-  activo          Boolean   @default(true)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  deletedAt       DateTime? @map("deleted_at")
-  createdById     String?   @map("created_by") @db.Uuid
-  updatedById     String?   @map("updated_by") @db.Uuid
-  createdBy       Usuario?  @relation("ClienteEquipoCreatedBy", fields: [createdById], references: [id])
-  updatedBy       Usuario?  @relation("ClienteEquipoUpdatedBy", fields: [updatedById], references: [id])
-  empresa         Empresa   @relation(fields: [empresaId], references: [id])
-  cliente         Cliente   @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  id              String            @id @default(uuid()) @db.Uuid
+  empresaId       String            @map("empresa_id") @db.Uuid
+  clienteId       String            @map("cliente_id") @db.Uuid
+  tipoEquipoId    String            @map("tipo_equipo_id") @db.Uuid
+  marca           String?           @map("marca") @db.VarChar(80)
+  modelo          String?           @map("modelo") @db.VarChar(120)
+  numeroSerie     String?           @map("numero_serie") @db.VarChar(120)
+  accesorios      String?           @map("accesorios") @db.VarChar(500)
+  notasInternas   String?           @map("notas_internas") @db.VarChar(500)
+  activo          Boolean           @default(true)
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  deletedAt       DateTime?         @map("deleted_at")
+  createdById     String?           @map("created_by") @db.Uuid
+  updatedById     String?           @map("updated_by") @db.Uuid
+  createdBy       Usuario?          @relation("ClienteEquipoCreatedBy", fields: [createdById], references: [id])
+  updatedBy       Usuario?          @relation("ClienteEquipoUpdatedBy", fields: [updatedById], references: [id])
+  empresa         Empresa           @relation(fields: [empresaId], references: [id])
+  cliente         Cliente           @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   tipoEquipo      TipoEquipoCliente @relation(fields: [tipoEquipoId], references: [id])
   ordenesServicio OrdenServicio[]
 
@@ -1982,18 +1996,18 @@ model ClienteEquipo {
 
 /// Numerador por sucursal + año (OS-CODIGO_SUCURSAL-YYYY-NNNNN).
 model SecuenciaOrdenServicio {
-  id              String    @id @default(uuid()) @db.Uuid
-  sucursalId      String    @map("sucursal_id") @db.Uuid
-  anio            Int       @map("anio")
-  proximoNumero   Int       @default(1) @map("proximo_numero")
-  longitudNumero  Int       @default(5) @map("longitud_numero")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  createdById     String?   @map("created_by") @db.Uuid
-  updatedById     String?   @map("updated_by") @db.Uuid
-  sucursal        Sucursal  @relation(fields: [sucursalId], references: [id])
-  createdBy       Usuario?  @relation("SecuenciaOrdenCreatedBy", fields: [createdById], references: [id])
-  updatedBy       Usuario?  @relation("SecuenciaOrdenUpdatedBy", fields: [updatedById], references: [id])
+  id             String   @id @default(uuid()) @db.Uuid
+  sucursalId     String   @map("sucursal_id") @db.Uuid
+  anio           Int      @map("anio")
+  proximoNumero  Int      @default(1) @map("proximo_numero")
+  longitudNumero Int      @default(5) @map("longitud_numero")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  createdById    String?  @map("created_by") @db.Uuid
+  updatedById    String?  @map("updated_by") @db.Uuid
+  sucursal       Sucursal @relation(fields: [sucursalId], references: [id])
+  createdBy      Usuario? @relation("SecuenciaOrdenCreatedBy", fields: [createdById], references: [id])
+  updatedBy      Usuario? @relation("SecuenciaOrdenUpdatedBy", fields: [updatedById], references: [id])
 
   @@unique([sucursalId, anio])
   @@map("secuencias_ordenes_servicio")
@@ -2001,56 +2015,56 @@ model SecuenciaOrdenServicio {
 
 /// 🔥 TABLA CENTRAL de RayegoTech: Orden de Servicio.
 model OrdenServicio {
-  id                      String                      @id @default(uuid()) @db.Uuid
-  sucursalId              String                      @map("sucursal_id") @db.Uuid
-  numeroOrden             String                      @unique @map("numero_orden") @db.VarChar(50)
-  clienteId               String                      @map("cliente_id") @db.Uuid
-  clienteEquipoId         String                      @map("cliente_equipo_id") @db.Uuid
-  estadoActual            EstadoOrdenServicio         @default(RECIBIDO) @map("estado_actual")
-  tecnicoAsignadoId       String?                     @map("tecnico_asignado_id") @db.Uuid
-  fechaRecepcion          DateTime                    @default(now()) @map("fecha_recepcion")
-  fechaEntregaEstimada    DateTime?                   @map("fecha_entrega_estimada") @db.Date
-  fechaEntregaReal        DateTime?                   @map("fecha_entrega_real") @db.Date
-  problemaReportado       String                      @map("problema_reportado") @db.VarChar(2000)
-  accesoriosRecibidos     String?                     @map("accesorios_recibidos") @db.VarChar(500)
-  contrasenaEquipo        String?                     @map("contrasena_equipo") @db.VarChar(120)
-  garantiaDiasAplicados   Int                         @default(30) @map("garantia_dias_aplicados")
-  aprobadoClienteAt       DateTime?                   @map("aprobado_cliente_at")
-  aprobadoClientePorId    String?                     @map("aprobado_cliente_por_id") @db.Uuid
-  rechazadoClienteAt      DateTime?                   @map("rechazado_cliente_at")
-  motivoRechazoCliente    String?                     @map("motivo_rechazo_cliente") @db.VarChar(500)
-  subtotalRepuestos       Decimal                     @default(0) @map("subtotal_repuestos") @db.Decimal(14, 2)
-  subtotalManoObra        Decimal                     @default(0) @map("subtotal_mano_obra") @db.Decimal(14, 2)
-  subtotalServiciosAdic   Decimal                     @default(0) @map("subtotal_servicios_adic") @db.Decimal(14, 2)
-  descuentoTotal          Decimal                     @default(0) @map("descuento_total") @db.Decimal(14, 2)
-  impuestoTotal           Decimal                     @default(0) @map("impuesto_total") @db.Decimal(14, 2)
-  totalOrden              Decimal                     @default(0) @map("total_orden") @db.Decimal(14, 2)
-  totalPagado             Decimal                     @default(0) @map("total_pagado") @db.Decimal(14, 2)
-  saldoPendiente          Decimal                     @default(0) @map("saldo_pendiente") @db.Decimal(14, 2)
-  observacionesInternas   String?                     @map("observaciones_internas") @db.VarChar(1000)
-  empresaId               String                      @map("empresa_id") @db.Uuid
-  activo                  Boolean                     @default(true)
-  createdAt               DateTime                    @default(now()) @map("created_at")
-  updatedAt               DateTime                    @updatedAt @map("updated_at")
-  deletedAt               DateTime?                   @map("deleted_at")
-  createdById             String?                     @map("created_by") @db.Uuid
-  updatedById             String?                     @map("updated_by") @db.Uuid
-  sucursal                Sucursal                    @relation(fields: [sucursalId], references: [id])
-  empresa                 Empresa                     @relation(fields: [empresaId], references: [id])
-  cliente                 Cliente                     @relation(fields: [clienteId], references: [id])
-  clienteEquipo           ClienteEquipo               @relation(fields: [clienteEquipoId], references: [id])
-  tecnicoAsignado         Tecnico?                    @relation("OrdenServicioTecnicoAsignado", fields: [tecnicoAsignadoId], references: [id])
-  aprobadoClientePor      Usuario?                    @relation(fields: [aprobadoClientePorId], references: [id])
-  createdBy               Usuario?                    @relation("OrdenServicioCreatedBy", fields: [createdById], references: [id])
-  updatedBy               Usuario?                    @relation("OrdenServicioUpdatedBy", fields: [updatedById], references: [id])
-  historialEstados        OrdenEstadoHistorial[]
-  diagnosticos            OrdenDiagnostico[]
-  presupuestos            OrdenPresupuestoVersion[]
-  asignacionesTecnico     OrdenAsignacionTecnico[]
-  items                   OrdenItemServicio[]
-  pagos                   OrdenServicioPago[]
-  garantias               OrdenGarantia[]
-  movimientosInventario   MovimientoInventario[]
+  id                    String                    @id @default(uuid()) @db.Uuid
+  sucursalId            String                    @map("sucursal_id") @db.Uuid
+  numeroOrden           String                    @unique @map("numero_orden") @db.VarChar(50)
+  clienteId             String                    @map("cliente_id") @db.Uuid
+  clienteEquipoId       String                    @map("cliente_equipo_id") @db.Uuid
+  estadoActual          EstadoOrdenServicio       @default(RECIBIDO) @map("estado_actual")
+  tecnicoAsignadoId     String?                   @map("tecnico_asignado_id") @db.Uuid
+  fechaRecepcion        DateTime                  @default(now()) @map("fecha_recepcion")
+  fechaEntregaEstimada  DateTime?                 @map("fecha_entrega_estimada") @db.Date
+  fechaEntregaReal      DateTime?                 @map("fecha_entrega_real") @db.Date
+  problemaReportado     String                    @map("problema_reportado") @db.VarChar(2000)
+  accesoriosRecibidos   String?                   @map("accesorios_recibidos") @db.VarChar(500)
+  contrasenaEquipo      String?                   @map("contrasena_equipo") @db.VarChar(120)
+  garantiaDiasAplicados Int                       @default(30) @map("garantia_dias_aplicados")
+  aprobadoClienteAt     DateTime?                 @map("aprobado_cliente_at")
+  aprobadoClientePorId  String?                   @map("aprobado_cliente_por_id") @db.Uuid
+  rechazadoClienteAt    DateTime?                 @map("rechazado_cliente_at")
+  motivoRechazoCliente  String?                   @map("motivo_rechazo_cliente") @db.VarChar(500)
+  subtotalRepuestos     Decimal                   @default(0) @map("subtotal_repuestos") @db.Decimal(14, 2)
+  subtotalManoObra      Decimal                   @default(0) @map("subtotal_mano_obra") @db.Decimal(14, 2)
+  subtotalServiciosAdic Decimal                   @default(0) @map("subtotal_servicios_adic") @db.Decimal(14, 2)
+  descuentoTotal        Decimal                   @default(0) @map("descuento_total") @db.Decimal(14, 2)
+  impuestoTotal         Decimal                   @default(0) @map("impuesto_total") @db.Decimal(14, 2)
+  totalOrden            Decimal                   @default(0) @map("total_orden") @db.Decimal(14, 2)
+  totalPagado           Decimal                   @default(0) @map("total_pagado") @db.Decimal(14, 2)
+  saldoPendiente        Decimal                   @default(0) @map("saldo_pendiente") @db.Decimal(14, 2)
+  observacionesInternas String?                   @map("observaciones_internas") @db.VarChar(1000)
+  empresaId             String                    @map("empresa_id") @db.Uuid
+  activo                Boolean                   @default(true)
+  createdAt             DateTime                  @default(now()) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
+  deletedAt             DateTime?                 @map("deleted_at")
+  createdById           String?                   @map("created_by") @db.Uuid
+  updatedById           String?                   @map("updated_by") @db.Uuid
+  sucursal              Sucursal                  @relation(fields: [sucursalId], references: [id])
+  empresa               Empresa                   @relation(fields: [empresaId], references: [id])
+  cliente               Cliente                   @relation(fields: [clienteId], references: [id])
+  clienteEquipo         ClienteEquipo             @relation(fields: [clienteEquipoId], references: [id])
+  tecnicoAsignado       Tecnico?                  @relation("OrdenServicioTecnicoAsignado", fields: [tecnicoAsignadoId], references: [id])
+  aprobadoClientePor    Usuario?                  @relation(fields: [aprobadoClientePorId], references: [id])
+  createdBy             Usuario?                  @relation("OrdenServicioCreatedBy", fields: [createdById], references: [id])
+  updatedBy             Usuario?                  @relation("OrdenServicioUpdatedBy", fields: [updatedById], references: [id])
+  historialEstados      OrdenEstadoHistorial[]
+  diagnosticos          OrdenDiagnostico[]
+  presupuestos          OrdenPresupuestoVersion[]
+  asignacionesTecnico   OrdenAsignacionTecnico[]
+  items                 OrdenItemServicio[]
+  pagos                 OrdenServicioPago[]
+  garantias             OrdenGarantia[]
+  movimientosInventario MovimientoInventario[]
 
   @@index([sucursalId, estadoActual])
   @@index([clienteId])
@@ -2063,17 +2077,17 @@ model OrdenServicio {
 
 /// Timeline de cambio de estado dentro de una Orden.
 model OrdenEstadoHistorial {
-  id                String              @id @default(uuid()) @db.Uuid
-  ordenId           String              @map("orden_id") @db.Uuid
-  estado            EstadoOrdenServicio @map("estado")
-  observaciones     String?             @map("observaciones") @db.VarChar(500)
-  fecha             DateTime            @default(now()) @map("fecha")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  deletedAt         DateTime?           @map("deleted_at")
-  realizadoPorId    String?             @map("realizado_por_id") @db.Uuid
-  orden             OrdenServicio       @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  realizadoPor      Usuario?            @relation(fields: [realizadoPorId], references: [id])
+  id             String              @id @default(uuid()) @db.Uuid
+  ordenId        String              @map("orden_id") @db.Uuid
+  estado         EstadoOrdenServicio @map("estado")
+  observaciones  String?             @map("observaciones") @db.VarChar(500)
+  fecha          DateTime            @default(now()) @map("fecha")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  deletedAt      DateTime?           @map("deleted_at")
+  realizadoPorId String?             @map("realizado_por_id") @db.Uuid
+  orden          OrdenServicio       @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  realizadoPor   Usuario?            @relation(fields: [realizadoPorId], references: [id])
 
   @@index([ordenId, fecha])
   @@map("ordenes_estado_historial")
@@ -2081,18 +2095,18 @@ model OrdenEstadoHistorial {
 
 /// Diagnósticos asociados a una Orden.
 model OrdenDiagnostico {
-  id              String        @id @default(uuid()) @db.Uuid
-  ordenId         String        @map("orden_id") @db.Uuid
-  tecnicoId       String?       @map("tecnico_id") @db.Uuid
-  detalle         String        @map("detalle") @db.VarChar(2000)
-  fecha           DateTime      @default(now()) @map("fecha")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-  deletedAt       DateTime?     @map("deleted_at")
-  creadoPorId     String?       @map("creado_por_id") @db.Uuid
-  orden           OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  tecnico         Tecnico?      @relation(fields: [tecnicoId], references: [id])
-  creadoPor       Usuario?      @relation("DiagnosticoCreadoPor", fields: [creadoPorId], references: [id])
+  id          String        @id @default(uuid()) @db.Uuid
+  ordenId     String        @map("orden_id") @db.Uuid
+  tecnicoId   String?       @map("tecnico_id") @db.Uuid
+  detalle     String        @map("detalle") @db.VarChar(2000)
+  fecha       DateTime      @default(now()) @map("fecha")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+  creadoPorId String?       @map("creado_por_id") @db.Uuid
+  orden       OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  tecnico     Tecnico?      @relation(fields: [tecnicoId], references: [id])
+  creadoPor   Usuario?      @relation("DiagnosticoCreadoPor", fields: [creadoPorId], references: [id])
 
   @@index([ordenId, fecha])
   @@index([tecnicoId])
@@ -2101,27 +2115,27 @@ model OrdenDiagnostico {
 
 /// Presupuesto versionado por Orden.
 model OrdenPresupuestoVersion {
-  id                   String              @id @default(uuid()) @db.Uuid
-  ordenId              String              @map("orden_id") @db.Uuid
-  version              Int                 @map("version")
-  subtotalRepuestos    Decimal             @default(0) @map("subtotal_repuestos") @db.Decimal(14, 2)
-  subtotalManoObra     Decimal             @default(0) @map("subtotal_mano_obra") @db.Decimal(14, 2)
-  subtotalServiciosAdic Decimal           @default(0) @map("subtotal_servicios_adic") @db.Decimal(14, 2)
-  descuentoTotal       Decimal             @default(0) @map("descuento_total") @db.Decimal(14, 2)
-  impuestoTotal        Decimal             @default(0) @map("impuesto_total") @db.Decimal(14, 2)
-  total                Decimal             @default(0) @map("total") @db.Decimal(14, 2)
-  notasCliente         String?             @map("notas_cliente") @db.VarChar(1000)
-  estadoAprobacion     String              @default("PENDIENTE") @map("estado_aprobacion") @db.VarChar(30)
-  fechaEnvioCliente    DateTime?           @map("fecha_envio_cliente")
-  fechaDecisionCliente  DateTime?          @map("fecha_decision_cliente")
-  motivoRechazo        String?             @map("motivo_rechazo") @db.VarChar(500)
-  decididoClientePor   String?             @map("decidido_cliente_por") @db.VarChar(120)
-  createdAt            DateTime            @default(now()) @map("created_at")
-  updatedAt            DateTime            @updatedAt @map("updated_at")
-  deletedAt            DateTime?           @map("deleted_at")
-  creadoPorId          String?             @map("creado_por_id") @db.Uuid
-  orden                OrdenServicio       @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  creadoPor            Usuario?            @relation("PresupuestoCreadoPor", fields: [creadoPorId], references: [id])
+  id                    String        @id @default(uuid()) @db.Uuid
+  ordenId               String        @map("orden_id") @db.Uuid
+  version               Int           @map("version")
+  subtotalRepuestos     Decimal       @default(0) @map("subtotal_repuestos") @db.Decimal(14, 2)
+  subtotalManoObra      Decimal       @default(0) @map("subtotal_mano_obra") @db.Decimal(14, 2)
+  subtotalServiciosAdic Decimal       @default(0) @map("subtotal_servicios_adic") @db.Decimal(14, 2)
+  descuentoTotal        Decimal       @default(0) @map("descuento_total") @db.Decimal(14, 2)
+  impuestoTotal         Decimal       @default(0) @map("impuesto_total") @db.Decimal(14, 2)
+  total                 Decimal       @default(0) @map("total") @db.Decimal(14, 2)
+  notasCliente          String?       @map("notas_cliente") @db.VarChar(1000)
+  estadoAprobacion      String        @default("PENDIENTE") @map("estado_aprobacion") @db.VarChar(30)
+  fechaEnvioCliente     DateTime?     @map("fecha_envio_cliente")
+  fechaDecisionCliente  DateTime?     @map("fecha_decision_cliente")
+  motivoRechazo         String?       @map("motivo_rechazo") @db.VarChar(500)
+  decididoClientePor    String?       @map("decidido_cliente_por") @db.VarChar(120)
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+  deletedAt             DateTime?     @map("deleted_at")
+  creadoPorId           String?       @map("creado_por_id") @db.Uuid
+  orden                 OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  creadoPor             Usuario?      @relation("PresupuestoCreadoPor", fields: [creadoPorId], references: [id])
 
   @@unique([ordenId, version])
   @@index([estadoAprobacion])
@@ -2130,20 +2144,20 @@ model OrdenPresupuestoVersion {
 
 /// Historial de asignaciones de técnico.
 model OrdenAsignacionTecnico {
-  id               String        @id @default(uuid()) @db.Uuid
-  ordenId          String        @map("orden_id") @db.Uuid
-  tecnicoId        String        @map("tecnico_id") @db.Uuid
-  fechaAsignacion  DateTime      @default(now()) @map("fecha_asignacion")
-  fechaLiberacion  DateTime?     @map("fecha_liberacion")
-  motivoCambio     String?       @map("motivo_cambio") @db.VarChar(500)
-  activo           Boolean       @default(true)
-  createdAt        DateTime      @default(now()) @map("created_at")
-  updatedAt        DateTime      @updatedAt @map("updated_at")
-  deletedAt        DateTime?     @map("deleted_at")
-  asignadoPorId    String?       @map("asignado_por_id") @db.Uuid
-  orden            OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  tecnico          Tecnico       @relation(fields: [tecnicoId], references: [id])
-  asignadoPor      Usuario?      @relation(fields: [asignadoPorId], references: [id])
+  id              String        @id @default(uuid()) @db.Uuid
+  ordenId         String        @map("orden_id") @db.Uuid
+  tecnicoId       String        @map("tecnico_id") @db.Uuid
+  fechaAsignacion DateTime      @default(now()) @map("fecha_asignacion")
+  fechaLiberacion DateTime?     @map("fecha_liberacion")
+  motivoCambio    String?       @map("motivo_cambio") @db.VarChar(500)
+  activo          Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedAt       DateTime?     @map("deleted_at")
+  asignadoPorId   String?       @map("asignado_por_id") @db.Uuid
+  orden           OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  tecnico         Tecnico       @relation(fields: [tecnicoId], references: [id])
+  asignadoPor     Usuario?      @relation(fields: [asignadoPorId], references: [id])
 
   @@index([ordenId, fechaAsignacion])
   @@index([tecnicoId, activo])
@@ -2152,37 +2166,37 @@ model OrdenAsignacionTecnico {
 
 /// Ítems de una Orden de Servicio (repuestos, mano de obra, accesorios, servicios).
 model OrdenItemServicio {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  ordenId             String                  @map("orden_id") @db.Uuid
-  tipo                TipoItemOrdenServicio   @map("tipo")
-  productoId          String?                 @map("producto_id") @db.Uuid
-  loteId              String?                 @map("lote_id") @db.Uuid
-  tipoServicioId      String?                 @map("tipo_servicio_id") @db.Uuid
-  tecnicoId           String?                 @map("tecnico_id") @db.Uuid
-  descripcion         String                  @map("descripcion") @db.VarChar(255)
-  cantidad            Decimal                 @default(1) @db.Decimal(14, 4)
-  precioUnitario      Decimal                 @default(0) @map("precio_unitario") @db.Decimal(14, 2)
-  costoUnitarioRef    Decimal?                @default(0) @map("costo_unitario_ref") @db.Decimal(14, 6)
-  descuentoItem       Decimal                 @default(0) @map("descuento_item") @db.Decimal(14, 2)
-  impuestoItem        Decimal                 @default(0) @map("impuesto_item") @db.Decimal(14, 2)
-  subtotal            Decimal                 @default(0) @map("subtotal") @db.Decimal(14, 2)
-  horasTrabajadas     Decimal?                @map("horas_trabajadas") @db.Decimal(10, 2)
-  fechaRealizacion    DateTime?               @map("fecha_realizacion") @db.Date
-  observaciones       String?                 @map("observaciones") @db.VarChar(500)
-  consumidoInventario Boolean                 @default(false) @map("consumido_inventario")
-  activo              Boolean                 @default(true)
-  createdAt           DateTime                @default(now()) @map("created_at")
-  updatedAt           DateTime                @updatedAt @map("updated_at")
-  deletedAt           DateTime?               @map("deleted_at")
-  creadoPorId         String?                 @map("creado_por_id") @db.Uuid
-  actualizadoPorId    String?                 @map("actualizado_por_id") @db.Uuid
-  orden               OrdenServicio           @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  producto            Producto?               @relation(fields: [productoId], references: [id])
-  lote                Lote?                   @relation(fields: [loteId], references: [id])
-  tipoServicio        TipoServicioTecnico?    @relation(fields: [tipoServicioId], references: [id])
-  tecnico             Tecnico?                @relation(fields: [tecnicoId], references: [id])
-  creadoPor           Usuario?                @relation("ItemOrdenCreadoPor", fields: [creadoPorId], references: [id])
-  actualizadoPor      Usuario?                @relation("ItemOrdenActualizadoPor", fields: [actualizadoPorId], references: [id])
+  id                    String                 @id @default(uuid()) @db.Uuid
+  ordenId               String                 @map("orden_id") @db.Uuid
+  tipo                  TipoItemOrdenServicio  @map("tipo")
+  productoId            String?                @map("producto_id") @db.Uuid
+  loteId                String?                @map("lote_id") @db.Uuid
+  tipoServicioId        String?                @map("tipo_servicio_id") @db.Uuid
+  tecnicoId             String?                @map("tecnico_id") @db.Uuid
+  descripcion           String                 @map("descripcion") @db.VarChar(255)
+  cantidad              Decimal                @default(1) @db.Decimal(14, 4)
+  precioUnitario        Decimal                @default(0) @map("precio_unitario") @db.Decimal(14, 2)
+  costoUnitarioRef      Decimal?               @default(0) @map("costo_unitario_ref") @db.Decimal(14, 6)
+  descuentoItem         Decimal                @default(0) @map("descuento_item") @db.Decimal(14, 2)
+  impuestoItem          Decimal                @default(0) @map("impuesto_item") @db.Decimal(14, 2)
+  subtotal              Decimal                @default(0) @map("subtotal") @db.Decimal(14, 2)
+  horasTrabajadas       Decimal?               @map("horas_trabajadas") @db.Decimal(10, 2)
+  fechaRealizacion      DateTime?              @map("fecha_realizacion") @db.Date
+  observaciones         String?                @map("observaciones") @db.VarChar(500)
+  consumidoInventario   Boolean                @default(false) @map("consumido_inventario")
+  activo                Boolean                @default(true)
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  deletedAt             DateTime?              @map("deleted_at")
+  creadoPorId           String?                @map("creado_por_id") @db.Uuid
+  actualizadoPorId      String?                @map("actualizado_por_id") @db.Uuid
+  orden                 OrdenServicio          @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  producto              Producto?              @relation(fields: [productoId], references: [id])
+  lote                  Lote?                  @relation(fields: [loteId], references: [id])
+  tipoServicio          TipoServicioTecnico?   @relation(fields: [tipoServicioId], references: [id])
+  tecnico               Tecnico?               @relation(fields: [tecnicoId], references: [id])
+  creadoPor             Usuario?               @relation("ItemOrdenCreadoPor", fields: [creadoPorId], references: [id])
+  actualizadoPor        Usuario?               @relation("ItemOrdenActualizadoPor", fields: [actualizadoPorId], references: [id])
   movimientosInventario MovimientoInventario[]
 
   @@index([ordenId])
@@ -2196,26 +2210,26 @@ model OrdenItemServicio {
 /// Pagos parciales / adelantos / saldo final de una Orden.
 /// Se integra 100% con MovimientoCaja existente (tabla caja).
 model OrdenServicioPago {
-  id                String              @id @default(uuid()) @db.Uuid
-  ordenId           String              @map("orden_id") @db.Uuid
-  movimientoCajaId  String?             @unique @map("movimiento_caja_id") @db.Uuid
-  formaPagoId       String              @map("forma_pago_id") @db.Uuid
-  tipoPagoOrden     String              @map("tipo_pago_orden") @db.VarChar(30) // ADELANTO/SALDO/PAGO_TOTAL/OTRO
-  monto             Decimal             @db.Decimal(14, 2)
-  referenciaExterna String?             @map("referencia_externa") @db.VarChar(120)
-  fechaPago         DateTime            @default(now()) @map("fecha_pago")
-  observaciones     String?             @map("observaciones") @db.VarChar(255)
-  activo            Boolean             @default(true)
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  deletedAt         DateTime?           @map("deleted_at")
-  creadoPorId       String?             @map("creado_por_id") @db.Uuid
-  actualizadoPorId  String?             @map("actualizado_por_id") @db.Uuid
-  orden             OrdenServicio       @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  movimientoCaja    MovimientoCaja?     @relation(fields: [movimientoCajaId], references: [id])
-  formaPago         FormaPago           @relation(fields: [formaPagoId], references: [id])
-  creadoPor         Usuario?            @relation("OrdenPagoCreadoPor", fields: [creadoPorId], references: [id])
-  actualizadoPor    Usuario?            @relation("OrdenPagoActualizadoPor", fields: [actualizadoPorId], references: [id])
+  id                String          @id @default(uuid()) @db.Uuid
+  ordenId           String          @map("orden_id") @db.Uuid
+  movimientoCajaId  String?         @unique @map("movimiento_caja_id") @db.Uuid
+  formaPagoId       String          @map("forma_pago_id") @db.Uuid
+  tipoPagoOrden     String          @map("tipo_pago_orden") @db.VarChar(30) // ADELANTO/SALDO/PAGO_TOTAL/OTRO
+  monto             Decimal         @db.Decimal(14, 2)
+  referenciaExterna String?         @map("referencia_externa") @db.VarChar(120)
+  fechaPago         DateTime        @default(now()) @map("fecha_pago")
+  observaciones     String?         @map("observaciones") @db.VarChar(255)
+  activo            Boolean         @default(true)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+  creadoPorId       String?         @map("creado_por_id") @db.Uuid
+  actualizadoPorId  String?         @map("actualizado_por_id") @db.Uuid
+  orden             OrdenServicio   @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  movimientoCaja    MovimientoCaja? @relation(fields: [movimientoCajaId], references: [id])
+  formaPago         FormaPago       @relation(fields: [formaPagoId], references: [id])
+  creadoPor         Usuario?        @relation("OrdenPagoCreadoPor", fields: [creadoPorId], references: [id])
+  actualizadoPor    Usuario?        @relation("OrdenPagoActualizadoPor", fields: [actualizadoPorId], references: [id])
 
   @@index([ordenId, fechaPago])
   @@index([formaPagoId])
@@ -2226,24 +2240,24 @@ model OrdenServicioPago {
 
 /// Garantía asociada a una Orden entregada (1 Orden tiene 1 garantía max).
 model OrdenGarantia {
-  id              String        @id @default(uuid()) @db.Uuid
-  ordenId         String        @unique @map("orden_id") @db.Uuid
-  diasAplicados   Int           @default(30) @map("dias_aplicados")
-  fechaInicio     DateTime      @map("fecha_inicio") @db.Date
-  fechaFin        DateTime      @map("fecha_fin") @db.Date
-  terminos        String?       @map("terminos") @db.VarChar(2000)
-  itemsCubiertos  String?       @map("items_cubiertos") @db.VarChar(2000)
-  estado          String        @default("VIGENTE") @map("estado") @db.VarChar(30)
-  observaciones   String?       @map("observaciones") @db.VarChar(500)
-  activo          Boolean       @default(true)
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-  deletedAt       DateTime?     @map("deleted_at")
-  creadoPorId     String?       @map("creado_por_id") @db.Uuid
-  actualizadoPorId String?      @map("actualizado_por_id") @db.Uuid
-  orden           OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  creadoPor       Usuario?      @relation("OrdenGarantiaCreadoPor", fields: [creadoPorId], references: [id])
-  actualizadoPor  Usuario?      @relation("OrdenGarantiaActualizadoPor", fields: [actualizadoPorId], references: [id])
+  id               String        @id @default(uuid()) @db.Uuid
+  ordenId          String        @unique @map("orden_id") @db.Uuid
+  diasAplicados    Int           @default(30) @map("dias_aplicados")
+  fechaInicio      DateTime      @map("fecha_inicio") @db.Date
+  fechaFin         DateTime      @map("fecha_fin") @db.Date
+  terminos         String?       @map("terminos") @db.VarChar(2000)
+  itemsCubiertos   String?       @map("items_cubiertos") @db.VarChar(2000)
+  estado           String        @default("VIGENTE") @map("estado") @db.VarChar(30)
+  observaciones    String?       @map("observaciones") @db.VarChar(500)
+  activo           Boolean       @default(true)
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  deletedAt        DateTime?     @map("deleted_at")
+  creadoPorId      String?       @map("creado_por_id") @db.Uuid
+  actualizadoPorId String?       @map("actualizado_por_id") @db.Uuid
+  orden            OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  creadoPor        Usuario?      @relation("OrdenGarantiaCreadoPor", fields: [creadoPorId], references: [id])
+  actualizadoPor   Usuario?      @relation("OrdenGarantiaActualizadoPor", fields: [actualizadoPorId], references: [id])
 
   @@index([fechaFin, estado])
   @@index([deletedAt])

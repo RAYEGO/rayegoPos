@@ -9,6 +9,7 @@ import {
   requirePermission,
 } from '../../lib/auth.js'
 import type { AuthRole } from '../auth/auth.types.js'
+import { getRoleLabel } from '../auth/auth.permissions.js'
 
 const SALT_ROUNDS = 12
 
@@ -27,7 +28,28 @@ export const AUTH_ROLE_CODES = [
   'SUPERVISOR',
   'CAJERO',
   'ALMACEN',
+  'TECNICO',
 ] as const
+
+export async function ensureDefaultRoles(): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    for (const codigo of AUTH_ROLE_CODES) {
+      await tx.rol.upsert({
+        where: { codigo },
+        create: {
+          codigo,
+          nombre: getRoleLabel(codigo),
+          activo: true,
+        },
+        update: {
+          activo: true,
+          deletedAt: null,
+          nombre: getRoleLabel(codigo),
+        },
+      })
+    }
+  })
+}
 
 export const createUserSchema = z.object({
   firstName: z.string().min(1, 'Nombres es obligatorio.').max(120),
@@ -107,6 +129,7 @@ async function writeAudit(
 }
 
 async function resolveRoleByCodigo(codigo: AuthRole): Promise<Rol> {
+  await ensureDefaultRoles()
   const rol = await prisma.rol.findFirst({
     where: { codigo, activo: true, deletedAt: null },
   })

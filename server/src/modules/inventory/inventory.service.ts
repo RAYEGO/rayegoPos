@@ -7,7 +7,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 import {
   buildPackagingSnapshot,
   convertQuantityToBaseUnits,
@@ -1116,6 +1116,7 @@ export async function adjustInventoryLot(
   payload: AdjustInventoryLotPayload,
   request: FastifyRequest,
 ) {
+  await requirePermission(request, 'inventario.manage')
   const { userId, branchId } = await requireBranchAuthContext(request)
   const requestedQuantity = Number(payload.quantity)
 

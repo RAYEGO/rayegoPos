@@ -15,7 +15,7 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { getAuthContext, requireBranchAuthContext } from '../../lib/auth.js'
+import { getAuthContext, requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
   buildPackagingSnapshot,
@@ -2159,6 +2159,7 @@ export async function registerPurchasePayment(
   payload: RegisterPurchasePaymentPayload,
   request: FastifyRequest,
 ) {
+  await requirePermission(request, 'compras.manage')
   const { userId, branchId } = await requireBranchAuthContext(request)
   const amount = Number(payload.monto)
   const paymentDate = payload.fechaPago
@@ -3318,6 +3319,7 @@ export async function returnPurchaseItem(
 }
 
 export async function getPurchaseOrderById(orderId: string, request: FastifyRequest) {
+  await requirePermission(request, 'compras.read')
   const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   const companyPromise = prisma.empresa.findFirst({

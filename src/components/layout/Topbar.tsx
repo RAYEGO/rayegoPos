@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { RoleBadge } from '@/components/auth/RoleBadge'
-import { Bell, Building2, Globe2, LogOut, Menu, Search, UserCircle2 } from 'lucide-react'
+import { Bell, Building2, Globe2, LogOut, Menu, Search, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -119,7 +119,10 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         <div className="hidden w-[420px] max-w-[42vw] items-center lg:flex">
           <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Buscar en Rayego POS (próximamente)" />
+            <Input
+              className="pl-9 rounded-lg bg-muted/40 border-transparent focus-visible:bg-background focus-visible:border-input"
+              placeholder="Buscar en Rayego POS (próximamente)"
+            />
           </div>
         </div>
 
@@ -151,39 +154,42 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
                         : 'bg-muted-foreground')
                 }
               />
-              <span className="inline-flex items-center gap-1">
-                {environmentStatus.kind === 'prod' ? '🔴' : environmentStatus.kind === 'dev' ? '🟢' : environmentStatus.kind === 'other' ? '🟡' : '⚪️'}
-                {environmentStatus.label}
-              </span>
+              <span>{environmentStatus.label}</span>
             </div>
           ) : null}
           {isPlatformAdmin ? (
             <div className="hidden items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary sm:flex">
-              <Globe2 className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate font-medium">Rayego POS · Administración de plataforma</span>
+              <Globe2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate font-medium">Rayego POS · Plataforma</span>
             </div>
           ) : session?.user.companyName || session?.user.branchName ? (
-            <div className="hidden items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground sm:flex">
-              <Building2 className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">
+            <div className="hidden items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary sm:flex">
+              <Building2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate font-medium">
                 {session.user.companyName ?? '—'}
                 {session.user.branchName ? ` · ${session.user.branchName}` : ''}
               </span>
             </div>
           ) : null}
           {session?.user.roleName ? (
-            <div className="hidden items-center gap-1 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground md:flex">
+            <div className="hidden items-center gap-1 rounded-full bg-muted/70 px-3 py-1 text-xs text-muted-foreground md:flex">
               <span className="truncate">{session.user.roleName}</span>
             </div>
           ) : null}
-          <Button type="button" variant="ghost" size="icon" aria-label="Notificaciones">
-            <Bell />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Notificaciones"
+            className="hover:bg-primary/5 transition-all"
+          >
+            <Bell className="h-[18px] w-[18px]" />
           </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="ghost" className="gap-2 px-2 sm:px-3">
-                <UserCircle2 />
+                <UserRound />
                 <span className="hidden text-sm font-medium md:inline">
                   {session?.user.fullName ?? 'Usuario'}
                 </span>

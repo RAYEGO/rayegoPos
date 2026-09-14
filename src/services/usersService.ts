@@ -27,7 +27,7 @@ export type CreateUserPayload = {
   email: string
   username: string
   password: string
-  role: 'ADMIN_POS' | 'ADMIN' | 'ADMIN_EMPRESA' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN'
+  role: 'ADMIN_POS' | 'ADMIN' | 'ADMIN_EMPRESA' | 'SUPERVISOR' | 'CAJERO' | 'ALMACEN' | 'TECNICO'
   branchIds: string[]
   isActive: boolean
   mustChangePassword?: boolean

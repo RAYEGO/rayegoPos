@@ -1,7 +1,7 @@
 import { Prisma, TipoDocumentoIdentidad, TipoPersona } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext } from '../../lib/auth.js'
+import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
 
 function createHttpError(statusCode: number, message: string) {
   const error = new Error(message) as Error & { statusCode: number }
@@ -266,6 +266,7 @@ export async function updateSupplier(
 }
 
 export async function deleteSupplier(supplierId: string, request: FastifyRequest) {
+  await requirePermission(request, 'proveedores.manage')
   const { userId, companyId } = await requireBranchAuthContext(request)
 
   const supplier = await prisma.proveedor.findFirst({
