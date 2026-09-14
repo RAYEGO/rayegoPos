@@ -88,6 +88,7 @@ const _ventaRapidaBaseSchema = z.object({
   descuentoTotal: z.coerce.number().min(0, 'El descuento no puede ser negativo.').default(0),
 })
 
+type VentaRapidaFormInput = z.input<typeof _ventaRapidaBaseSchema>
 type VentaRapidaFormValues = z.output<typeof _ventaRapidaBaseSchema>
 
 const ventaRapidaSchema = _ventaRapidaBaseSchema.superRefine((value, ctx) => {
@@ -351,7 +352,7 @@ export function VentasPage() {
     name: 'payments',
   })
 
-  const ventaRapidaForm = useForm<VentaRapidaFormValues>({
+  const ventaRapidaForm = useForm<VentaRapidaFormInput, any, VentaRapidaFormValues>({
     resolver: zodResolver(ventaRapidaSchema),
     defaultValues: {
       descripcion: '',
