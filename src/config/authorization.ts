@@ -278,7 +278,7 @@ export const roleDefinitions: RoleDefinition[] = [
     key: 'TECNICO',
     label: 'Técnico',
     description: 'Gestiona órdenes de servicio, equipos de clientes y consumo de inventario RT.',
-    badgeVariant: 'secondary',
+    badgeVariant: 'info',
     permissions: [
       'dashboard.read',
       'ordenesServicio.read',

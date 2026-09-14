@@ -8,7 +8,7 @@ import {
   requirePermission,
 } from '../../lib/auth.js'
 import type { AuthPermission, AuthRole } from '../auth/auth.types.js'
-import { AUTH_ROLE_CODES } from '../users/users.service.js'
+import { AUTH_ROLE_CODES, ensureDefaultRoles } from '../users/users.service.js'
 
 const PLATFORM_ONLY_ROLES: AuthRole[] = ['ADMIN_POS']
 
@@ -122,6 +122,8 @@ export async function listRolesForAdmin(
   await requirePermission(request, 'usuarios.read')
   const ctx = await getAuthContext(request)
   const isPlatform = Boolean(ctx.isPlatformAdmin) || ctx.roles.includes('ADMIN_POS')
+
+  await ensureDefaultRoles()
 
   const where: Prisma.RolWhereInput = {
     deletedAt: null,

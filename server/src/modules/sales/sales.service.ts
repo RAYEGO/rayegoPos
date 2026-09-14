@@ -118,7 +118,7 @@ type SalesDashboardFilters = {
 }
 
 type CreateSaleItemProductoRegistrado = {
-  tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO
+  tipoLinea: 'PRODUCTO_REGISTRADO'
   productoId: string
   cantidad: number
   presentacionId: string
@@ -126,7 +126,7 @@ type CreateSaleItemProductoRegistrado = {
 }
 
 type CreateSaleItemVentaRapida = {
-  tipoLinea: TipoLineaVenta.VENTA_RAPIDA
+  tipoLinea: 'VENTA_RAPIDA'
   descripcion: string
   simboloUnidad: string
   precioUnitario: number
@@ -372,7 +372,7 @@ function mapDispensations(sales: SaleWithRelations[], codeMap: Map<string, strin
   return sales.flatMap((sale) =>
     sale.detalles
       .filter((detail) =>
-        detail.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO &&
+        detail.tipoLinea === 'PRODUCTO_REGISTRADO' &&
         detail.producto &&
         (detail.producto.requiereReceta || detail.producto.esControlado),
       )
@@ -854,10 +854,10 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
   const registeredProductItems = payload.items.filter(
     (item): item is CreateSaleItemProductoRegistrado =>
-      item.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO,
+      item.tipoLinea === 'PRODUCTO_REGISTRADO',
   )
   const quickSaleItems = payload.items.filter(
-    (item): item is CreateSaleItemVentaRapida => item.tipoLinea === TipoLineaVenta.VENTA_RAPIDA,
+    (item): item is CreateSaleItemVentaRapida => item.tipoLinea === 'VENTA_RAPIDA',
   )
 
   const duplicatedProducts = registeredProductItems.reduce((map, item) => {
@@ -1181,7 +1181,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         throw createHttpError(400, 'La cantidad debe ser un entero positivo.')
       }
 
-      if (item.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO) {
+      if (item.tipoLinea === 'PRODUCTO_REGISTRADO') {
         const product = productMap.get(item.productoId)!
         const packagingContext = resolvePackagingOperationContext({
           operation: 'SALE',
@@ -1229,7 +1229,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         }
 
         return {
-          tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO,
+          tipoLinea: 'PRODUCTO_REGISTRADO' as const,
           productoId: item.productoId,
           producto: product,
           descripcion: null,
@@ -1248,17 +1248,18 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         }
       }
 
-      const precioUnitarioVR = Number(item.precioUnitario)
+      const vrItem = item as CreateSaleItemVentaRapida
+      const precioUnitarioVR = Number(vrItem.precioUnitario)
       if (!Number.isFinite(precioUnitarioVR) || precioUnitarioVR <= 0) {
         throw createHttpError(400, 'El precio unitario del artículo rápido debe ser mayor a 0.')
       }
 
-      const descripcionVR = item.descripcion.trim()
+      const descripcionVR = vrItem.descripcion.trim()
       if (!descripcionVR || descripcionVR.length > 255) {
         throw createHttpError(400, 'La descripción del artículo rápido es inválida.')
       }
 
-      const simboloUnidadVR = item.simboloUnidad.trim()
+      const simboloUnidadVR = vrItem.simboloUnidad.trim()
       if (!simboloUnidadVR || simboloUnidadVR.length > 20) {
         throw createHttpError(400, 'El símbolo de unidad del artículo rápido es inválido.')
       }
@@ -1273,7 +1274,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       }
 
       return {
-        tipoLinea: TipoLineaVenta.VENTA_RAPIDA,
+        tipoLinea: 'VENTA_RAPIDA' as const,
         productoId: null,
         producto: null,
         descripcion: descripcionVR,
@@ -1463,7 +1464,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
 
     const detailMap = new Map(
       sale.detalles
-        .filter((detail) => detail.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO && detail.productoId)
+        .filter((detail) => detail.tipoLinea === 'PRODUCTO_REGISTRADO' && detail.productoId)
         .map((detail) => [detail.productoId!, detail]),
     )
     const lotAvailabilityMap = new Map(
@@ -1482,8 +1483,8 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
     )
 
     const registeredLineItems = lineItems.filter(
-      (item): item is ProcessedLineBase & { tipoLinea: TipoLineaVenta.PRODUCTO_REGISTRADO; productoId: string; producto: any } =>
-        item.tipoLinea === TipoLineaVenta.PRODUCTO_REGISTRADO,
+      (item): item is ProcessedLineBase & { tipoLinea: 'PRODUCTO_REGISTRADO'; productoId: string; producto: { nombre: string } } =>
+        item.tipoLinea === 'PRODUCTO_REGISTRADO' && Boolean(item.producto) && Boolean(item.productoId),
     )
 
     for (const item of registeredLineItems) {
@@ -1513,7 +1514,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       if (totalAvailable + 0.0001 < item.quantity) {
         throw createHttpError(
           400,
-          `No hay stock suficiente por lotes para ${item.product.nombre}. Disponible: ${totalAvailable.toFixed(2)}.`,
+          `No hay stock suficiente por lotes para ${item.producto.nombre}. Disponible: ${totalAvailable.toFixed(2)}.`,
         )
       }
 
@@ -1924,7 +1925,7 @@ export async function cancelSale(saleId: string, request: FastifyRequest, observ
 
     for (const detail of sale.detalles) {
       if (
-        detail.tipoLinea !== TipoLineaVenta.PRODUCTO_REGISTRADO ||
+        detail.tipoLinea !== 'PRODUCTO_REGISTRADO' ||
         !detail.productoId
       ) {
         continue

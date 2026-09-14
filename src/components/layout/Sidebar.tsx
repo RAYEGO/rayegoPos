@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppLogo } from '@/components/brand/AppLogo'
 import { buildNavItems } from '@/config/navigation'
@@ -158,13 +158,56 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
     [visibleNavItems, availableHeight, itemHeight, gapHeight],
   )
 
-  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      'flex items-center gap-3 rounded-md px-3 py-3 text-sm transition-colors duration-150 min-h-[44px] w-full text-left',
-      isActive
-        ? 'bg-primary-foreground/10 text-primary-foreground'
-        : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground',
+  const { pathname } = useLocation()
+
+  function normalizePath(p: string) {
+    let s = p.trim()
+    while (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1)
+    return s
+  }
+
+  function isModuleActive(itemHref: string, currentPathname: string) {
+    const href = normalizePath(itemHref)
+    const curr = normalizePath(currentPathname)
+    const isDashboard =
+      href === '/app' || href === '/dashboard' || href === '' || href === '/'
+    if (isDashboard) {
+      return (
+        curr === href ||
+        curr === '/app' ||
+        curr === '/dashboard' ||
+        curr === '' ||
+        curr === '/'
+      )
+    }
+    return curr === href || curr.startsWith(href + '/')
+  }
+
+  const navLinkBaseClass =
+    'flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition-all duration-150 min-h-[44px] w-full text-left border-l-4 border-transparent'
+
+  function getNavLinkClass(
+    isActive: boolean,
+    options?: { isHighlighted?: boolean },
+  ) {
+    const isHighlighted = options?.isHighlighted === true
+    if (isActive) {
+      return cn(
+        navLinkBaseClass,
+        'bg-secondary/15 border-secondary text-primary-foreground font-medium shadow-softSm',
+      )
+    }
+    if (isHighlighted) {
+      return cn(
+        navLinkBaseClass,
+        'bg-secondary/10 border-secondary/80 text-primary-foreground font-semibold hover:bg-secondary/15',
+      )
+    }
+    return cn(
+      navLinkBaseClass,
+      'text-primary-foreground/85 hover:bg-secondary/8 hover:text-primary-foreground',
     )
+  }
 
   return (
     <>
@@ -191,18 +234,22 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
               </div>
             )}
 
-            {mainItems.map((item) => (
-              <NavLink
-                key={item.href}
-                to={item.href}
-                className={navLinkClass}
-                end={item.href === '/'}
-                onClick={onNavigate}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{item.label}</span>
-              </NavLink>
-            ))}
+            {mainItems.map((item) => {
+              const isHighlighted =
+                item.label.includes('⚡') || /venta\s*rápida/i.test(item.label)
+              const active = isModuleActive(item.href, pathname)
+              return (
+                <NavLink
+                  key={item.href}
+                  to={item.href}
+                  className={getNavLinkClass(active, { isHighlighted })}
+                  onClick={onNavigate}
+                >
+                  <item.icon className={cn('h-[18px] w-[18px] shrink-0', isHighlighted && 'text-secondary')} />
+                  <span className="truncate">{item.label}</span>
+                </NavLink>
+              )
+            })}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -210,10 +257,10 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
                   type="button"
                   disabled={moreItems.length === 0}
                   className={cn(
-                    'flex items-center gap-3 rounded-md px-3 py-3 text-sm transition-colors duration-150 min-h-[44px] w-full text-left',
+                    navLinkBaseClass,
                     moreItems.length === 0
                       ? 'text-primary-foreground/50 cursor-default'
-                      : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground',
+                      : 'text-primary-foreground/80 hover:bg-secondary/8 hover:text-primary-foreground',
                   )}
                 >
                   <MoreHorizontal className="h-4 w-4 shrink-0" />
@@ -232,19 +279,36 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
                   )}
                 >
                   <DropdownMenuGroup>
-                    {moreItems.map((item) => (
-                      <DropdownMenuItem
-                        key={item.href}
-                        onClick={() => {
-                          navigate(item.href)
-                          onNavigate?.()
-                        }}
-                        className="gap-3 min-h-[44px] px-3 py-2 text-primary-foreground/90 hover:bg-primary-foreground/10 hover:text-primary-foreground focus:bg-primary-foreground/10 focus:text-primary-foreground"
-                      >
-                        <item.icon className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{item.label}</span>
-                      </DropdownMenuItem>
-                    ))}
+                    {moreItems.map((item) => {
+                      const isHighlighted =
+                        item.label.includes('⚡') || /venta\s*rápida/i.test(item.label)
+                      const active = isModuleActive(item.href, pathname)
+                      return (
+                        <DropdownMenuItem
+                          key={item.href}
+                          onClick={() => {
+                            navigate(item.href)
+                            onNavigate?.()
+                          }}
+                          className={cn(
+                            'gap-3 min-h-[44px] px-3 py-2 rounded-lg mb-1',
+                            active
+                              ? 'bg-secondary/15 border-l-4 border-secondary text-primary-foreground font-medium shadow-softSm'
+                              : isHighlighted
+                                ? 'bg-secondary/15 text-primary-foreground font-semibold hover:bg-secondary/20 focus:bg-secondary/20'
+                                : 'text-primary-foreground/90 hover:bg-secondary/8 hover:text-primary-foreground focus:bg-secondary/8 focus:text-primary-foreground',
+                          )}
+                        >
+                          <item.icon
+                            className={cn(
+                              'h-[18px] w-[18px] shrink-0',
+                              isHighlighted && 'text-secondary',
+                            )}
+                          />
+                          <span className="truncate">{item.label}</span>
+                        </DropdownMenuItem>
+                      )
+                    })}
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               )}
@@ -254,7 +318,12 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-primary-foreground/10 px-4 py-4 shrink-0">
-        <div className="text-xs text-primary-foreground/70">Modo oscuro (próximamente)</div>
+        <div className="text-[11px] leading-tight text-primary-foreground/70">
+          Rayego POS v1.0
+        </div>
+        <div className="mt-0.5 text-[10px] leading-tight text-primary-foreground/50">
+          Sistema de gestión farmacéutica
+        </div>
       </div>
     </>
   )

@@ -1,6 +1,5 @@
 import { Link, Outlet } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { BrandSeal } from '@/components/brand/BrandSeal'
 import { paths } from '@/routes/paths'
 
 export function PublicLayout() {
@@ -10,7 +9,11 @@ export function PublicLayout() {
         <div className="mx-auto flex h-16 w-full max-w-[1400px] items-center justify-between gap-4 px-4 sm:px-6">
           <Link to={paths.landing} className="flex items-center gap-3">
             <div className="rounded-xl bg-white p-1.5 shadow-softSm ring-1 ring-border">
-              <BrandSeal className="h-8 w-8" />
+              <img
+                src="/rayego-isotipo.png"
+                alt="Isotipo Rayego POS"
+                className="h-8 w-8 object-contain"
+              />
             </div>
             <div className="leading-tight">
               <div className="text-sm font-semibold text-foreground">Rayego POS</div>

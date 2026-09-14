@@ -9,7 +9,7 @@ import {
 
 const roleCodigoParamSchema = z.object({
   codigo: z.enum(AUTH_ROLE_CODES, {
-    required_error: 'Rol inválido.',
+    message: 'Rol inválido.',
   }),
 })
 

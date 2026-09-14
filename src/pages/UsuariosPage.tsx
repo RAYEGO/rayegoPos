@@ -102,7 +102,7 @@ const usersFormSchema = z
     username: z.string().min(1, 'Ingresa el usuario.').max(60),
     password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.').or(z.literal('')),
     confirmPassword: z.string().min(8, 'Confirma la contraseña.').or(z.literal('')),
-    role: z.enum(['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'CAJERO', 'ALMACEN']),
+    role: z.enum(['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'CAJERO', 'ALMACEN', 'TECNICO']),
     branchIds: z.array(z.string()),
     isActive: z.boolean(),
     mustChangePassword: z.boolean(),

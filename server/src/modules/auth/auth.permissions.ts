@@ -7,6 +7,7 @@ const roleLabels: Record<AuthRole, string> = {
   SUPERVISOR: 'Supervisor',
   CAJERO: 'Cajero',
   ALMACEN: 'Almacén',
+  TECNICO: 'Técnico',
 }
 
 const rolePermissions: Record<AuthRole, AuthPermission[]> = {
@@ -114,6 +115,17 @@ const rolePermissions: Record<AuthRole, AuthPermission[]> = {
     'proveedores.read',
     'proveedores.manage',
   ],
+  TECNICO: [
+    'dashboard.read',
+    'ventas.read',
+    'productos.read',
+    'inventario.read',
+    'clientes.read',
+    'proveedores.read',
+    'reportes.read',
+    'configuracion.read',
+    'auditoria.read',
+  ],
 }
 
 const ALL_ROLE_CODES: AuthRole[] = [
@@ -123,6 +135,7 @@ const ALL_ROLE_CODES: AuthRole[] = [
   'SUPERVISOR',
   'CAJERO',
   'ALMACEN',
+  'TECNICO',
 ]
 
 export function isAuthRole(value: string): value is AuthRole {

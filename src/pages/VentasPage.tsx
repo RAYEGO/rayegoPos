@@ -976,7 +976,7 @@ export function VentasPage() {
               </Select>
               <Button
                 type="button"
-                variant="default"
+                variant="ghost"
                 onClick={() => setIsVentaRapidaDialogOpen(true)}
                 className="justify-center gap-2 h-9 bg-green-600 hover:bg-green-700 text-white active:scale-95 shadow-md shadow-green-100 rounded-xl transition-all duration-200"
               >
