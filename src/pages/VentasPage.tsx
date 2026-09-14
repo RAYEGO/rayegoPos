@@ -99,7 +99,13 @@ const ventaRapidaSchema = z
     }
   })
 
-type VentaRapidaFormValues = z.infer<typeof ventaRapidaSchema>
+type VentaRapidaFormValues = {
+  descripcion: string
+  simboloUnidad: string
+  precioUnitario: number
+  cantidad: number
+  descuentoTotal: number
+}
 
 type LocalCartPresentationOption = {
   id: string

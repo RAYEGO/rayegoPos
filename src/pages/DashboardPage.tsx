@@ -253,7 +253,6 @@ export function DashboardPage() {
             dashboard={dashboard}
             activityRows={activityRows}
             onNavigateToInventory={() => navigate(paths.inventario)}
-            onNavigateToSales={() => navigate(paths.ventas)}
             onNavigateToNewSale={() => navigate(paths.ventas)}
             onNavigateToVentaRapida={() => navigate(paths.ventas)}
             onNavigateToProducts={() => navigate(paths.productos)}
