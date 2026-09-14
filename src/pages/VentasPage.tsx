@@ -80,32 +80,26 @@ const saleCheckoutSchema = z.object({
 
 type SaleCheckoutFormValues = z.infer<typeof saleCheckoutSchema>
 
-const ventaRapidaSchema = z
-  .object({
-    descripcion: z.string().trim().min(1, 'Agrega una descripción.').max(255, 'Máximo 255 caracteres.'),
-    simboloUnidad: z.string().trim().min(1, 'Agrega un símbolo.').max(20, 'Máximo 20 caracteres.').default('u'),
-    precioUnitario: z.coerce.number().positive('El precio debe ser mayor a 0.'),
-    cantidad: z.coerce.number().int().positive('La cantidad debe ser mayor a 0.'),
-    descuentoTotal: z.coerce.number().min(0, 'El descuento no puede ser negativo.').optional().default(0),
-  })
-  .superRefine((value, ctx) => {
-    const bruto = value.precioUnitario * value.cantidad
-    if (value.descuentoTotal > bruto) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'El descuento no puede superar el subtotal de la línea.',
-        path: ['descuentoTotal'],
-      })
-    }
-  })
+const _ventaRapidaBaseSchema = z.object({
+  descripcion: z.string().trim().min(1, 'Agrega una descripción.').max(255, 'Máximo 255 caracteres.'),
+  simboloUnidad: z.string().trim().min(1, 'Agrega un símbolo.').max(20, 'Máximo 20 caracteres.').default('u'),
+  precioUnitario: z.coerce.number().positive('El precio debe ser mayor a 0.'),
+  cantidad: z.coerce.number().int().positive('La cantidad debe ser mayor a 0.'),
+  descuentoTotal: z.coerce.number().min(0, 'El descuento no puede ser negativo.').default(0),
+})
 
-type VentaRapidaFormValues = {
-  descripcion: string
-  simboloUnidad: string
-  precioUnitario: number
-  cantidad: number
-  descuentoTotal: number
-}
+type VentaRapidaFormValues = z.output<typeof _ventaRapidaBaseSchema>
+
+const ventaRapidaSchema = _ventaRapidaBaseSchema.superRefine((value, ctx) => {
+  const bruto = value.precioUnitario * value.cantidad
+  if (value.descuentoTotal > bruto) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'El descuento no puede superar el subtotal de la línea.',
+      path: ['descuentoTotal'],
+    })
+  }
+})
 
 type LocalCartPresentationOption = {
   id: string
