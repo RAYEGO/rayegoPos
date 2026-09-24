@@ -75,6 +75,7 @@ import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { cashierService } from '@/services/cashierService'
 import { paths } from '@/routes/paths'
+import type { AuthRole } from '@/types/auth'
 import type {
   CashDrawerStatus,
   CashMovementType,
@@ -181,6 +182,34 @@ export function CajaPage() {
   const activeBranchName = session?.user.branchName ?? 'Sucursal activa'
   const { isFeatureEnabled } = useBusinessFeatures()
   const hasOSTab = isFeatureEnabled('cashier_tab_os_payments')
+  const canCloseDrawer = useMemo<boolean>(() => {
+    if (!session?.user) return false
+    const ROLES_CIERRE_CAJA_BOTICA: ReadonlySet<AuthRole> = new Set([
+      'ADMIN',
+      'ADMIN_EMPRESA',
+      'ADMIN_POS',
+      'ADMIN_BOTICA',
+      'SUPERVISOR',
+      'SUPERVISOR_BOTICA',
+    ])
+    const ROLES_CIERRE_CAJA_ST: ReadonlySet<AuthRole> = new Set([
+      'ADMIN',
+      'ADMIN_EMPRESA',
+      'ADMIN_POS',
+      'ADMIN_SERVICIO_TECNICO',
+      'SUPERVISOR',
+      'SUPERVISOR_ST',
+    ])
+    const rolesUsuario = session.user.roles ?? []
+    const tipo = session.user.companyTypeCode
+    const esST = tipo === 'SERVICIO_TECNICO'
+    const permitidos = esST ? ROLES_CIERRE_CAJA_ST : ROLES_CIERRE_CAJA_BOTICA
+    return rolesUsuario.some((r) => permitidos.has(r))
+  }, [session])
+  const closeDrawerDisabledReason = useMemo<string | null>(() => {
+    if (canCloseDrawer) return null
+    return 'Tu rol no puede realizar el cierre definitivo. Contacta a tu administrador o supervisor.'
+  }, [canCloseDrawer])
   const [dashboard, setDashboard] = useState<CashierDashboardResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -983,10 +1012,12 @@ export function CajaPage() {
                   type="button"
                   size="sm"
                   disabled={
+                    !canCloseDrawer ||
                     !reconciliationPreview?.lastSaved ||
                     (digitalReconciliation.totals.differenceAmount !== 0 &&
                       reconciliationObservations.trim().length === 0)
                   }
+                  title={closeDrawerDisabledReason ?? undefined}
                   onClick={() => setCloseConfirmDialogOpen(true)}
                 >
                   Cerrar turno

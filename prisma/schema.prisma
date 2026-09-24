@@ -1666,17 +1666,30 @@ enum UsoServicioTecnico {
 }
 
 /// Estados estandarizados de una Orden de Servicio de RayegoTech.
+/// Bloque5: 9 valores OFICIALES (primer bloque) + PAGADO.
+/// Valores LEGACY (segundo bloque) se conservan para compatibilidad con código anterior y registros históricos.
+/// NUEVOS flujos Bloque5: SOLO transicionan por los 9+1 oficiales (validador central).
 enum EstadoOrdenServicio {
+  // ===== OFICIALES Bloque 5 (9 pasos + PAGADO) =====
+  RECEPCIONADO
+  EN_DIAGNOSTICO
+  PRESUPUESTADO
+  ESPERANDO_AUTORIZACION
+  EN_REPARACION
+  TRABAJO_TERMINADO
+  LISTO_PARA_COBRO
+  PAGADO
+  ENTREGADO
+
+  // ===== LEGACY compatibilidad Bloque 1..4 =====
   RECIBIDO
   DIAGNOSTICO
   PRESUPUESTO
   ESPERANDO_APROBACION
   APROBADO
-  EN_REPARACION
   EN_PRUEBAS
   LISTO_PARA_ENTREGA
   PENDIENTE_RETIRO
-  ENTREGADO
   RECHAZADO
   CANCELADO
   EN_GARANTIA

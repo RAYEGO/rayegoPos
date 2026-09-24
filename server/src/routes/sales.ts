@@ -59,12 +59,12 @@ const createSaleSchema = z.object({
     .array(
       z.object({
         formaPagoId: z.string().uuid(),
-        monto: z.number().positive(),
+        monto: z.number().min(0),
         referenciaExterna: z.string().max(120).optional(),
         observaciones: z.string().max(255).optional(),
       }),
     )
-    .min(1),
+    .default([]),
 })
 
 const cancelSaleSchema = z.object({

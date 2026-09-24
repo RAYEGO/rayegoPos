@@ -121,6 +121,7 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
+  Package,
   Copy,
   TestTubeDiagonal,
   X,
@@ -2181,7 +2182,7 @@ export function ProductosPage() {
                 <Card key={product.id} className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="h-14 w-14 rounded-lg border bg-muted flex items-center justify-center text-2xl">
-                      📦
+                      <Package className="h-7 w-7 text-primary/70" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between">
@@ -2307,7 +2308,7 @@ export function ProductosPage() {
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <div className="h-10 w-10 rounded-lg border bg-muted flex items-center justify-center text-lg">
-                                📦
+                                <Package className="h-5 w-5 text-primary/70" />
                               </div>
                               <div className="min-w-0">
                                 <p className="font-medium text-foreground truncate">{product.name}</p>
@@ -3349,7 +3350,7 @@ export function ProductosPage() {
               <p className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Ejemplo visual</p>
               <div className="mt-2.5 space-y-1.5 text-[13px]">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base">📦</span>
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-base"><Package className="h-4 w-4 text-primary" /></span>
                   <span className="font-semibold">Caja</span>
                 </div>
                 <div className="pl-9 text-[12px] text-muted-foreground">

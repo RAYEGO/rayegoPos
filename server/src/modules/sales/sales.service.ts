@@ -14,6 +14,7 @@ import {
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
 import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
+import type { AuthRole } from '../../modules/auth/auth.types.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import {
   buildPackagingSnapshot,
@@ -22,6 +23,40 @@ import {
   resolvePackagingOperationContext,
 } from '../../lib/productPackaging.js'
 import { buildEnsureDefaultPaymentMethodsUpsert, classifyPaymentMethod } from '../../shared/payment-catalog.js'
+
+const ROLE_DISCOUNT_CAP: Readonly<Partial<Record<AuthRole, number>>> = {
+  CAJERO: 10,
+  CAJERO_BOTICA: 10,
+  CAJERO_ST: 10,
+  SUPERVISOR: 20,
+  SUPERVISOR_BOTICA: 20,
+  SUPERVISOR_ST: 20,
+}
+
+function resolveMaxDiscountPercentForRoles(userRoles: AuthRole[]): { cap: number; admin: boolean; label: string } {
+  if (!userRoles.length) return { cap: 0, admin: false, label: 'Sin rol' }
+  const adminRoles: ReadonlySet<AuthRole> = new Set<AuthRole>([
+    'ADMIN_POS',
+    'ADMIN',
+    'ADMIN_EMPRESA',
+    'ADMIN_BOTICA',
+    'ADMIN_SERVICIO_TECNICO',
+  ])
+  if (userRoles.some((role) => adminRoles.has(role))) {
+    return { cap: 100, admin: true, label: 'Administrador' }
+  }
+  let effectiveCap = 0
+  let effectiveLabel = 'Sin permiso de descuento'
+  for (const role of userRoles) {
+    const candidate = ROLE_DISCOUNT_CAP[role] ?? null
+    if (candidate === null) continue
+    if (candidate > effectiveCap) {
+      effectiveCap = candidate
+      effectiveLabel = role
+    }
+  }
+  return { cap: effectiveCap, admin: false, label: effectiveLabel }
+}
 
 const saleInclude = {
   sucursal: {
@@ -839,8 +874,11 @@ export async function getSalesDashboard(
 
 export async function createSale(payload: CreateSalePayload, request: FastifyRequest) {
   await requirePermission(request, 'ventas.manage')
-  const { userId, branchId } = await requireBranchAuthContext(request)
+  const authCtx = await requireBranchAuthContext(request)
+  const { userId, branchId, roles: authRoles } = authCtx
   const targetBranchId = payload.sucursalId ?? branchId
+
+  const discountRule = resolveMaxDiscountPercentForRoles(authRoles)
 
   if (payload.sucursalId && payload.sucursalId !== branchId) {
     throw createHttpError(403, 'No tienes permisos para crear ventas en otra sucursal.')
@@ -925,6 +963,14 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
   const result = await prisma.$transaction(async (tx) => {
     await ensureDefaultPaymentMethods(tx, userId)
 
+    const paymentFormIds = Array.from(
+      new Set(
+        payload.payments
+          .filter((payment) => Number.isFinite(payment.monto) && Number(payment.monto) > 0)
+          .map((payment) => payment.formaPagoId),
+      ),
+    )
+
     const [branch, responsibleUser, customer, products, paymentMethods, openCashDrawer] = await Promise.all([
       tx.sucursal.findFirst({
         where: {
@@ -1000,7 +1046,7 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       tx.formaPago.findMany({
         where: {
           id: {
-            in: payload.payments.map((payment) => payment.formaPagoId),
+            in: paymentFormIds,
           },
           deletedAt: null,
           activo: true,
@@ -1228,6 +1274,17 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
           )
         }
 
+        if (discountTotal > 0 && grossAmount > 0) {
+          const appliedPercent = Number(((discountTotal / grossAmount) * 100).toFixed(4))
+          if (!discountRule.admin && appliedPercent - discountRule.cap > 1e-4) {
+            const safeCapLabel = Number.isFinite(discountRule.cap) ? discountRule.cap.toFixed(2) : String(discountRule.cap)
+            throw createHttpError(
+              400,
+              `El descuento aplicado (${appliedPercent.toFixed(2)}%) excede el límite máximo permitido para tu rol (${safeCapLabel}%).`,
+            )
+          }
+        }
+
         return {
           tipoLinea: 'PRODUCTO_REGISTRADO' as const,
           productoId: item.productoId,
@@ -1273,6 +1330,17 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
         )
       }
 
+      if (discountTotal > 0 && grossAmount > 0) {
+        const appliedPercent = Number(((discountTotal / grossAmount) * 100).toFixed(4))
+        if (!discountRule.admin && appliedPercent - discountRule.cap > 1e-4) {
+          const safeCapLabel = Number.isFinite(discountRule.cap) ? discountRule.cap.toFixed(2) : String(discountRule.cap)
+          throw createHttpError(
+            400,
+            `El descuento aplicado (${appliedPercent.toFixed(2)}%) excede el límite máximo permitido para tu rol (${safeCapLabel}%).`,
+          )
+        }
+      }
+
       return {
         tipoLinea: 'VENTA_RAPIDA' as const,
         productoId: null,
@@ -1296,20 +1364,25 @@ export async function createSale(payload: CreateSalePayload, request: FastifyReq
       lineItems.reduce((sum, item) => sum + item.subtotal, 0).toFixed(2),
     )
 
-    const payments = payload.payments.map((payment) => {
+    const paymentsAll = payload.payments.flatMap((payment) => {
       const amount = Number(payment.monto)
-      const paymentMethod = paymentMethodMap.get(payment.formaPagoId)!
-
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw createHttpError(400, 'Cada pago debe tener un monto mayor a 0.')
+      if (!Number.isFinite(amount) || amount < 0) {
+        throw createHttpError(400, 'Cada pago debe tener un monto no negativo.')
       }
-
-      return {
-        ...payment,
-        amount,
-        paymentMethod,
+      const paymentMethod = paymentMethodMap.get(payment.formaPagoId)
+      if (!paymentMethod) {
+        throw createHttpError(404, 'Una o más formas de pago seleccionadas no están disponibles.')
       }
+      if (amount > 0) {
+        return [{
+          ...payment,
+          amount,
+          paymentMethod,
+        }]
+      }
+      return []
     })
+    const payments = paymentsAll
 
     const paidAmount = Number(payments.reduce((sum, payment) => sum + payment.amount, 0).toFixed(2))
     const balanceAmount = Number(Math.max(0, totalAmount - paidAmount).toFixed(2))

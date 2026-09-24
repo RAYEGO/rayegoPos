@@ -82,7 +82,7 @@ export function loadResolvedProjectEnvironment(target) {
 
   loadEnvFile({
     path: target.envFile,
-    override: false,
+    override: true,
   })
 
   process.env.RAYEGO_ENV_MODE = target.mode

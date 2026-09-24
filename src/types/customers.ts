@@ -1,5 +1,31 @@
 export type CustomerStatusFilter = 'activo' | 'inactivo'
 
+export type CustomerLookupDocumentType = 'DNI' | 'RUC'
+
+export type CustomerLookupApiPeruPayload = {
+  numeroDocumento: string
+  tipoDocumento: CustomerLookupDocumentType
+  tipoPersona: 'NATURAL' | 'JURIDICA'
+  nombres?: string
+  apellidoPaterno?: string
+  apellidoMaterno?: string
+  apellidos?: string
+  razonSocial?: string
+  direccion?: string
+  estado?: string
+  condicion?: string
+}
+
+export type CustomerLookupResponse =
+  | { source: 'local'; found: true; cliente: CustomerItem }
+  | { source: 'local'; found: false }
+  | { source: 'api_peru'; found: true; cliente: CustomerLookupApiPeruPayload }
+  | {
+      source: 'api_peru'
+      found: false
+      reason?: 'NOT_FOUND' | 'EXTERNAL_ERROR' | 'UNSUPPORTED_DOCUMENT_TYPE'
+    }
+
 export type CustomerItem = {
   id: string
   tipoPersona: string

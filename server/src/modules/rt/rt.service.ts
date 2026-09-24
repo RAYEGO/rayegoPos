@@ -34,6 +34,129 @@ export function roundMoney(n: number): number {
   return Number(n.toFixed(2))
 }
 
+// ============================================================
+// HELPERS Bloque5: Validación centralizada transiciones OS
+// ============================================================
+export type EstadoOrdenServicioAny = EstadoOrdenServicio | Uppercase<string>
+export type TransitionCtxOS = {
+  aprobadoClienteAt?: Date | null
+  saldoPendiente?: number
+  userRoles?: string[]
+  esTecnicoResponsable?: boolean
+}
+
+const OFICIALES_FWD = new Map<EstadoOrdenServicio, Array<EstadoOrdenServicio>>([
+  [EstadoOrdenServicio.RECEPCIONADO, [EstadoOrdenServicio.EN_DIAGNOSTICO]],
+  [EstadoOrdenServicio.EN_DIAGNOSTICO, [EstadoOrdenServicio.PRESUPUESTADO, EstadoOrdenServicio.RECEPCIONADO]],
+  [EstadoOrdenServicio.PRESUPUESTADO, [EstadoOrdenServicio.ESPERANDO_AUTORIZACION, EstadoOrdenServicio.EN_DIAGNOSTICO]],
+  [EstadoOrdenServicio.ESPERANDO_AUTORIZACION, [EstadoOrdenServicio.EN_REPARACION, EstadoOrdenServicio.PRESUPUESTADO]],
+  [EstadoOrdenServicio.EN_REPARACION, [EstadoOrdenServicio.TRABAJO_TERMINADO, EstadoOrdenServicio.ESPERANDO_AUTORIZACION]],
+  [EstadoOrdenServicio.TRABAJO_TERMINADO, [EstadoOrdenServicio.LISTO_PARA_COBRO, EstadoOrdenServicio.EN_REPARACION]],
+  [EstadoOrdenServicio.LISTO_PARA_COBRO, [EstadoOrdenServicio.PAGADO, EstadoOrdenServicio.TRABAJO_TERMINADO]],
+  [EstadoOrdenServicio.PAGADO, [EstadoOrdenServicio.ENTREGADO, EstadoOrdenServicio.LISTO_PARA_COBRO]],
+  [EstadoOrdenServicio.ENTREGADO, [EstadoOrdenServicio.PAGADO, EstadoOrdenServicio.EN_GARANTIA]],
+])
+
+const TERMINALES_LEGACY: Set<EstadoOrdenServicio> = new Set([
+  EstadoOrdenServicio.CANCELADO,
+  EstadoOrdenServicio.RECHAZADO,
+  EstadoOrdenServicio.EN_GARANTIA,
+])
+
+export function isValidEstadoTransitionOS(
+  from: EstadoOrdenServicioAny,
+  to: EstadoOrdenServicioAny,
+  ctx: TransitionCtxOS = {},
+): boolean {
+  const f = from as EstadoOrdenServicio
+  const t = to as EstadoOrdenServicio
+  if (f === t) return true
+  if (TERMINALES_LEGACY.has(f)) return false
+
+  const nexts = OFICIALES_FWD.get(f)
+  if (nexts && nexts.includes(t)) {
+    if (f === EstadoOrdenServicio.ESPERANDO_AUTORIZACION && t === EstadoOrdenServicio.EN_REPARACION) {
+      if (!ctx.aprobadoClienteAt) return false
+    }
+    if (f === EstadoOrdenServicio.LISTO_PARA_COBRO && t === EstadoOrdenServicio.PAGADO) {
+      if (ctx.saldoPendiente === undefined) return false
+      if (ctx.saldoPendiente > 0.005) return false
+    }
+    return true
+  }
+
+  // === Legacy transitions — compatibilidad Bloque1..4 (no se bloquean para OS antiguas).
+  // El frontend nuevo Bloque5 usará solo oficiales, por lo que estas rutas solo serán
+  // recorridas por órdenes vivas creadas antes de este bloque (si las hubiera).
+  if (f === EstadoOrdenServicio.RECIBIDO && t === EstadoOrdenServicio.DIAGNOSTICO) return true
+  if (f === EstadoOrdenServicio.DIAGNOSTICO && t === EstadoOrdenServicio.PRESUPUESTO) return true
+  if (f === EstadoOrdenServicio.PRESUPUESTO && t === EstadoOrdenServicio.ESPERANDO_APROBACION) return true
+  if (f === EstadoOrdenServicio.ESPERANDO_APROBACION && t === EstadoOrdenServicio.APROBADO) return true
+  if (f === EstadoOrdenServicio.APROBADO && t === EstadoOrdenServicio.EN_REPARACION) return true
+  if (f === EstadoOrdenServicio.EN_REPARACION && t === EstadoOrdenServicio.EN_PRUEBAS) return true
+  if (f === EstadoOrdenServicio.EN_PRUEBAS && t === EstadoOrdenServicio.LISTO_PARA_ENTREGA) return true
+  if (f === EstadoOrdenServicio.LISTO_PARA_ENTREGA && t === EstadoOrdenServicio.PENDIENTE_RETIRO) return true
+  if (f === EstadoOrdenServicio.PENDIENTE_RETIRO && t === EstadoOrdenServicio.ENTREGADO) return true
+  if (f === EstadoOrdenServicio.ENTREGADO && t === EstadoOrdenServicio.EN_GARANTIA) return true
+  // Backwards legacy step-backs
+  if (f === EstadoOrdenServicio.DIAGNOSTICO && t === EstadoOrdenServicio.RECIBIDO) return true
+  if (f === EstadoOrdenServicio.PRESUPUESTO && t === EstadoOrdenServicio.DIAGNOSTICO) return true
+  if (f === EstadoOrdenServicio.ESPERANDO_APROBACION && t === EstadoOrdenServicio.PRESUPUESTO) return true
+  if (f === EstadoOrdenServicio.APROBADO && t === EstadoOrdenServicio.ESPERANDO_APROBACION) return true
+  if (f === EstadoOrdenServicio.EN_PRUEBAS && t === EstadoOrdenServicio.EN_REPARACION) return true
+  if (f === EstadoOrdenServicio.LISTO_PARA_ENTREGA && t === EstadoOrdenServicio.EN_PRUEBAS) return true
+  if (f === EstadoOrdenServicio.PENDIENTE_RETIRO && t === EstadoOrdenServicio.LISTO_PARA_ENTREGA) return true
+
+  // ===== Bridge legacy → oficial (una sola dirección; útil para manualmente mover OS viejas a flujo nuevo) =====
+  const equivalenciasLegacyAOficial: Partial<Record<EstadoOrdenServicio, EstadoOrdenServicio>> = {
+    RECIBIDO: EstadoOrdenServicio.RECEPCIONADO,
+    DIAGNOSTICO: EstadoOrdenServicio.EN_DIAGNOSTICO,
+    PRESUPUESTO: EstadoOrdenServicio.PRESUPUESTADO,
+    ESPERANDO_APROBACION: EstadoOrdenServicio.ESPERANDO_AUTORIZACION,
+    APROBADO: EstadoOrdenServicio.EN_REPARACION,
+    EN_PRUEBAS: EstadoOrdenServicio.TRABAJO_TERMINADO,
+    LISTO_PARA_ENTREGA: EstadoOrdenServicio.LISTO_PARA_COBRO,
+    PENDIENTE_RETIRO: EstadoOrdenServicio.PAGADO,
+  }
+  if (equivalenciasLegacyAOficial[f] === t) {
+    if (t === EstadoOrdenServicio.PAGADO && (ctx.saldoPendiente ?? 1) > 0.005) return false
+    if (t === EstadoOrdenServicio.EN_REPARACION && !ctx.aprobadoClienteAt) return false
+    return true
+  }
+  // ===== Bridge oficial → legacy (una sola dirección; conservadoramente habilitado) =====
+  const oficinalegacy: Partial<Record<EstadoOrdenServicio, EstadoOrdenServicio>> = {
+    RECEPCIONADO: EstadoOrdenServicio.RECIBIDO,
+    EN_DIAGNOSTICO: EstadoOrdenServicio.DIAGNOSTICO,
+    PRESUPUESTADO: EstadoOrdenServicio.PRESUPUESTO,
+    ESPERANDO_AUTORIZACION: EstadoOrdenServicio.ESPERANDO_APROBACION,
+    TRABAJO_TERMINADO: EstadoOrdenServicio.EN_PRUEBAS,
+    LISTO_PARA_COBRO: EstadoOrdenServicio.LISTO_PARA_ENTREGA,
+  }
+  if (oficinalegacy[f] === t) return true
+
+  return false
+}
+
+export function razonTransicionInvalida(
+  from: EstadoOrdenServicioAny,
+  to: EstadoOrdenServicioAny,
+  ctx: TransitionCtxOS = {},
+): string {
+  if (from === to) return ''
+  if (fTerminal(from as EstadoOrdenServicio)) return `Transición inválida: estado ${from} es terminal (no permite cambios).`
+  if (from === EstadoOrdenServicio.ESPERANDO_AUTORIZACION && to === EstadoOrdenServicio.EN_REPARACION && !ctx.aprobadoClienteAt) {
+    return 'Transición inválida: cliente aún no autoriza el presupuesto (fecha aprobación requerida).'
+  }
+  if (from === EstadoOrdenServicio.LISTO_PARA_COBRO && to === EstadoOrdenServicio.PAGADO && (ctx.saldoPendiente ?? 1) > 0.005) {
+    return `Transición inválida: saldo pendiente S/ ${Number(ctx.saldoPendiente ?? 0).toFixed(2)}; no se puede marcar PAGADO hasta saldo 0.`
+  }
+  return `Transición de estado inválida: ${from} → ${to}.`
+}
+
+function fTerminal(e: EstadoOrdenServicio): boolean {
+  return TERMINALES_LEGACY.has(e)
+}
+
 function httpError(statusCode: number, message: string): Error {
   const err = new Error(message) as any
   err.statusCode = statusCode
@@ -631,7 +754,7 @@ export async function getOrdenServicio(request: FastifyRequest, id: string) {
 
 // Helper para crear Orden. Acepta payload flex; campos schema oficiales.
 export async function createOrdenServicio(request: FastifyRequest, payload: any) {
-  const { companyId, branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId, userId, roles } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.write')
   const clienteId = String(payload.clienteId || '').trim()
   const clienteEquipoId = toOptionalString(payload.clienteEquipoId)
@@ -671,7 +794,7 @@ export async function createOrdenServicio(request: FastifyRequest, payload: any)
   const fechaRecepcion = payload.fechaRecepcion ? new Date(payload.fechaRecepcion) : new Date()
   const anio = fechaRecepcion.getFullYear()
 
-  const igvPorc = Number(payload.igvPorcentaje ?? clientIgvDefault(companyId)) || 18
+  const igvPorc = Number(payload.igvPorcentaje ?? (await clientIgvDefault(companyId))) || 18
 
   return await prisma.$transaction(async (tx: any) => {
     const { numeroOrden } = await getNextNumeroOrden(
@@ -696,7 +819,7 @@ export async function createOrdenServicio(request: FastifyRequest, payload: any)
         empresaId: companyId,
         sucursalId: branchId,
         numeroOrden,
-        estadoActual: EstadoOrdenServicio.RECIBIDO,
+        estadoActual: EstadoOrdenServicio.RECEPCIONADO,
         clienteId,
         clienteEquipoId: clienteEquipoId || undefined,
         tipoServicioId: tipoServicioId || undefined,
@@ -723,23 +846,46 @@ export async function createOrdenServicio(request: FastifyRequest, payload: any)
         createdById: userId,
         updatedById: userId,
       },
-      include: ordenInclude,
     })
 
     await tx.ordenEstadoHistorial.create({
       data: {
         ordenId: orden.id,
-        estado: EstadoOrdenServicio.RECIBIDO,
+        estado: EstadoOrdenServicio.RECEPCIONADO,
         observaciones: 'Creación de la Orden de Servicio.',
         fecha: new Date(),
         realizadoPorId: userId,
       },
     })
 
-    if (payload.tecnicoAsignadoId) {
+    let tecnicoAsignacionFinalId: string | null | undefined = payload.tecnicoAsignadoId
+      ? String(payload.tecnicoAsignadoId)
+      : undefined
+    let motivoAsignacion = 'Asignación inicial en la creación de OS.'
+    // ===== Bloque5 T4: Auto-asignación TECNICO_ST si rol presente y no hay técnico seleccionado =====
+    if (!tecnicoAsignacionFinalId && Array.isArray(roles) && roles.includes('TECNICO_ST')) {
+      const tecAuto = await tx.tecnico.findFirst({
+        where: {
+          usuarioId: userId,
+          usuario: { empresaId: companyId },
+          deletedAt: null,
+          activo: true,
+        },
+      })
+      if (tecAuto) {
+        tecnicoAsignacionFinalId = tecAuto.id
+        motivoAsignacion = 'Auto-asignación por rol TECNICO_ST al crear OS.'
+        await tx.ordenServicio.update({
+          where: { id: orden.id },
+          data: { tecnicoAsignadoId: tecAuto.id },
+        })
+      }
+    }
+
+    if (tecnicoAsignacionFinalId) {
       const tec = await tx.tecnico.findFirst({
         where: {
-          id: String(payload.tecnicoAsignadoId),
+          id: String(tecnicoAsignacionFinalId),
           usuario: { empresaId: companyId },
           deletedAt: null,
           activo: true,
@@ -752,7 +898,7 @@ export async function createOrdenServicio(request: FastifyRequest, payload: any)
           tecnicoId: tec.id,
           fechaAsignacion: new Date(),
           activo: true,
-          motivoCambio: 'Asignación inicial en la creación de OS.',
+          motivoCambio: motivoAsignacion,
         },
       })
     }
@@ -780,7 +926,7 @@ export async function createOrdenServicio(request: FastifyRequest, payload: any)
     }
 
     return getOrdenServicioFromTx(tx, orden.id)
-  })
+  }, { timeout: 30000 })
 }
 
 async function getOrdenServicioFromTx(tx: any, id: string) {
@@ -824,7 +970,7 @@ export async function cambiarEstadoOrden(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId, roles } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.cambioEstado')
   const estadoNuevo: EstadoOrdenServicio | undefined = payload?.estado
   if (!estadoNuevo) throw UNAUTH(400, 'Parámetro estado es obligatorio.')
@@ -833,23 +979,46 @@ export async function cambiarEstadoOrden(
   return await prisma.$transaction(async (tx: any) => {
     const orden = await tx.ordenServicio.findFirst({
       where: { id, empresaId: companyId, deletedAt: null },
+      include: { tecnicoAsignado: { include: { usuario: true } } },
     })
     if (!orden) throw UNAUTH(404, 'Orden no existe.')
     const estadoAnterior: EstadoOrdenServicio = orden.estadoActual
     if (estadoAnterior === estadoNuevo) {
       return getOrdenServicioFromTx(tx, id)
     }
-    if (
-      estadoAnterior === EstadoOrdenServicio.ENTREGADO &&
-      estadoNuevo !== EstadoOrdenServicio.EN_GARANTIA
-    ) {
-      throw UNAUTH(409, 'Orden ENTREGADA solo puede ir a EN_GARANTIA.')
+
+    // Validador central Bloque5
+    const saldo = decimalToNumber(orden.saldoPendiente)
+    const ctx: TransitionCtxOS = {
+      aprobadoClienteAt: orden.aprobadoClienteAt ?? null,
+      saldoPendiente: saldo,
+      userRoles: roles,
+      esTecnicoResponsable: !!(
+        orden.tecnicoAsignado && orden.tecnicoAsignado.usuarioId === userId
+      ),
     }
+    if (!isValidEstadoTransitionOS(estadoAnterior, estadoNuevo, ctx)) {
+      throw UNAUTH(409, razonTransicionInvalida(estadoAnterior, estadoNuevo, ctx))
+    }
+
+    // ===== Entrega (PAGADO → ENTREGADO): reglas de roles Bloque5 =====
     if (estadoNuevo === EstadoOrdenServicio.ENTREGADO) {
-      const saldo = decimalToNumber(orden.saldoPendiente)
       if (saldo > 0.005)
         throw UNAUTH(409, `No se puede ENTREGAR. Saldo pendiente S/ ${saldo.toFixed(2)}.`)
+      const rolesArr = Array.isArray(roles) ? (roles as string[]) : []
+      const isAdmin =
+        rolesArr.includes('ADMIN_SERVICIO_TECNICO') ||
+        rolesArr.includes('SUPERVISOR_ST') ||
+        rolesArr.includes('ADMIN_EMPRESA') ||
+        rolesArr.includes('ADMIN')
+      if (!ctx.esTecnicoResponsable && !isAdmin) {
+        throw UNAUTH(
+          403,
+          'No tienes autorización para marcar como ENTREGADO esta orden. Solo el técnico responsable, ADMIN_SERVICIO_TECNICO o SUPERVISOR_ST pueden entregar.',
+        )
+      }
     }
+
     if (
       estadoNuevo === EstadoOrdenServicio.EN_GARANTIA &&
       estadoAnterior !== EstadoOrdenServicio.ENTREGADO
@@ -895,7 +1064,7 @@ export async function cambiarEstadoOrden(
       },
     })
     return getOrdenServicioFromTx(tx, id)
-  })
+  }, { timeout: 30000 })
 }
 
 export async function asignarTecnicoOrden(
@@ -903,10 +1072,20 @@ export async function asignarTecnicoOrden(
   id: string,
   payload: any,
 ) {
-  const { companyId, branchId: _branchId, userId } = await requireBranchAuthContext(request)
+  const { companyId, branchId: _branchId, userId, roles } = await requireBranchAuthContext(request)
   requirePermission(request, 'ordenesServicio.cambioEstado')
+  const rolesArr = Array.isArray(roles) ? (roles as string[]) : []
+  const puedeReasignar =
+    rolesArr.includes('ADMIN_SERVICIO_TECNICO') ||
+    rolesArr.includes('SUPERVISOR_ST') ||
+    rolesArr.includes('ADMIN_EMPRESA') ||
+    rolesArr.includes('ADMIN')
+  if (!puedeReasignar) {
+    throw UNAUTH(403, 'No tienes autorización para reasignar técnicos. Solo ADMIN_SERVICIO_TECNICO o SUPERVISOR_ST pueden reasignar.')
+  }
   const tecnicoId = String(payload.tecnicoId || '').trim()
   if (!tecnicoId) throw UNAUTH(400, 'tecnicoId es obligatorio.')
+  const observacionesMotivo = toOptionalString(payload.observaciones)
   return await prisma.$transaction(async (tx: any) => {
     const orden = await tx.ordenServicio.findFirst({
       where: { id, empresaId: companyId, deletedAt: null },
@@ -923,7 +1102,13 @@ export async function asignarTecnicoOrden(
     if (!tec) throw UNAUTH(404, 'Técnico no existe.')
     await tx.ordenAsignacionTecnico.updateMany({
       where: { ordenId: id, activo: true },
-      data: { activo: false, fechaLiberacion: new Date(), motivoCambio: 'Reasignación' },
+      data: {
+        activo: false,
+        fechaLiberacion: new Date(),
+        motivoCambio: observacionesMotivo
+          ? `Reasignación: ${observacionesMotivo}`
+          : 'Reasignación',
+      },
     })
     await tx.ordenServicio.update({
       where: { id },
@@ -935,11 +1120,11 @@ export async function asignarTecnicoOrden(
         tecnicoId,
         fechaAsignacion: new Date(),
         activo: true,
-        motivoCambio: toOptionalString(payload.observaciones),
+        motivoCambio: observacionesMotivo || 'Reasignación de técnico.',
       },
     })
     return getOrdenServicioFromTx(tx, id)
-  })
+  }, { timeout: 30000 })
 }
 
 // ============================================================
@@ -1079,7 +1264,7 @@ export async function aprobarPresupuestoCliente(
       })
     }
     return { ok: true, aprobado }
-  })
+  }, { timeout: 30000 })
 }
 
 // ============================================================
@@ -1308,14 +1493,38 @@ export async function registrarPagoOrden(
 
     const nuevoTotalPagado = totalPagado + monto
     const nuevoSaldo = Math.max(0, roundMoney(totalActual - nuevoTotalPagado))
+    const estadoActualOrden: EstadoOrdenServicio = orden.estadoActual
+    const estadosPreCobro = new Set<EstadoOrdenServicio>([
+      EstadoOrdenServicio.LISTO_PARA_COBRO,
+      EstadoOrdenServicio.LISTO_PARA_ENTREGA,
+      EstadoOrdenServicio.PENDIENTE_RETIRO,
+    ])
+    let estadoNuevoAuto: EstadoOrdenServicio | null = null
+    if (nuevoSaldo <= 0.005 && estadosPreCobro.has(estadoActualOrden)) {
+      estadoNuevoAuto = EstadoOrdenServicio.PAGADO
+    }
+
     await tx.ordenServicio.update({
       where: { id },
       data: {
         totalPagado: toDecimal(nuevoTotalPagado, 2),
         saldoPendiente: toDecimal(nuevoSaldo, 2),
+        ...(estadoNuevoAuto ? { estadoActual: estadoNuevoAuto } : null),
         updatedById: userId,
       },
     })
+
+    if (estadoNuevoAuto) {
+      await tx.ordenEstadoHistorial.create({
+        data: {
+          ordenId: id,
+          estado: estadoNuevoAuto,
+          observaciones: `Cambio automático a PAGADO al completar pago (saldo S/ 0.00).`,
+          fecha: new Date(),
+          realizadoPorId: userId,
+        },
+      })
+    }
 
     return { pago, ...(await getOrdenServicioFromTx(tx, id)) }
   })

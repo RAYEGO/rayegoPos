@@ -1,3 +1,4 @@
+import './bootstrap-env.js'
 import { createApp } from './app.js'
 import { serverConfig } from './config.js'
 

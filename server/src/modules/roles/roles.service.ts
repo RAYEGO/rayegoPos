@@ -12,6 +12,87 @@ import { AUTH_ROLE_CODES, ensureDefaultRoles } from '../users/users.service.js'
 
 const PLATFORM_ONLY_ROLES: AuthRole[] = ['ADMIN_POS']
 
+type CanonicalPermission = {
+  codigo: AuthPermission
+  modulo: string
+  nombre: string
+  descripcion: string
+}
+
+const CANONICAL_PERMISSIONS: CanonicalPermission[] = [
+  { codigo: 'dashboard.read', modulo: 'General', nombre: 'Ver dashboard', descripcion: 'Permite acceder al panel principal y sus indicadores.' },
+  { codigo: 'ventas.read', modulo: 'Ventas', nombre: 'Ver ventas', descripcion: 'Permite acceder al módulo de ventas.' },
+  { codigo: 'ventas.manage', modulo: 'Ventas', nombre: 'Gestionar ventas', descripcion: 'Permite realizar operaciones de venta que modifican el estado de una venta, incluyendo crear y cancelar ventas.' },
+  { codigo: 'productos.read', modulo: 'Productos', nombre: 'Ver productos', descripcion: 'Permite acceder al catálogo de productos.' },
+  { codigo: 'productos.manage', modulo: 'Productos', nombre: 'Gestionar productos', descripcion: 'Permite crear, editar, duplicar, activar y desactivar productos del catálogo.' },
+  { codigo: 'compras.read', modulo: 'Compras', nombre: 'Ver compras', descripcion: 'Permite acceder al módulo de compras.' },
+  { codigo: 'compras.manage', modulo: 'Compras', nombre: 'Gestionar compras', descripcion: 'Permite realizar operaciones de compra que modifican su estado, incluyendo crear, editar compras y registrar recepciones.' },
+  { codigo: 'inventario.read', modulo: 'Inventario', nombre: 'Ver inventario', descripcion: 'Permite revisar stock, lotes y movimientos.' },
+  { codigo: 'inventario.manage', modulo: 'Inventario', nombre: 'Gestionar inventario', descripcion: 'Permite realizar operaciones que modifican el inventario, incluyendo ajustes, transferencias y movimientos de stock.' },
+  { codigo: 'clientes.read', modulo: 'Clientes', nombre: 'Ver clientes', descripcion: 'Permite acceder al padrón de clientes.' },
+  { codigo: 'clientes.manage', modulo: 'Clientes', nombre: 'Gestionar clientes', descripcion: 'Permite crear, editar y cambiar el estado de clientes.' },
+  { codigo: 'proveedores.read', modulo: 'Proveedores', nombre: 'Ver proveedores', descripcion: 'Permite acceder al padrón de proveedores.' },
+  { codigo: 'proveedores.manage', modulo: 'Proveedores', nombre: 'Gestionar proveedores', descripcion: 'Permite crear, editar y cambiar el estado de proveedores.' },
+  { codigo: 'caja.read', modulo: 'Caja', nombre: 'Ver caja', descripcion: 'Permite operar y consultar el módulo de caja.' },
+  { codigo: 'caja.manage', modulo: 'Caja', nombre: 'Gestionar caja', descripcion: 'Permite realizar operaciones de gestión de caja que modifican su estado, incluyendo apertura y operaciones administrativas de caja.' },
+  { codigo: 'usuarios.read', modulo: 'Seguridad', nombre: 'Ver usuarios', descripcion: 'Permite acceder a usuarios, roles y permisos.' },
+  { codigo: 'usuarios.manage', modulo: 'Seguridad', nombre: 'Gestionar usuarios', descripcion: 'Permite crear, editar y cambiar el estado de usuarios.' },
+  { codigo: 'sesiones.read', modulo: 'Seguridad', nombre: 'Ver sesiones', descripcion: 'Permite consultar sesiones activas y recientes.' },
+  { codigo: 'sesiones.revoke', modulo: 'Seguridad', nombre: 'Revocar sesiones', descripcion: 'Permite cerrar sesiones activas de otros usuarios.' },
+  { codigo: 'auditoria.read', modulo: 'Seguridad', nombre: 'Ver auditoría', descripcion: 'Permite consultar el historial de acciones del sistema.' },
+  { codigo: 'reportes.read', modulo: 'Reportes', nombre: 'Ver reportes', descripcion: 'Permite acceder al módulo de reportes.' },
+  { codigo: 'configuracion.read', modulo: 'Configuración', nombre: 'Ver configuración', descripcion: 'Permite acceder a la configuración general del sistema.' },
+  { codigo: 'tipos_empresa.manage', modulo: 'Administración POS', nombre: 'Gestionar tipos de empresa', descripcion: 'Permite crear, editar y activar tipos de empresa y sus módulos (plataforma).' },
+  { codigo: 'empresas.read', modulo: 'Administración POS', nombre: 'Ver empresas', descripcion: 'Permite listar y consultar la información de empresas de la plataforma.' },
+  { codigo: 'empresas.manage', modulo: 'Administración POS', nombre: 'Gestionar empresas', descripcion: 'Permite crear, editar y configurar empresas en la plataforma.' },
+  { codigo: 'administradores.manage', modulo: 'Administración POS', nombre: 'Gestionar administradores', descripcion: 'Permite asignar y administrar los administradores de empresa.' },
+  { codigo: 'ordenesServicio.read', modulo: 'Servicio Técnico', nombre: 'Ver órdenes de servicio', descripcion: 'Permite acceder a las órdenes de servicio técnico.' },
+  { codigo: 'ordenesServicio.write', modulo: 'Servicio Técnico', nombre: 'Crear/editar órdenes de servicio', descripcion: 'Permite crear y editar órdenes de servicio técnico.' },
+  { codigo: 'ordenesServicio.cambioEstado', modulo: 'Servicio Técnico', nombre: 'Cambiar estado de órdenes', descripcion: 'Permite cambiar el estado de las órdenes de servicio técnico.' },
+  { codigo: 'ordenesServicio.aprobar', modulo: 'Servicio Técnico', nombre: 'Órdenes Servicio — Aprobar Presupuesto', descripcion: 'Aprobar/rechazar el presupuesto presentado al cliente.' },
+  { codigo: 'tecnicos.read', modulo: 'Servicio Técnico', nombre: 'Ver técnicos', descripcion: 'Permite listar y consultar el padrón de técnicos.' },
+  { codigo: 'tecnicos.write', modulo: 'Servicio Técnico', nombre: 'Crear/editar técnicos', descripcion: 'Permite crear y editar registros de técnicos.' },
+  { codigo: 'equiposCliente.read', modulo: 'Servicio Técnico', nombre: 'Ver equipos de clientes', descripcion: 'Permite consultar los equipos registrados de los clientes.' },
+  { codigo: 'equiposCliente.write', modulo: 'Servicio Técnico', nombre: 'Crear/editar equipos de clientes', descripcion: 'Permite crear y editar equipos de clientes.' },
+  { codigo: 'presupuestosOrdenServicio.write', modulo: 'Servicio Técnico', nombre: 'Gestionar presupuestos de órdenes', descripcion: 'Permite crear y editar presupuestos para órdenes de servicio técnico.' },
+  { codigo: 'pagosOrdenServicio.write', modulo: 'Servicio Técnico', nombre: 'Gestionar pagos de órdenes', descripcion: 'Permite registrar y editar pagos relacionados con órdenes de servicio técnico.' },
+  { codigo: 'consumoInventarioRT.write', modulo: 'Servicio Técnico', nombre: 'Gestionar consumo de inventario en RT', descripcion: 'Permite registrar el consumo de inventario dentro de órdenes de servicio técnico.' },
+  { codigo: 'inventarioServicio.write', modulo: 'Inventario', nombre: 'Inventario Técnico — Consumir', descripcion: 'Consumir/devolver repuestos y materiales desde Orden Servicio → Kardex.' },
+  { codigo: 'reportesServicioTecnico.read', modulo: 'Reportes', nombre: 'Reportes Servicio Técnico', descripcion: 'Ver reportes/estadísticas de servicio técnico (productividad, tiempos, garantías).' },
+  { codigo: 'garantiasOrdenServicio.read', modulo: 'Servicio Técnico', nombre: 'Ver garantías de órdenes', descripcion: 'Permite consultar las garantías asociadas a órdenes de servicio técnico.' },
+  { codigo: 'garantiasOrdenServicio.write', modulo: 'Servicio Técnico', nombre: 'Gestionar garantías de órdenes', descripcion: 'Permite registrar, aprobar/rechazar y atender solicitudes de garantía asociadas a órdenes de servicio.' },
+]
+
+let defaultPermisosEnsured = false
+
+export async function ensureDefaultPermisos(): Promise<void> {
+  if (defaultPermisosEnsured) return
+  const now = new Date()
+  for (const perm of CANONICAL_PERMISSIONS) {
+    await prisma.permiso.upsert({
+      where: { codigo: perm.codigo },
+      create: {
+        codigo: perm.codigo,
+        modulo: perm.modulo,
+        nombre: perm.nombre,
+        descripcion: perm.descripcion,
+        activo: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      update: {
+        modulo: perm.modulo,
+        nombre: perm.nombre,
+        descripcion: perm.descripcion,
+        activo: true,
+        deletedAt: null,
+        updatedAt: now,
+      },
+    })
+  }
+  defaultPermisosEnsured = true
+}
+
 export type RoleListItem = {
   codigo: AuthRole
   nombre: string
@@ -124,6 +205,7 @@ export async function listRolesForAdmin(
   const isPlatform = Boolean(ctx.isPlatformAdmin) || ctx.roles.includes('ADMIN_POS')
 
   await ensureDefaultRoles()
+  await ensureDefaultPermisos()
 
   const where: Prisma.RolWhereInput = {
     deletedAt: null,
@@ -162,6 +244,8 @@ export async function getRolePermissionsDetail(
 ): Promise<RolePermissionsDetail> {
   const auth = await assertCanAdministerRole(request, roleCodigo)
   void auth
+
+  await ensureDefaultPermisos()
 
   const [rol, permisosDisponibles] = await Promise.all([
     prisma.rol.findFirst({
@@ -232,6 +316,8 @@ export async function updateRolePermissions(
   const auth = await assertCanAdministerRole(request, roleCodigo)
   const companyScope = auth.isPlatform ? undefined : auth.companyId
 
+  await ensureDefaultPermisos()
+
   const rol = await prisma.rol.findFirst({
     where: {
       codigo: payload.codigo,
@@ -250,9 +336,19 @@ export async function updateRolePermissions(
   })
   const permisoPorCodigo = new Map(allPermisosRows.map((p) => [p.codigo, p.id]))
 
-  const permisosNormalizados = Array.from(new Set(payload.permisos)).filter(
-    (codigo) => permisoPorCodigo.has(codigo),
-  )
+  const payloadSinRepetir = Array.from(new Set(payload.permisos))
+  const codigosInvalidos = payloadSinRepetir.filter((codigo) => !permisoPorCodigo.has(codigo))
+  if (codigosInvalidos.length > 0) {
+    const preview = codigosInvalidos.slice(0, 10).join(', ')
+    const suffix = codigosInvalidos.length > 10 ? ` (+${codigosInvalidos.length - 10} más)` : ''
+    throw createHttpError(
+      400,
+      `Se recibieron ${codigosInvalidos.length} permisos desconocidos o inactivos: [${preview}]${suffix}. No se modificaron permisos actuales del rol.`,
+      'INVALID_PERMISSION_CODES',
+    )
+  }
+
+  const permisosNormalizados = payloadSinRepetir
 
   const previousPermisos = await prisma.rolPermiso.findMany({
     where: { rolId: rol.id, deletedAt: null },

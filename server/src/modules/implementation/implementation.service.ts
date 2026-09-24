@@ -60,7 +60,12 @@ function resolveLotStatus({
 
 function assertAdmin(request: FastifyRequest) {
   const roles = request.auth?.roles ?? []
-  if (!roles.includes('ADMIN') && !roles.includes('ADMIN_EMPRESA')) {
+  if (
+    !roles.includes('ADMIN') &&
+    !roles.includes('ADMIN_EMPRESA') &&
+    !roles.includes('ADMIN_BOTICA') &&
+    !roles.includes('ADMIN_SERVICIO_TECNICO')
+  ) {
     throw createHttpError(403, 'No tienes permisos para acceder a esta sección.')
   }
 }

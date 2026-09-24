@@ -1,11 +1,19 @@
 export type AuthRole =
-  | 'ADMIN'
   | 'ADMIN_EMPRESA'
+  | 'ADMIN_BOTICA'
+  | 'ADMIN_SERVICIO_TECNICO'
   | 'ADMIN_POS'
+  | 'ADMIN'
   | 'SUPERVISOR'
+  | 'SUPERVISOR_BOTICA'
   | 'CAJERO'
+  | 'CAJERO_BOTICA'
   | 'ALMACEN'
+  | 'ALMACEN_BOTICA'
   | 'TECNICO'
+  | 'SUPERVISOR_ST'
+  | 'CAJERO_ST'
+  | 'TECNICO_ST'
 
 export type AuthPermission =
   | '*'
@@ -35,6 +43,21 @@ export type AuthPermission =
   | 'empresas.read'
   | 'empresas.manage'
   | 'administradores.manage'
+  | 'ordenesServicio.read'
+  | 'ordenesServicio.write'
+  | 'ordenesServicio.cambioEstado'
+  | 'ordenesServicio.aprobar'
+  | 'tecnicos.read'
+  | 'tecnicos.write'
+  | 'equiposCliente.read'
+  | 'equiposCliente.write'
+  | 'presupuestosOrdenServicio.write'
+  | 'pagosOrdenServicio.write'
+  | 'consumoInventarioRT.write'
+  | 'inventarioServicio.write'
+  | 'reportesServicioTecnico.read'
+  | 'garantiasOrdenServicio.read'
+  | 'garantiasOrdenServicio.write'
 
 export type AuthBranch = {
   id: string

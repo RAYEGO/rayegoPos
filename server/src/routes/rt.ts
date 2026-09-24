@@ -16,7 +16,7 @@ import {
 
 const uuidP = z.string().uuid()
 const FiltersOSList = z.object({
-  estado: z.enum(['RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_REPARACION','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','ENTREGADO','RECHAZADO','CANCELADO','EN_GARANTIA']).or(z.array(z.any())).optional(),
+  estado: z.enum(['RECEPCIONADO','EN_DIAGNOSTICO','PRESUPUESTADO','ESPERANDO_AUTORIZACION','EN_REPARACION','TRABAJO_TERMINADO','LISTO_PARA_COBRO','PAGADO','ENTREGADO','RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','RECHAZADO','CANCELADO','EN_GARANTIA']).or(z.array(z.any())).optional(),
   desde: z.string().optional(), hasta: z.string().optional(),
   search: z.string().optional(), sucursalId: uuidP.optional(), clienteId: uuidP.optional(),
   tecnicoAsignadoId: uuidP.optional(),
@@ -56,7 +56,7 @@ export async function rtRoutes(app: FastifyInstance) {
 
   app.put('/ordenes-servicio/:id/estado', async (req, _reply) => {
     const p = z.object({ id: uuidP }).parse(req.params)
-    const body = z.object({ estado: z.enum(['RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_REPARACION','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','ENTREGADO','RECHAZADO','CANCELADO','EN_GARANTIA']), observaciones: z.string().optional().nullable(), terminosGarantia: z.string().optional().nullable() }).strict().parse(req.body)
+    const body = z.object({ estado: z.enum(['RECEPCIONADO','EN_DIAGNOSTICO','PRESUPUESTADO','ESPERANDO_AUTORIZACION','EN_REPARACION','TRABAJO_TERMINADO','LISTO_PARA_COBRO','PAGADO','ENTREGADO','RECIBIDO','DIAGNOSTICO','PRESUPUESTO','ESPERANDO_APROBACION','APROBADO','EN_PRUEBAS','LISTO_PARA_ENTREGA','PENDIENTE_RETIRO','RECHAZADO','CANCELADO','EN_GARANTIA']), observaciones: z.string().optional().nullable(), terminosGarantia: z.string().optional().nullable() }).strict().parse(req.body)
     return cambiarEstadoOrden(req, p.id, body)
   })
 

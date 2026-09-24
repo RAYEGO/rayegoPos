@@ -3,13 +3,9 @@ import { hash } from 'bcryptjs'
 import type { FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../../lib/prisma.js'
-import {
-  getAuthContext,
-  requireBranchAuthContext,
-  requirePermission,
-} from '../../lib/auth.js'
-import type { AuthRole } from '../auth/auth.types.js'
-import { getRoleLabel } from '../auth/auth.permissions.js'
+import { applyCompanyScope, getAuthContext, requirePermission } from '../../lib/auth.js'
+import type { AuthRole, AuthPermission } from '../auth/auth.types.js'
+import { getRoleLabel, rolePermissions } from '../auth/auth.permissions.js'
 
 const SALT_ROUNDS = 12
 
@@ -25,6 +21,14 @@ export const AUTH_ROLE_CODES = [
   'ADMIN_POS',
   'ADMIN_EMPRESA',
   'ADMIN',
+  'ADMIN_BOTICA',
+  'SUPERVISOR_BOTICA',
+  'CAJERO_BOTICA',
+  'ALMACEN_BOTICA',
+  'ADMIN_SERVICIO_TECNICO',
+  'SUPERVISOR_ST',
+  'CAJERO_ST',
+  'TECNICO_ST',
   'SUPERVISOR',
   'CAJERO',
   'ALMACEN',
@@ -33,6 +37,7 @@ export const AUTH_ROLE_CODES = [
 
 export async function ensureDefaultRoles(): Promise<void> {
   await prisma.$transaction(async (tx) => {
+    const now = new Date()
     for (const codigo of AUTH_ROLE_CODES) {
       await tx.rol.upsert({
         where: { codigo },
@@ -40,13 +45,69 @@ export async function ensureDefaultRoles(): Promise<void> {
           codigo,
           nombre: getRoleLabel(codigo),
           activo: true,
+          createdAt: now,
+          updatedAt: now,
         },
         update: {
           activo: true,
           deletedAt: null,
           nombre: getRoleLabel(codigo),
+          updatedAt: now,
         },
       })
+    }
+
+    const permisosMap = new Map(
+      (
+        await tx.permiso.findMany({
+          where: { activo: true, deletedAt: null },
+          select: { codigo: true, id: true },
+        })
+      ).map((p) => [p.codigo, p.id]),
+    )
+
+    const permitidosSync = new Set<AuthRole>([
+      'ADMIN_BOTICA',
+      'SUPERVISOR_BOTICA',
+      'CAJERO_BOTICA',
+      'ALMACEN_BOTICA',
+      'ADMIN_SERVICIO_TECNICO',
+      'SUPERVISOR_ST',
+      'CAJERO_ST',
+      'TECNICO_ST',
+    ])
+
+    for (const codigo of AUTH_ROLE_CODES) {
+      if (!permitidosSync.has(codigo)) continue
+
+      const rol = await tx.rol.findFirst({
+        where: { codigo, deletedAt: null, activo: true },
+        select: {
+          id: true,
+          rolesPermisos: {
+            where: { deletedAt: null },
+            select: { permiso: { select: { codigo: true } } },
+          },
+        },
+      })
+      if (!rol) continue
+
+      const existentes = new Set<string>(
+        rol.rolesPermisos.map((rp) => rp.permiso.codigo),
+      )
+      const deseados: AuthPermission[] = rolePermissions[codigo] ?? []
+      if (deseados.length === 0) continue
+
+      const faltantes = deseados.filter((pc) => permisosMap.has(pc) && !existentes.has(pc))
+      if (faltantes.length === 0) continue
+
+      const data = faltantes.map((pc) => ({
+        rolId: rol.id,
+        permisoId: permisosMap.get(pc) as string,
+        createdAt: now,
+        updatedAt: now,
+      }))
+      await tx.rolPermiso.createMany({ data, skipDuplicates: true })
     }
   })
 }
@@ -95,6 +156,8 @@ export type UsersListUserRecord = {
   lastAccessAt: string
   mustChangePassword: boolean
   mfaEnabled: boolean
+  empresaId: string | null
+  empresaNombre: string | null
 }
 
 async function writeAudit(
@@ -205,6 +268,8 @@ function toUserRecord(
     username: string
     activo: boolean
     ultimoAccesoAt: Date | null
+    empresaId: string | null
+    empresa: { nombreComercial: string | null; razonSocial: string } | null
     usuariosRoles: { rol: { codigo: string } }[]
     usuarioSucursales: { sucursalId: string }[]
   },
@@ -237,33 +302,36 @@ function toUserRecord(
       : 'Pendiente',
     mustChangePassword: false,
     mfaEnabled: false,
+    empresaId: raw.empresaId,
+    empresaNombre: raw.empresa?.nombreComercial ?? raw.empresa?.razonSocial ?? null,
   }
 }
 
 export async function listUsersForCompany(
   request: FastifyRequest,
 ): Promise<UsersListUserRecord[]> {
-  const { companyId } = await requireBranchAuthContext(request)
+  const authCtx = await getAuthContext(request)
   requirePermission(request, 'usuarios.read')
+
+  const baseWhere: Prisma.UsuarioWhereInput = { deletedAt: null }
+  const where = applyCompanyScope<Prisma.UsuarioWhereInput>(authCtx, baseWhere, 'empresaId')
+  if (!authCtx.isPlatformAdmin) {
+    // Contexto empresa: en el listado no mostramos ADMIN_POS (pertenecen a plataforma)
+    ;(where as Prisma.UsuarioWhereInput).NOT = {
+      usuariosRoles: {
+        some: {
+          activo: true,
+          deletedAt: null,
+          rol: { codigo: 'ADMIN_POS' },
+          OR: [{ fechaFin: null }, { fechaFin: { gte: new Date() } }],
+        },
+      },
+    }
+  }
 
   const now = new Date()
   const users = await prisma.usuario.findMany({
-    where: {
-      empresaId: companyId,
-      deletedAt: null,
-      NOT: {
-        usuariosRoles: {
-          some: {
-            activo: true,
-            deletedAt: null,
-            rol: {
-              codigo: 'ADMIN_POS',
-            },
-            OR: [{ fechaFin: null }, { fechaFin: { gte: now } }],
-          },
-        },
-      },
-    },
+    where,
     select: {
       id: true,
       nombres: true,
@@ -274,6 +342,8 @@ export async function listUsersForCompany(
       username: true,
       activo: true,
       ultimoAccesoAt: true,
+      empresaId: true,
+      empresa: { select: { nombreComercial: true, razonSocial: true } },
       usuariosRoles: {
         where: {
           activo: true,
@@ -417,6 +487,10 @@ export async function createUser(
       username: true,
       activo: true,
       ultimoAccesoAt: true,
+      empresaId: true,
+      empresa: {
+        select: { nombreComercial: true, razonSocial: true },
+      },
       usuariosRoles: {
         where: { activo: true, deletedAt: null },
         select: { rol: { select: { codigo: true } } },
@@ -648,6 +722,10 @@ export async function updateUser(
       username: true,
       activo: true,
       ultimoAccesoAt: true,
+      empresaId: true,
+      empresa: {
+        select: { nombreComercial: true, razonSocial: true },
+      },
       usuariosRoles: {
         where: { activo: true, deletedAt: null },
         select: { rol: { select: { codigo: true } } },
@@ -744,7 +822,9 @@ export async function removeOrDeactivateUser(
 
   const targetRoles = target.usuariosRoles.map((r) => r.rol.codigo)
   const isTargetAdminPos = targetRoles.includes('ADMIN_POS')
-  const isTargetAdminEmpresa = targetRoles.includes('ADMIN_EMPRESA')
+  const isTargetAdminEmpresa = targetRoles.some((r) =>
+    ['ADMIN_EMPRESA', 'ADMIN_BOTICA', 'ADMIN_SERVICIO_TECNICO'].includes(r as AuthRole),
+  )
 
   if (isTargetAdminPos && !isPlatform) {
     throw createHttpError(
@@ -838,4 +918,58 @@ export async function removeOrDeactivateUser(
     message:
       'El usuario no tenía dependencias históricas y fue eliminado de forma segura (soft-delete).',
   }
+}
+
+export type UsersBranchListItem = {
+  id: string
+  nombre: string
+  codigo: string
+  direccion: string | null
+  telefono: string | null
+  email: string | null
+  activo: boolean
+  empresaId: string | null
+  empresaNombre: string | null
+}
+
+export async function listBranchesForUserModule(
+  request: FastifyRequest,
+): Promise<UsersBranchListItem[]> {
+  const authCtx = await getAuthContext(request)
+  requirePermission(request, 'usuarios.read')
+
+  const baseWhere: Prisma.SucursalWhereInput = { deletedAt: null }
+  const where = applyCompanyScope<Prisma.SucursalWhereInput>(authCtx, baseWhere, 'empresaId')
+
+  return prisma.sucursal.findMany({
+    where,
+    select: {
+      id: true,
+      nombre: true,
+      codigo: true,
+      direccion: true,
+      telefono: true,
+      email: true,
+      activo: true,
+      empresaId: true,
+      empresa: { select: { nombreComercial: true, razonSocial: true } },
+    },
+    orderBy: [
+      { activo: 'desc' },
+      { empresa: { nombreComercial: 'asc' } },
+      { empresa: { razonSocial: 'asc' } },
+      { codigo: 'asc' },
+      { nombre: 'asc' },
+    ],
+  }).then((rows) => rows.map((r) => ({
+    id: r.id,
+    nombre: r.nombre,
+    codigo: r.codigo,
+    direccion: r.direccion,
+    telefono: r.telefono,
+    email: r.email,
+    activo: r.activo,
+    empresaId: r.empresaId,
+    empresaNombre: r.empresa?.nombreComercial ?? r.empresa?.razonSocial ?? null,
+  })))
 }

@@ -251,23 +251,20 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
               )
             })}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  disabled={moreItems.length === 0}
-                  className={cn(
-                    navLinkBaseClass,
-                    moreItems.length === 0
-                      ? 'text-primary-foreground/50 cursor-default'
-                      : 'text-primary-foreground/80 hover:bg-secondary/8 hover:text-primary-foreground',
-                  )}
-                >
-                  <MoreHorizontal className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Más</span>
-                </button>
-              </DropdownMenuTrigger>
-              {moreItems.length > 0 && (
+            {moreItems.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      navLinkBaseClass,
+                      'text-primary-foreground/80 hover:bg-secondary/8 hover:text-primary-foreground',
+                    )}
+                  >
+                    <MoreHorizontal className="h-4 w-4 shrink-0" />
+                    <span className="truncate">Más</span>
+                  </button>
+                </DropdownMenuTrigger>
                 <DropdownMenuContent
                   side="bottom"
                   align="start"
@@ -311,8 +308,8 @@ function SidebarNavigation({ onNavigate }: { onNavigate?: () => void }) {
                     })}
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
-              )}
-            </DropdownMenu>
+              </DropdownMenu>
+            ) : null}
           </div>
         </div>
       </nav>

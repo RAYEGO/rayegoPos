@@ -1,6 +1,7 @@
 import { AccionAuditoria, Prisma, TipoDocumentoIdentidad } from '@prisma/client'
 import { hash } from 'bcryptjs'
 import type { FastifyRequest } from 'fastify'
+import type { AuthRole } from '../auth/auth.types.js'
 import { prisma } from '../../lib/prisma.js'
 import { requirePermission, requirePlatformAdmin } from '../../lib/auth.js'
 
@@ -1198,7 +1199,7 @@ export async function createEmpresaOnboarding(
 
   const tipoEmpresa = await prisma.tipoEmpresa.findFirst({
     where: { id: tipoEmpresaId, deletedAt: null },
-    select: { id: true },
+    select: { id: true, codigo: true },
   })
   if (!tipoEmpresa) {
     throw createHttpError(400, 'El tipo de empresa seleccionado no es válido.')
@@ -1231,13 +1232,31 @@ export async function createEmpresaOnboarding(
     }
   }
 
+  const tipoCodigo = (tipoEmpresa.codigo ?? '').trim().toUpperCase()
+  const isTipoServicioTecnico = tipoCodigo === 'SERVICIO_TECNICO'
+  const rolAdminCodigo: AuthRole = isTipoServicioTecnico
+    ? 'ADMIN_SERVICIO_TECNICO'
+    : tipoCodigo === 'PLATAFORMA'
+      ? 'ADMIN_EMPRESA'
+      : 'ADMIN_BOTICA'
+  const rolAdminNombre = rolAdminCodigo === 'ADMIN_SERVICIO_TECNICO'
+    ? 'Administrador Servicio Técnico'
+    : rolAdminCodigo === 'ADMIN_BOTICA'
+      ? 'Administrador de Botica'
+      : 'Administrador Empresa'
+  const rolAdminDescripcion = rolAdminCodigo === 'ADMIN_SERVICIO_TECNICO'
+    ? 'Administrador de una empresa de servicio técnico'
+    : rolAdminCodigo === 'ADMIN_BOTICA'
+      ? 'Administrador de una botica o farmacia'
+      : 'Administrador de una empresa'
+
   const onboarding = await prisma.$transaction(async (tx) => {
     const rolAdmin = await ensureRoleByCodigo(
       tx,
-      'ADMIN_EMPRESA',
+      rolAdminCodigo,
       userId,
-      'Administrador Empresa',
-      'Administrador de una empresa',
+      rolAdminNombre,
+      rolAdminDescripcion,
     )
 
     const empresa = await tx.empresa.create({
@@ -1789,7 +1808,10 @@ export async function createEmpresaAdministrador(
 
   const empresa = await prisma.empresa.findFirst({
     where: { id: empresaId, deletedAt: null },
-    select: { id: true },
+    select: {
+      id: true,
+      tipoEmpresa: { select: { id: true, codigo: true } },
+    },
   })
   if (!empresa) {
     throw createHttpError(404, 'La empresa no fue encontrada.')
@@ -1856,13 +1878,31 @@ export async function createEmpresaAdministrador(
 
   const passwordHash = await hash(password, SALT_ROUNDS)
 
+  const tipoCodigo = (empresa.tipoEmpresa?.codigo ?? '').trim().toUpperCase()
+  const isTipoServicioTecnico = tipoCodigo === 'SERVICIO_TECNICO'
+  const rolAdminCodigo: AuthRole = isTipoServicioTecnico
+    ? 'ADMIN_SERVICIO_TECNICO'
+    : tipoCodigo === 'PLATAFORMA'
+      ? 'ADMIN_EMPRESA'
+      : 'ADMIN_BOTICA'
+  const rolAdminNombre = rolAdminCodigo === 'ADMIN_SERVICIO_TECNICO'
+    ? 'Administrador Servicio Técnico'
+    : rolAdminCodigo === 'ADMIN_BOTICA'
+      ? 'Administrador de Botica'
+      : 'Administrador Empresa'
+  const rolAdminDescripcion = rolAdminCodigo === 'ADMIN_SERVICIO_TECNICO'
+    ? 'Administrador de una empresa de servicio técnico'
+    : rolAdminCodigo === 'ADMIN_BOTICA'
+      ? 'Administrador de una botica o farmacia'
+      : 'Administrador de una empresa'
+
   const created = await prisma.$transaction(async (tx) => {
     const rolAdmin = await ensureRoleByCodigo(
       tx,
-      'ADMIN_EMPRESA',
+      rolAdminCodigo,
       userId,
-      'Administrador Empresa',
-      'Administrador de una empresa',
+      rolAdminNombre,
+      rolAdminDescripcion,
     )
 
     let sucursalId: string

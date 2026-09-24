@@ -2,8 +2,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
+import { X } from 'lucide-react'
 import {
-  ChevronDown,
   CreditCard,
   MoreVertical,
   Edit,
@@ -14,7 +14,6 @@ import {
   ShieldAlert,
   Trash2,
   Wrench,
-  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -41,8 +40,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { SidePanel, SidePanelClose, SidePanelContent } from '@/components/ui/side-panel'
-import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -62,7 +59,6 @@ import { ApiError, ApiNetworkError } from '@/services/apiClient'
 import { customersService } from '@/services/customersService'
 import { rtService } from '@/services/rtService'
 import type {
-  CreateCustomerPayload,
   CustomerAccountStatementResponse,
   CustomerItem,
   CustomerSalesResponse,
@@ -78,57 +74,8 @@ import type {
 } from '@/types/rayegotech'
 import { toast } from 'sonner'
 import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-selector'
+import { CustomerFormDialog } from '@/components/customers/CustomerFormDialog'
 import type { PaymentMethodOption } from '@/lib/payment-methods'
-
-const optionalEmailSchema = z
-  .string()
-  .max(150, 'Máximo 150 caracteres.')
-  .refine((value) => value === '' || /\S+@\S+\.\S+/.test(value), 'Ingresa un correo válido.')
-
-const customerFormSchema = z
-  .object({
-    tipoPersona: z.string().min(1, 'Selecciona el tipo de persona.'),
-    tipoDocumento: z.string().min(1, 'Selecciona el tipo de documento.'),
-    numeroDocumento: z
-      .string()
-      .trim()
-      .min(1, 'Ingresa el número de documento.')
-      .max(20, 'Máximo 20 caracteres.'),
-    nombres: z.string().max(120).optional(),
-    apellidos: z.string().max(120).optional(),
-    razonSocial: z.string().max(200).optional(),
-    email: optionalEmailSchema,
-    telefono: z.string().max(30).optional(),
-    direccion: z.string().max(255).optional(),
-    permitirCredito: z.boolean(),
-    limiteCredito: z.number().min(0),
-    ubigeo: z.string().max(6).optional(),
-    fechaNacimiento: z.string().optional(),
-    observaciones: z.string().max(255).optional(),
-    activo: z.boolean(),
-  })
-  .superRefine((values, ctx) => {
-    if (values.tipoPersona === 'JURIDICA') {
-      if (!values.razonSocial?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'La razón social es obligatoria.',
-          path: ['razonSocial'],
-        })
-      }
-      return
-    }
-
-    if (!values.nombres?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Los nombres son obligatorios.',
-        path: ['nombres'],
-      })
-    }
-  })
-
-type CustomerFormValues = z.infer<typeof customerFormSchema>
 
 const customerPaymentSchema = z
   .object({
@@ -157,24 +104,6 @@ const defaultDashboard: CustomersDashboardResponse = {
     tiposPersona: [],
     tiposDocumento: [],
   },
-}
-
-const defaultFormValues: CustomerFormValues = {
-  tipoPersona: '',
-  tipoDocumento: '',
-  numeroDocumento: '',
-  nombres: '',
-  apellidos: '',
-  razonSocial: '',
-  email: '',
-  telefono: '',
-  direccion: '',
-  permitirCredito: false,
-  limiteCredito: 0,
-  ubigeo: '',
-  fechaNacimiento: '',
-  observaciones: '',
-  activo: true,
 }
 
 function formatCurrency(value: number) {
@@ -319,36 +248,6 @@ function CustomerAutocomplete({
   )
 }
 
-function toPayload(values: CustomerFormValues): CreateCustomerPayload {
-  const rawCreditLimit = Number.isFinite(values.limiteCredito) ? values.limiteCredito : 0
-  const limiteCredito = values.permitirCredito ? Math.max(0, rawCreditLimit) : 0
-
-  return {
-    tipoPersona: values.tipoPersona,
-    tipoDocumento: values.tipoDocumento?.trim() ? values.tipoDocumento : undefined,
-    numeroDocumento: values.numeroDocumento?.trim() || undefined,
-    nombres: values.nombres?.trim() || undefined,
-    apellidos: values.apellidos?.trim() || undefined,
-    razonSocial: values.razonSocial?.trim() || undefined,
-    email: values.email?.trim() || undefined,
-    telefono: values.telefono?.trim() || undefined,
-    direccion: values.direccion?.trim() || undefined,
-    permitirCredito: values.permitirCredito,
-    limiteCredito: Number(limiteCredito.toFixed(2)),
-    ubigeo: values.ubigeo?.trim() || undefined,
-    fechaNacimiento: values.fechaNacimiento?.trim() || undefined,
-    observaciones: values.observaciones?.trim() || undefined,
-  }
-}
-
-function FieldError({ message }: { message?: string }) {
-  if (!message) {
-    return null
-  }
-
-  return <p className="text-xs text-destructive">{message}</p>
-}
-
 export function ClientesPage() {
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
@@ -396,7 +295,6 @@ export function ClientesPage() {
   const [error, setError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<CustomerItem | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<CustomerItem | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -415,11 +313,6 @@ export function ClientesPage() {
   const [garantiasRT, setGarantiasRT] = useState<GarantiaOrden[]>([])
   const [garantiasRTLoading, setGarantiasRTLoading] = useState(false)
 
-  const form = useForm<CustomerFormValues>({
-    resolver: zodResolver(customerFormSchema),
-    defaultValues: defaultFormValues,
-  })
-
   const paymentForm = useForm<CustomerPaymentFormValues>({
     resolver: zodResolver(customerPaymentSchema),
     defaultValues: {
@@ -429,10 +322,6 @@ export function ClientesPage() {
       observaciones: null,
     },
   })
-
-  const formTipoPersona = form.watch('tipoPersona')
-  const formTipoDocumento = form.watch('tipoDocumento')
-  const formPermitirCredito = form.watch('permitirCredito')
 
   const selectedCustomer = useMemo(() => {
     if (!selectedCustomerId) {
@@ -852,78 +741,17 @@ export function ClientesPage() {
 
   function openCreateDialog() {
     setEditingCustomer(null)
-    form.reset({
-      ...defaultFormValues,
-      tipoPersona: dashboard.options.tiposPersona[0] ?? 'NATURAL',
-      tipoDocumento: dashboard.options.tiposDocumento[0] ?? '',
-      activo: true,
-    })
     setIsDialogOpen(true)
   }
 
   function openEditDialog(customer: CustomerItem) {
     setEditingCustomer(customer)
-    form.reset({
-      tipoPersona: customer.tipoPersona,
-      tipoDocumento: customer.tipoDocumento ?? '',
-      numeroDocumento: customer.numeroDocumento ?? '',
-      nombres: customer.nombres ?? '',
-      apellidos: customer.apellidos ?? '',
-      razonSocial: customer.razonSocial ?? '',
-      email: customer.email ?? '',
-      telefono: customer.telefono ?? '',
-      direccion: customer.direccion ?? '',
-      permitirCredito: customer.permitirCredito,
-      limiteCredito: customer.limiteCredito,
-      ubigeo: customer.ubigeo ?? '',
-      fechaNacimiento: customer.fechaNacimiento ? customer.fechaNacimiento.slice(0, 10) : '',
-      observaciones: customer.observaciones ?? '',
-      activo: customer.activo,
-    })
     setIsDialogOpen(true)
   }
 
   function openDeleteDialog(customer: CustomerItem) {
     setDeleteTarget(customer)
     setIsDeleteDialogOpen(true)
-  }
-
-  async function handleSaveCustomer(values: CustomerFormValues) {
-    if (!accessToken) {
-      toast.error('La sesión no está disponible.')
-      return
-    }
-
-    setIsSubmitting(true)
-
-    try {
-      const payload = toPayload(values)
-
-      if (editingCustomer) {
-        await customersService.update(accessToken, editingCustomer.id, {
-          ...payload,
-          activo: values.activo,
-        })
-        toast.success('Cliente actualizado correctamente.')
-      } else {
-        await customersService.create(accessToken, payload)
-        toast.success('Cliente registrado correctamente.')
-      }
-
-      setIsDialogOpen(false)
-      setEditingCustomer(null)
-      form.reset(defaultFormValues)
-      await loadDashboard()
-    } catch (nextError) {
-      if (nextError instanceof ApiError && nextError.status === 401) {
-        await handleUnauthorized()
-        return
-      }
-
-      toast.error(getApiErrorMessage(nextError))
-    } finally {
-      setIsSubmitting(false)
-    }
   }
 
   async function handleToggleStatus(customer: CustomerItem) {
@@ -973,13 +801,6 @@ export function ClientesPage() {
       setIsDeleting(false)
     }
   }
-
-  const documentInputPlaceholder = useMemo(() => {
-    if (formTipoDocumento === 'RUC') return 'Número de RUC'
-    if (formTipoDocumento === 'DNI') return 'Número de DNI'
-    if (formTipoDocumento === 'CE') return 'Carné de extranjería'
-    return 'Número de documento'
-  }, [formTipoDocumento])
 
   return (
     <div className="space-y-4 p-4">
@@ -1985,8 +1806,12 @@ export function ClientesPage() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
+        <DialogContent
+          className={
+            'flex flex-col gap-0 overflow-hidden !p-0 sm:max-w-[560px] max-h-[calc(100vh-40px)]'
+          }
+        >
+          <DialogHeader className="flex-shrink-0 items-start gap-1 border-b bg-popover px-6 py-4 pr-14">
             <DialogTitle>Registrar pago de cliente</DialogTitle>
             <DialogDescription>
               Aplica un pago a la deuda pendiente. Se afectarán las ventas más antiguas primero.
@@ -1994,172 +1819,174 @@ export function ClientesPage() {
           </DialogHeader>
 
           <form
-            className="space-y-5"
+            className="flex min-h-0 flex-1 flex-col"
             onSubmit={(ev) => {
               ev.preventDefault()
               void handleSubmitPayment()
             }}
           >
-            <div className="rounded-xl border bg-muted/30 p-4">
-              <p className="text-xs font-medium text-muted-foreground">Saldo pendiente</p>
-              <p className="mt-1 text-xl font-semibold text-rose-600">
-                {formatCurrency(accountStatement?.totals?.outstandingAmount ?? 0)}
-              </p>
-              {accountStatement?.pendingSales?.length ? (
-                <div className="mt-3 border-t border-muted pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Se aplicará a (FIFO):
-                  </p>
-                  <ul className="mt-1.5 space-y-1.5 text-xs">
-                    {accountStatement.pendingSales.slice(0, 3).map((sale) => (
-                      <li key={sale.saleId} className="flex items-center justify-between gap-3">
-                        <span className="flex items-center gap-2">
-                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-500/80" />
-                          <span className="font-medium text-foreground">{sale.document}</span>
-                          <span className="text-muted-foreground">
-                            {formatDateTime(sale.issueDate).slice(0, 10)}
-                          </span>
-                        </span>
-                        <span className="font-semibold text-foreground">
-                          {formatCurrency(sale.outstandingAmount)}
-                        </span>
-                      </li>
-                    ))}
-                    {accountStatement.pendingSales.length > 3 ? (
-                      <li className="pt-1 text-[11px] text-muted-foreground">
-                        +{accountStatement.pendingSales.length - 3} comprobante
-                        {accountStatement.pendingSales.length - 3 === 1 ? '' : 's'} más por{' '}
-                        <span className="font-semibold text-foreground">
-                          {formatCurrency(
-                            accountStatement.pendingSales
-                              .slice(3)
-                              .reduce((sum, s) => sum + s.outstandingAmount, 0),
-                          )}
-                        </span>
-                      </li>
-                    ) : null}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Monto a pagar <span className="text-rose-600">*</span>
-              </label>
-              {(() => {
-                const maxAmount = accountStatement?.totals?.outstandingAmount ?? 0
-                const montoError = paymentForm.formState.errors.monto?.message
-                return (
-                  <div className="space-y-1">
-                    <Input
-                      ref={paymentAmountInputRef}
-                      type="number"
-                      step="0.01"
-                      min={0.01}
-                      max={maxAmount}
-                      onBlur={(ev) => {
-                        const raw = ev.target.value
-                        if (!raw) {
-                          paymentForm.setValue('monto', 0)
-                          paymentForm.setError('monto', {
-                            type: 'manual',
-                            message: 'Ingresa el monto a pagar.',
-                          })
-                          return
-                        }
-                        const parsed = Number(raw)
-                        if (!Number.isFinite(parsed)) {
-                          paymentForm.setValue('monto', 0)
-                          paymentForm.setError('monto', {
-                            type: 'manual',
-                            message: 'Ingresa un monto válido.',
-                          })
-                          return
-                        }
-                        const amount = Number(parsed.toFixed(2))
-                        paymentForm.setValue('monto', amount)
-                        if (amount <= 0) {
-                          paymentForm.setError('monto', {
-                            type: 'manual',
-                            message: 'El monto debe ser mayor a 0.',
-                          })
-                          return
-                        }
-                        if (amount > maxAmount + 0.0001) {
-                          paymentForm.setError('monto', {
-                            type: 'manual',
-                            message: `El monto no puede superar el saldo pendiente de ${formatCurrency(
-                              maxAmount,
-                            )}.`,
-                          })
-                          return
-                        }
-                        paymentForm.clearErrors('monto')
-                      }}
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Máximo a pagar: <span className="font-medium">{formatCurrency(maxAmount)}</span>
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+              <div className="rounded-xl border bg-muted/30 p-4">
+                <p className="text-xs font-medium text-muted-foreground">Saldo pendiente</p>
+                <p className="mt-1 text-xl font-semibold text-rose-600">
+                  {formatCurrency(accountStatement?.totals?.outstandingAmount ?? 0)}
+                </p>
+                {accountStatement?.pendingSales?.length ? (
+                  <div className="mt-3 border-t border-muted pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Se aplicará a (FIFO):
                     </p>
-                    {montoError && (
-                      <p className="text-xs font-medium text-rose-600">{montoError}</p>
-                    )}
+                    <ul className="mt-1.5 space-y-1.5 text-xs">
+                      {accountStatement.pendingSales.slice(0, 3).map((sale) => (
+                        <li key={sale.saleId} className="flex items-center justify-between gap-3">
+                          <span className="flex items-center gap-2">
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-500/80" />
+                            <span className="font-medium text-foreground">{sale.document}</span>
+                            <span className="text-muted-foreground">
+                              {formatDateTime(sale.issueDate).slice(0, 10)}
+                            </span>
+                          </span>
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(sale.outstandingAmount)}
+                          </span>
+                        </li>
+                      ))}
+                      {accountStatement.pendingSales.length > 3 ? (
+                        <li className="pt-1 text-[11px] text-muted-foreground">
+                          +{accountStatement.pendingSales.length - 3} comprobante
+                          {accountStatement.pendingSales.length - 3 === 1 ? '' : 's'} más por{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(
+                              accountStatement.pendingSales
+                                .slice(3)
+                                .reduce((sum, s) => sum + s.outstandingAmount, 0),
+                            )}
+                          </span>
+                        </li>
+                      ) : null}
+                    </ul>
                   </div>
-                )
-              })()}
-            </div>
+                ) : null}
+              </div>
 
-            <FormPaymentMethodTwoLevelSelect
-              key={paymentMethodResetKey}
-              control={paymentForm.control}
-              name="formaPagoId"
-              methods={
-                (accountStatement?.options?.paymentMethods ??
-                  []) as PaymentMethodOption[]
-              }
-              required
-              id="customer-payment"
-            />
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Monto a pagar <span className="text-rose-600">*</span>
+                </label>
+                {(() => {
+                  const maxAmount = accountStatement?.totals?.outstandingAmount ?? 0
+                  const montoError = paymentForm.formState.errors.monto?.message
+                  return (
+                    <div className="space-y-1">
+                      <Input
+                        ref={paymentAmountInputRef}
+                        type="number"
+                        step="0.01"
+                        min={0.01}
+                        max={maxAmount}
+                        onBlur={(ev) => {
+                          const raw = ev.target.value
+                          if (!raw) {
+                            paymentForm.setValue('monto', 0)
+                            paymentForm.setError('monto', {
+                              type: 'manual',
+                              message: 'Ingresa el monto a pagar.',
+                            })
+                            return
+                          }
+                          const parsed = Number(raw)
+                          if (!Number.isFinite(parsed)) {
+                            paymentForm.setValue('monto', 0)
+                            paymentForm.setError('monto', {
+                              type: 'manual',
+                              message: 'Ingresa un monto válido.',
+                            })
+                            return
+                          }
+                          const amount = Number(parsed.toFixed(2))
+                          paymentForm.setValue('monto', amount)
+                          if (amount <= 0) {
+                            paymentForm.setError('monto', {
+                              type: 'manual',
+                              message: 'El monto debe ser mayor a 0.',
+                            })
+                            return
+                          }
+                          if (amount > maxAmount + 0.0001) {
+                            paymentForm.setError('monto', {
+                              type: 'manual',
+                              message: `El monto no puede superar el saldo pendiente de ${formatCurrency(
+                                maxAmount,
+                              )}.`,
+                            })
+                            return
+                          }
+                          paymentForm.clearErrors('monto')
+                        }}
+                        placeholder="0.00"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Máximo a pagar: <span className="font-medium">{formatCurrency(maxAmount)}</span>
+                      </p>
+                      {montoError && (
+                        <p className="text-xs font-medium text-rose-600">{montoError}</p>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Referencia</label>
-              <Controller
+              <FormPaymentMethodTwoLevelSelect
+                key={paymentMethodResetKey}
                 control={paymentForm.control}
-                name="referenciaExterna"
-                render={({ field }) => (
-                  <Input
-                    value={field.value ?? ''}
-                    onChange={(ev) =>
-                      field.onChange(ev.target.value === '' ? null : ev.target.value)
-                    }
-                    onBlur={field.onBlur}
-                    placeholder="Opcional: código operación, voucher, N° externo..."
-                  />
-                )}
+                name="formaPagoId"
+                methods={
+                  (accountStatement?.options?.paymentMethods ??
+                    []) as PaymentMethodOption[]
+                }
+                required
+                id="customer-payment"
               />
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Referencia</label>
+                <Controller
+                  control={paymentForm.control}
+                  name="referenciaExterna"
+                  render={({ field }) => (
+                    <Input
+                      value={field.value ?? ''}
+                      onChange={(ev) =>
+                        field.onChange(ev.target.value === '' ? null : ev.target.value)
+                      }
+                      onBlur={field.onBlur}
+                      placeholder="Opcional: código operación, voucher, N° externo..."
+                    />
+                  )}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Observaciones</label>
+                <Controller
+                  control={paymentForm.control}
+                  name="observaciones"
+                  render={({ field }) => (
+                    <Textarea
+                      value={field.value ?? ''}
+                      onChange={(ev) =>
+                        field.onChange(ev.target.value === '' ? null : ev.target.value)
+                      }
+                      onBlur={field.onBlur}
+                      rows={3}
+                      placeholder="Opcional: comentarios internos sobre este pago..."
+                    />
+                  )}
+                />
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Observaciones</label>
-              <Controller
-                control={paymentForm.control}
-                name="observaciones"
-                render={({ field }) => (
-                  <Textarea
-                    value={field.value ?? ''}
-                    onChange={(ev) =>
-                      field.onChange(ev.target.value === '' ? null : ev.target.value)
-                    }
-                    onBlur={field.onBlur}
-                    rows={3}
-                    placeholder="Opcional: comentarios internos sobre este pago..."
-                  />
-                )}
-              />
-            </div>
-
-            <DialogFooter>
+            <DialogFooter className="flex-shrink-0 gap-2 border-t bg-popover px-6 py-4">
               <Button
                 type="button"
                 variant="outline"
@@ -2191,293 +2018,26 @@ export function ClientesPage() {
         </DialogContent>
       </Dialog>
 
-      <SidePanel
+      <CustomerFormDialog
         open={isDialogOpen}
-        onOpenChange={(open) => {
-          setIsDialogOpen(open)
-          if (!open) {
+        onOpenChange={(nextOpen) => {
+          setIsDialogOpen(nextOpen)
+          if (!nextOpen) {
             setEditingCustomer(null)
-            form.reset(defaultFormValues)
           }
         }}
-      >
-        <SidePanelContent className="p-0">
-          <form className="flex h-full flex-col" onSubmit={form.handleSubmit(handleSaveCustomer)}>
-            <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
-              <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">
-                  {editingCustomer ? 'Editar cliente' : 'Registrar cliente'}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Registra lo indispensable para vender rápido. RENIEC y SUNAT podrán completar
-                  estos datos automáticamente más adelante.
-                </p>
-              </div>
-              <SidePanelClose asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-9 w-9">
-                  <X className="h-4 w-4" />
-                  <span className="sr-only">Cerrar</span>
-                </Button>
-              </SidePanelClose>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="space-y-4">
-                <Card className="p-4">
-                  <p className="font-medium text-foreground">Datos principales</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Solo pedimos lo necesario para registrar al cliente en menos de un minuto.
-                  </p>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Tipo de persona</label>
-                        <Controller
-                          control={form.control}
-                          name="tipoPersona"
-                          render={({ field }) => (
-                            <Select value={field.value} onValueChange={field.onChange}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Seleccionar" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {dashboard.options.tiposPersona.map((item) => (
-                                  <SelectItem key={item} value={item}>
-                                    {item}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        <FieldError message={form.formState.errors.tipoPersona?.message} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Tipo de documento</label>
-                        <Controller
-                          control={form.control}
-                          name="tipoDocumento"
-                          render={({ field }) => (
-                            <Select value={field.value} onValueChange={field.onChange}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Seleccionar" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {dashboard.options.tiposDocumento.map((item) => (
-                                  <SelectItem key={item} value={item}>
-                                    {item}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        <FieldError message={form.formState.errors.tipoDocumento?.message} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Número de documento</label>
-                        <Input
-                          {...form.register('numeroDocumento')}
-                          placeholder={documentInputPlaceholder}
-                        />
-                        <FieldError message={form.formState.errors.numeroDocumento?.message} />
-                      </div>
-
-                      {formTipoPersona === 'JURIDICA' ? (
-                        <div className="space-y-2 md:col-span-2">
-                          <label className="text-sm font-medium">Razón social</label>
-                          <Input {...form.register('razonSocial')} placeholder="Empresa SAC" />
-                          <FieldError message={form.formState.errors.razonSocial?.message} />
-                          <p className="text-xs text-muted-foreground">
-                            Preparado para completar automáticamente desde SUNAT.
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Nombre completo</label>
-                            <Input {...form.register('nombres')} placeholder="Juan Pérez" />
-                            <FieldError message={form.formState.errors.nombres?.message} />
-                            <p className="text-xs text-muted-foreground">
-                              Preparado para completar automáticamente desde RENIEC.
-                            </p>
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-sm font-medium">Apellidos (opcional)</label>
-                            <Input {...form.register('apellidos')} placeholder="Pérez Gómez" />
-                            <FieldError message={form.formState.errors.apellidos?.message} />
-                          </div>
-                        </>
-                      )}
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Teléfono</label>
-                        <Input {...form.register('telefono')} placeholder="987654321" />
-                        <FieldError message={form.formState.errors.telefono?.message} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Correo</label>
-                        <Input
-                          {...form.register('email')}
-                          type="email"
-                          placeholder="cliente@email.com"
-                        />
-                        <FieldError message={form.formState.errors.email?.message} />
-                      </div>
-
-                      <div className="space-y-2 md:col-span-2">
-                        <label className="text-sm font-medium">Dirección</label>
-                        <Input {...form.register('direccion')} placeholder="Dirección (opcional)" />
-                        <FieldError message={form.formState.errors.direccion?.message} />
-                      </div>
-
-                      <div className="space-y-2 md:col-span-2">
-                        <label className="text-sm font-medium">Observaciones</label>
-                        <Textarea
-                          {...form.register('observaciones')}
-                          placeholder="Notas (alergias, referencias, contacto, etc.)"
-                          className="min-h-24"
-                        />
-                        <FieldError message={form.formState.errors.observaciones?.message} />
-                      </div>
-                    </div>
-
-                    <details className="mt-4 rounded-lg border bg-muted/20 p-3">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-foreground">
-                        <span>Información adicional</span>
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      </summary>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Estos datos no son necesarios para registrar al cliente en caja.
-                      </p>
-                      <div className="mt-3 grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Fecha de nacimiento</label>
-                          <Input {...form.register('fechaNacimiento')} type="date" />
-                          <FieldError message={form.formState.errors.fechaNacimiento?.message} />
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Ubigeo</label>
-                          <Input {...form.register('ubigeo')} placeholder="150101" />
-                          <FieldError message={form.formState.errors.ubigeo?.message} />
-                        </div>
-                      </div>
-                    </details>
-                  </Card>
-
-                  <details className="rounded-xl border bg-card p-4">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-foreground">Configuración comercial</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Opcional. Úsalo cuando el cliente maneje crédito.
-                        </p>
-                      </div>
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    </summary>
-
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <div className="flex items-center justify-between rounded-lg border p-3">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Permitir crédito</p>
-                          <p className="text-xs text-muted-foreground">
-                            Disponible próximamente en Ventas
-                          </p>
-                        </div>
-                        <Controller
-                          control={form.control}
-                          name="permitirCredito"
-                          render={({ field }) => (
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
-                          )}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Límite de crédito</label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          disabled={!formPermitirCredito}
-                          {...form.register('limiteCredito', {
-                            setValueAs: (value) => {
-                              if (value === '' || value === null || typeof value === 'undefined') {
-                                return 0
-                              }
-                              const next = Number(value)
-                              return Number.isFinite(next) ? next : 0
-                            },
-                          })}
-                          placeholder="S/ 0.00"
-                        />
-                        <FieldError message={form.formState.errors.limiteCredito?.message} />
-                      </div>
-                    </div>
-                  </details>
-
-                  {editingCustomer ? (
-                    <Card className="p-4">
-                      <p className="font-medium text-foreground">Estado</p>
-                      <div className="mt-3 flex items-center justify-between rounded-lg border p-3">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Cliente activo</p>
-                          <p className="text-xs text-muted-foreground">
-                            Disponible para selección en ventas
-                          </p>
-                        </div>
-                        <Controller
-                          control={form.control}
-                          name="activo"
-                          render={({ field }) => (
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
-                          )}
-                        />
-                      </div>
-                    </Card>
-                  ) : null}
-              </div>
-            </div>
-
-            <div className="border-t bg-popover px-6 py-4">
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setIsDialogOpen(false)
-                    setEditingCustomer(null)
-                    form.reset(defaultFormValues)
-                  }}
-                  disabled={isSubmitting}
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? (
-                    <>
-                      <Loader className="h-4 w-4 text-current" />
-                      Guardando...
-                    </>
-                  ) : editingCustomer ? (
-                    <>
-                      <Plus className="mr-1 h-4 w-4" />
-                      Guardar cambios
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="mr-1 h-4 w-4" />
-                      Crear cliente
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </form>
-        </SidePanelContent>
-      </SidePanel>
+        mode={editingCustomer ? 'edit' : 'create'}
+        editingCustomer={editingCustomer}
+        accessToken={accessToken}
+        tiposDocumento={dashboard.options.tiposDocumento}
+        tiposPersona={dashboard.options.tiposPersona}
+        onSuccess={async () => {
+          if (editingCustomer) {
+            void loadDashboard()
+          }
+        }}
+        refreshDashboardCallback={loadDashboard}
+      />
 
       <Dialog
         open={isDeleteDialogOpen}

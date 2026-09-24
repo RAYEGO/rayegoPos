@@ -1,18 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form'
+import { Controller, useFieldArray, useForm, useWatch, type UseFormReturn } from 'react-hook-form'
 import { z } from 'zod'
 import {
+  BadgeCheck,
+  Building2,
   CreditCard,
   Loader2,
   Minus,
   Plus,
   Search,
   ShoppingBasket,
+  ShoppingCart,
   Trash2,
   MoreVertical,
   History,
   ClipboardList,
+  UserPlus,
+  UserRound,
   X,
   MessageSquarePlus,
   Zap,
@@ -56,9 +61,97 @@ import { FormPaymentMethodTwoLevelSelect } from '@/components/ui/payment-method-
 import { getMethodVariant } from '@/lib/payment-methods'
 import { ReceiptDialog } from '@/components/sales/ReceiptDialog'
 import { useAuth } from '@/hooks/useAuth'
+import type { AuthRole } from '@/types/auth'
+
+const DISCOUNT_ROLE_CAP: Readonly<Partial<Record<AuthRole, number>>> = {
+  CAJERO: 10,
+  CAJERO_BOTICA: 10,
+  CAJERO_ST: 10,
+  SUPERVISOR: 20,
+  SUPERVISOR_BOTICA: 20,
+  SUPERVISOR_ST: 20,
+}
+
+type DiscountCapResult =
+  | { admin: false; cap: number }
+  | { admin: true; cap: null }
+
+function resolveDiscountCapForRoles(userRoles: AuthRole[]): DiscountCapResult {
+  if (!userRoles.length) return { admin: false, cap: 0 }
+  const adminRoles: ReadonlySet<AuthRole> = new Set<AuthRole>([
+    'ADMIN_POS',
+    'ADMIN',
+    'ADMIN_EMPRESA',
+    'ADMIN_BOTICA',
+    'ADMIN_SERVICIO_TECNICO',
+  ])
+  if (userRoles.some((role) => adminRoles.has(role))) {
+    return { admin: true, cap: null }
+  }
+  let cap = 0
+  for (const role of userRoles) {
+    const candidate = DISCOUNT_ROLE_CAP[role] ?? null
+    if (candidate !== null && candidate > cap) cap = candidate
+  }
+  return { admin: false, cap }
+}
+
+function validateLineDiscountPercent(params: {
+  grossAmount: number
+  discountAmount: number
+  cap: DiscountCapResult
+}): { valid: boolean; appliedPercent: number; message?: string } {
+  const grossAmount = Number.isFinite(params.grossAmount) ? params.grossAmount : 0
+  const discountAmount = Number.isFinite(params.discountAmount) ? params.discountAmount : 0
+  if (discountAmount <= 0 || grossAmount <= 0) {
+    return { valid: true, appliedPercent: 0 }
+  }
+  const appliedPercent = Number(((discountAmount / grossAmount) * 100).toFixed(4))
+  if (params.cap.admin) {
+    return { valid: true, appliedPercent }
+  }
+  const cap = params.cap.cap ?? 0
+  if (appliedPercent - cap > 1e-4) {
+    return {
+      valid: false,
+      appliedPercent,
+      message: `El descuento aplicado (${appliedPercent.toFixed(2)}%) excede el límite máximo permitido para tu rol (${cap.toFixed(2)}%).`,
+    }
+  }
+  return { valid: true, appliedPercent }
+}
+
+function percentToDiscountAmount(params: { percent: number; grossAmount: number }): number {
+  const percent = Number.isFinite(params.percent) ? params.percent : 0
+  const gross = Number.isFinite(params.grossAmount) ? params.grossAmount : 0
+  const clamped = Math.max(0, Math.min(100, percent))
+  if (!gross || !clamped) return 0
+  return Number(((clamped * gross) / 100).toFixed(2))
+}
+
+function discountAmountToPercent(params: { discountAmount: number; grossAmount: number }): number {
+  const discount = Number.isFinite(params.discountAmount) ? params.discountAmount : 0
+  const gross = Number.isFinite(params.grossAmount) ? params.grossAmount : 0
+  if (!gross || discount <= 0) return 0
+  return Number(((discount / gross) * 100).toFixed(2))
+}
+
+function discountCapLabel(cap: DiscountCapResult): string {
+  if (cap.admin) return 'Administrador · máximo 100%'
+  const value = cap.cap ?? 0
+  if (value <= 0) return 'Sin descuento permitido'
+  if (value === 10) return 'Cajero · máximo 10%'
+  if (value === 20) return 'Supervisor · máximo 20%'
+  return `Rol · máximo ${value.toFixed(0)}%`
+}
+
 import { useHandleUnauthorized } from '@/hooks/useHandleUnauthorized'
 import { ApiError, ApiNetworkError } from '@/services/apiClient'
+import { customersService } from '@/services/customersService'
 import { salesService } from '@/services/salesService'
+import { CustomerFormDialog } from '@/components/customers/CustomerFormDialog'
+import type { CustomerFormValues } from '@/components/customers/customerFormSchema'
+import type { CustomerLookupResponse, CustomerLookupApiPeruPayload } from '@/types/customers'
 import type { CreateSalePayload, SaleReceiptResponse, SalesDashboardResponse } from '@/types/sales'
 import { toast } from 'sonner'
 
@@ -69,13 +162,34 @@ const saleCheckoutSchema = z.object({
   payments: z
     .array(
       z.object({
-        formaPagoId: z.string().uuid({ message: 'Selecciona una forma de pago.' }),
-        monto: z.number().positive('El monto debe ser mayor a 0.'),
+        formaPagoId: z
+          .string()
+          .optional()
+          .refine(
+            (value) => value === undefined || value === '' || z.string().uuid().safeParse(value).success,
+            { message: 'Selecciona una forma de pago.' },
+          ),
+        monto: z.number().min(0, 'El monto no puede ser negativo.'),
         referenciaExterna: z.string().max(120, 'Máximo 120 caracteres.').optional(),
         observaciones: z.string().max(255, 'Máximo 255 caracteres.').optional(),
       }),
     )
-    .min(1, 'Registra al menos un pago.'),
+    .superRefine((value, ctx) => {
+      value.forEach((payment, index) => {
+        const amount = Number.isFinite(payment.monto) ? payment.monto : 0
+        if (amount > 0) {
+          const id = payment.formaPagoId ?? ''
+          if (!id || !z.string().uuid().safeParse(id).success) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [`payments.${index}.formaPagoId`],
+              message: 'Selecciona una forma de pago para el monto ingresado.',
+            })
+          }
+        }
+      })
+    })
+    .default([]),
 })
 
 type SaleCheckoutFormValues = z.infer<typeof saleCheckoutSchema>
@@ -306,9 +420,138 @@ function getStockVariant(product: SalesDashboardResponse['products'][number]) {
   return 'success'
 }
 
+type VentaRapidaFormHandle = UseFormReturn<VentaRapidaFormInput, any, VentaRapidaFormValues>
+
+function VentaRapidaDiscountBlock(props: {
+  form: VentaRapidaFormHandle
+  cap: DiscountCapResult
+}) {
+  const { form, cap } = props
+  const [unitPrice, quantity, discountAmount] = useWatch({
+    control: form.control,
+    name: ['precioUnitario', 'cantidad', 'descuentoTotal'],
+  })
+  const grossAmount = Number.isFinite(unitPrice) && Number.isFinite(quantity)
+    ? Number((Number(unitPrice) * Number(quantity)).toFixed(2))
+    : 0
+  const currentPercent = discountAmountToPercent({
+    discountAmount: Number(discountAmount),
+    grossAmount,
+  })
+  const disabled = cap.admin === false && cap.cap <= 0
+  const finalPercent = Number.isFinite(currentPercent) ? currentPercent : 0
+
+  return (
+    <div className="space-y-1.5 w-full">
+      <div className="flex items-end justify-between gap-2">
+        <div>
+          <Label htmlFor="venta-rapida-descuento-total">Descuento en soles (opcional)</Label>
+          <div className="mt-1.5">
+            <Input
+              id="venta-rapida-descuento-total"
+              type="number"
+              step="0.01"
+              min={0}
+              max={grossAmount}
+              className="h-9"
+              disabled={disabled}
+              {...form.register('descuentoTotal', { valueAsNumber: true })}
+            />
+          </div>
+          <FieldError message={form.formState.errors.descuentoTotal?.message} />
+        </div>
+        <div>
+          <Label htmlFor="venta-rapida-descuento-percent">o Porcentaje</Label>
+          <div className="mt-1.5 relative w-[160px]">
+            <Input
+              id="venta-rapida-descuento-percent"
+              type="number"
+              min={0}
+              max={cap.admin ? 100 : cap.cap}
+              step="0.01"
+              defaultValue={finalPercent}
+              disabled={disabled}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                const value = Number((event.currentTarget as HTMLInputElement).value)
+                if (value < 0 || Number.isNaN(value)) return
+                if (value > 100) return
+                if (cap.admin === false && value - cap.cap > 1e-4) {
+                  toast.error(
+                    `El descuento máximo permitido para tu rol es ${cap.cap.toFixed(0)}%.`,
+                  )
+                  return
+                }
+                const nextAmount = percentToDiscountAmount({
+                  percent: value,
+                  grossAmount,
+                })
+                form.setValue('descuentoTotal', nextAmount, {
+                  shouldDirty: true,
+                  shouldTouch: true,
+                })
+              }}
+              onChange={(event) => {
+                const inputValue = Number(event.currentTarget.value)
+                const percent = Number.isFinite(inputValue) ? inputValue : 0
+                if (percent < 0 || Number.isNaN(percent)) return
+                if (percent > 100) return
+                if (cap.admin === false && percent - cap.cap > 1e-4) {
+                  const safe = Math.min(percent, cap.cap)
+                  if (safe !== percent) {
+                    event.currentTarget.value = String(safe)
+                  }
+                }
+                const clamped = cap.admin
+                  ? Math.max(0, Math.min(100, percent))
+                  : Math.max(0, Math.min(cap.cap, percent))
+                const nextAmount = percentToDiscountAmount({
+                  percent: clamped,
+                  grossAmount,
+                })
+                form.setValue('descuentoTotal', nextAmount, {
+                  shouldDirty: true,
+                  shouldTouch: true,
+                })
+              }}
+              className="h-9 pr-9 text-sm"
+            />
+            <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground tabular-nums">
+              %
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="text-[11px] text-muted-foreground tabular-nums">
+        {grossAmount > 0 ? (
+          <>
+            Bruto: {formatCurrency(grossAmount)} · Descuento aplicado: {finalPercent.toFixed(2)}% (-
+            {formatCurrency(Number(discountAmount) || 0)}) · Final:{' '}
+            <span className="font-medium text-foreground">
+              {formatCurrency(Math.max(0, grossAmount - (Number(discountAmount) || 0)))}
+            </span>
+          </>
+        ) : (
+          <>Ingresa un precio y una cantidad mayor a cero para calcular descuentos.</>
+        )}
+      </div>
+      <p
+        className={
+          'text-[11px] ' +
+          (disabled ? 'text-destructive' : 'text-muted-foreground')
+        }
+      >
+        {discountCapLabel(cap)}
+      </p>
+    </div>
+  )
+}
+
 export function VentasPage() {
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const userRoles = (session?.user.roles ?? []) as AuthRole[]
+  const discountCap = useMemo(() => resolveDiscountCapForRoles(userRoles), [userRoles])
 
   const [dashboard, setDashboard] = useState<SalesDashboardResponse | null>(null)
   const [searchText, setSearchText] = useState('')
@@ -330,6 +573,18 @@ export function VentasPage() {
   const [isVentaRapidaSubmittingAnim, setIsVentaRapidaSubmittingAnim] = useState(false)
   const [expandedPaymentNotes, setExpandedPaymentNotes] = useState<Record<number, boolean>>({})
   const [isVentaRapidaDialogOpen, setIsVentaRapidaDialogOpen] = useState(false)
+  const [customerSearchInput, setCustomerSearchInput] = useState('')
+  const [customerManualDocType, setCustomerManualDocType] = useState<
+    '' | 'DNI' | 'RUC' | 'CE' | 'PASAPORTE' | 'OTRO'
+  >('')
+  const [isClassicCustomerPickerOpen, setIsClassicCustomerPickerOpen] = useState(false)
+  const [customerLookupLoading, setCustomerLookupLoading] = useState(false)
+  const [customerLookupResult, setCustomerLookupResult] = useState<CustomerLookupResponse | null>(null)
+  const [customerRegisterOpen, setCustomerRegisterOpen] = useState(false)
+  const [customerRegisterInitialValues, setCustomerRegisterInitialValues] = useState<Partial<CustomerFormValues> | null>(null)
+  const [recentlyCreatedCustomers, setRecentlyCreatedCustomers] = useState<Array<SalesDashboardResponse['options']['customers'][number]>>([])
+  const [tiposPersona, setTiposPersona] = useState<string[]>(['NATURAL', 'JURIDICA'])
+  const [tiposDocumento, setTiposDocumento] = useState<string[]>(['DNI', 'RUC', 'CE', 'PASAPORTE', 'OTRO'])
 
   const handleUnauthorized = useHandleUnauthorized('VentasPage')
 
@@ -338,8 +593,8 @@ export function VentasPage() {
     return () => window.clearTimeout(handle)
   }, [searchText])
 
-  const checkoutForm = useForm<SaleCheckoutFormValues>({
-    resolver: zodResolver(saleCheckoutSchema),
+  const checkoutForm = useForm({
+    resolver: zodResolver(saleCheckoutSchema) as any,
     defaultValues: defaultCheckoutFormValues,
   })
 
@@ -365,8 +620,19 @@ export function VentasPage() {
 
   function handleAddVentaRapida(values: VentaRapidaFormValues) {
     try {
+      const vrGross = Number(values.precioUnitario) * Number(values.cantidad)
+      const vrValidation = validateLineDiscountPercent({
+        grossAmount: vrGross,
+        discountAmount: Number(values.descuentoTotal),
+        cap: discountCap,
+      })
+      if (!vrValidation.valid && vrValidation.message) {
+        toast.error(vrValidation.message)
+        return
+      }
+
       addVentaRapidaToCart(values)
-      toast.success('⚡ Venta rápida agregada al carrito.')
+      toast.success('Venta rápida agregada al carrito.')
       setIsVentaRapidaSubmittingAnim(true)
       window.setTimeout(() => setIsVentaRapidaSubmittingAnim(false), 220)
       setIsVentaRapidaDialogOpen(false)
@@ -428,12 +694,36 @@ export function VentasPage() {
     void loadDashboard()
   }, [loadDashboard])
 
+  useEffect(() => {
+    if (!accessToken) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await customersService.getDashboard(accessToken, {})
+        if (cancelled) return
+        if (res?.options?.tiposPersona?.length) {
+          setTiposPersona(res.options.tiposPersona)
+        }
+        if (res?.options?.tiposDocumento?.length) {
+          setTiposDocumento(res.options.tiposDocumento)
+        }
+      } catch (next) {
+        if (next instanceof ApiError && next.status === 401) {
+          await handleUnauthorized()
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [accessToken, handleUnauthorized])
+
   const options = {
     branches: dashboard?.options?.branches ?? [],
     categories: dashboard?.options?.categories ?? [],
     commercialTypes: dashboard?.options?.commercialTypes ?? [],
     medicationTypes: dashboard?.options?.medicationTypes ?? [],
-    customers: dashboard?.options?.customers ?? [],
+    customers: [...(dashboard?.options?.customers ?? []), ...recentlyCreatedCustomers],
     paymentMethods: dashboard?.options?.paymentMethods ?? [],
   }
 
@@ -472,7 +762,8 @@ export function VentasPage() {
   }, [cartPulseNonce])
 
   const watchedPaymentTotal = watchedPayments.reduce(
-    (sum, payment) => sum + (Number.isFinite(payment?.monto) ? payment.monto : 0),
+    (sum, payment) =>
+      sum + (Number.isFinite(payment?.monto) && payment.monto > 0 ? payment.monto : 0),
     0,
   )
 
@@ -497,6 +788,111 @@ export function VentasPage() {
         : options.customers.find((customer) => customer.id === watchedCustomerId) ?? null,
     [options.customers, watchedCustomerId],
   )
+
+  const customerSearchClean = customerSearchInput.replace(/\s+/g, '').trim()
+
+  const detectedCustomerDocType: '' | 'DNI' | 'RUC' = useMemo(() => {
+    if (!customerSearchClean) return ''
+    if (/^\d{8}$/.test(customerSearchClean)) return 'DNI'
+    if (/^\d{11}$/.test(customerSearchClean)) return 'RUC'
+    return ''
+  }, [customerSearchClean])
+
+  const resolvedCustomerDocType: '' | 'DNI' | 'RUC' | 'CE' | 'PASAPORTE' | 'OTRO' =
+    detectedCustomerDocType || customerManualDocType
+
+  const foundCustomer = useMemo(() => {
+    if (!customerSearchClean || customerSearchClean.length < 5) return null
+    const needle = customerSearchClean.toLowerCase()
+    const byDoc = options.customers.find(
+      (c) => c.documentNumber && c.documentNumber.replace(/\s+/g, '').toLowerCase() === needle,
+    )
+    if (byDoc) return byDoc
+    if (resolvedCustomerDocType) return null
+    const byName = options.customers.find(
+      (c) => c.name.toLowerCase().includes(needle) || c.name.toLowerCase().startsWith(needle),
+    )
+    return byName ?? null
+  }, [options.customers, customerSearchClean, resolvedCustomerDocType])
+
+  const customerAutoSelectHintShown = selectedCustomer && !customerSearchClean
+
+  useEffect(() => {
+    if (!accessToken) return
+    if (!customerSearchClean || customerSearchClean.length < 5) {
+      setCustomerLookupLoading(false)
+      setCustomerLookupResult(null)
+      return
+    }
+    if (foundCustomer) {
+      setCustomerLookupLoading(false)
+      setCustomerLookupResult(null)
+      return
+    }
+    if (!detectedCustomerDocType) {
+      setCustomerLookupLoading(false)
+      setCustomerLookupResult(null)
+      return
+    }
+
+    let cancelled = false
+    const controller = new AbortController()
+
+    const handle = window.setTimeout(async () => {
+      setCustomerLookupLoading(true)
+      setCustomerLookupResult(null)
+      try {
+        const res = await customersService.lookupDocument(accessToken, customerSearchClean)
+        if (cancelled || controller.signal.aborted) return
+        setCustomerLookupResult(res)
+      } catch (next) {
+        if (cancelled || controller.signal.aborted) return
+        if (next instanceof ApiError && next.status === 401) {
+          await handleUnauthorized()
+          return
+        }
+        setCustomerLookupResult({
+          source: 'api_peru',
+          found: false,
+          reason: 'EXTERNAL_ERROR',
+        })
+      } finally {
+        if (!cancelled && !controller.signal.aborted) {
+          setCustomerLookupLoading(false)
+        }
+      }
+    }, 350)
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      window.clearTimeout(handle)
+    }
+  }, [accessToken, customerSearchClean, foundCustomer, detectedCustomerDocType, handleUnauthorized])
+
+  function openRegisterFromLookup(payload: CustomerLookupApiPeruPayload) {
+    const initial: Partial<CustomerFormValues> = {
+      tipoPersona: payload.tipoPersona,
+      tipoDocumento: payload.tipoDocumento,
+      numeroDocumento: payload.numeroDocumento,
+      nombres: payload.nombres ?? '',
+      apellidos: payload.apellidos ?? '',
+      razonSocial: payload.razonSocial ?? '',
+      direccion: payload.direccion ?? '',
+    }
+    setCustomerRegisterInitialValues(initial)
+    setCustomerRegisterOpen(true)
+  }
+
+  function openRegisterManualFromLookup() {
+    const tipoDoc = detectedCustomerDocType || resolvedCustomerDocType || ''
+    const initial: Partial<CustomerFormValues> = {
+      tipoDocumento: tipoDoc,
+      numeroDocumento: customerSearchClean,
+    }
+    setCustomerRegisterInitialValues(initial)
+    setCustomerRegisterOpen(true)
+  }
 
   const customerAllowsCredit = selectedCustomer?.permitirCredito ?? false
   const availableCreditAmount =
@@ -702,7 +1098,7 @@ export function VentasPage() {
     setCartItems((current) => {
       const existing = current.find((item) => item.cartKey === cartKey)
       if (existing && isLocalCartVentaRapida(existing)) {
-        toast.warning('⚡ Esta venta rápida ya está en el carrito; ajusta la cantidad desde allí.')
+        toast.warning('Esta venta rápida ya está en el carrito; ajusta la cantidad desde allí.')
         return current
       }
 
@@ -766,15 +1162,68 @@ export function VentasPage() {
     setCartItems((current) => current.filter((item) => item.cartKey !== cartKey))
   }
 
+  function applyCartItemDiscountPercent(cartKey: string, rawPercent: number): boolean {
+    const percent = Number.isFinite(rawPercent) ? rawPercent : 0
+    if (percent < 0) {
+      toast.error('El descuento no puede ser negativo.')
+      return false
+    }
+    if (percent > 100) {
+      toast.error('El descuento no puede superar el 100%.')
+      return false
+    }
+    if (discountCap.admin === false && percent - discountCap.cap > 1e-4) {
+      toast.error(
+        `El descuento máximo permitido para tu rol es ${discountCap.cap.toFixed(0)}%.`,
+      )
+      return false
+    }
+
+    let success = false
+    setCartItems((current) =>
+      current.map((item) => {
+        if (item.cartKey !== cartKey) return item
+        const gross = item.quantity * getCartItemUnitPrice(item)
+        const discountAmount = percentToDiscountAmount({ percent, grossAmount: gross })
+        if (discountAmount > gross) return item
+        const validation = validateLineDiscountPercent({
+          grossAmount: gross,
+          discountAmount,
+          cap: discountCap,
+        })
+        if (!validation.valid && validation.message) {
+          toast.error(validation.message)
+          return item
+        }
+        success = true
+        return { ...item, discountTotal: discountAmount }
+      }),
+    )
+    return success
+  }
+
   function openCartPanel() {
     if (!cartItems.length) {
       toast.error('Agrega productos al carrito antes de continuar.')
       return
     }
 
-    const hasPayments = checkoutForm.getValues('payments')?.length > 0
+    const currentPayments = checkoutForm.getValues('payments') ?? []
+    const hasPayments = currentPayments.length > 0
 
-    if (!hasPayments) {
+    const customerId = checkoutForm.getValues('clienteId') ?? 'SHOWROOM'
+    const isShowroom = customerId === 'SHOWROOM'
+    const candidateCustomer = isShowroom
+      ? null
+      : options.customers.find((customer) => customer.id === customerId) ?? null
+    const allowsCredit = candidateCustomer?.permitirCredito ?? false
+    const availableCredit = candidateCustomer && allowsCredit
+      ? Math.max(0, Number((candidateCustomer.limiteCredito - candidateCustomer.saldoPendiente).toFixed(2)))
+      : 0
+    const fullPaymentRequired = isShowroom || !allowsCredit
+    const creditAuthorizedWithoutPayment = !fullPaymentRequired && cartMetrics.total <= availableCredit
+
+    if (!hasPayments && !creditAuthorizedWithoutPayment) {
       const defaultPaymentMethodId = options.paymentMethods[0]?.id ?? ''
 
       checkoutForm.reset({
@@ -793,6 +1242,15 @@ export function VentasPage() {
       setShowSaleObservaciones(false)
       setExpandedPaymentNotes({})
     } else {
+      if (!hasPayments && creditAuthorizedWithoutPayment) {
+        const savedObs = checkoutForm.getValues('observaciones') ?? ''
+        checkoutForm.reset({
+          clienteId: customerId === 'SHOWROOM' ? (candidateCustomer?.id ?? 'SHOWROOM') : customerId,
+          tipoComprobante: checkoutForm.getValues('tipoComprobante') ?? 'TICKET',
+          observaciones: savedObs,
+          payments: [],
+        })
+      }
       const savedObs = checkoutForm.getValues('observaciones') ?? ''
       const savedPays = checkoutForm.getValues('payments') ?? []
       setShowSaleObservaciones(Boolean(savedObs))
@@ -818,7 +1276,8 @@ export function VentasPage() {
     }
 
     const paidAmount = values.payments.reduce(
-      (sum, payment) => sum + (Number.isFinite(payment.monto) ? payment.monto : 0),
+      (sum, payment) =>
+        sum + (Number.isFinite(payment.monto) && payment.monto > 0 ? payment.monto : 0),
       0,
     )
     const outstandingAmount = Math.max(
@@ -852,6 +1311,23 @@ export function VentasPage() {
       return
     }
 
+    for (const item of cartItems) {
+      const lineGross = item.quantity * getCartItemUnitPrice(item)
+      const lineValidation = validateLineDiscountPercent({
+        grossAmount: lineGross,
+        discountAmount: item.discountTotal,
+        cap: discountCap,
+      })
+      if (!lineValidation.valid && lineValidation.message) {
+        toast.error(
+          isLocalCartVentaRapida(item)
+            ? `Artículo "${item.descripcion}": ${lineValidation.message}`
+            : `Producto "${item.name}": ${lineValidation.message}`,
+        )
+        return
+      }
+    }
+
     const payload: CreateSalePayload = {
       clienteId: values.clienteId && values.clienteId !== 'SHOWROOM' ? values.clienteId : undefined,
       tipoComprobante: values.tipoComprobante,
@@ -875,14 +1351,20 @@ export function VentasPage() {
           descuentoTotal: item.discountTotal > 0 ? item.discountTotal : undefined,
         } as const
       }),
-      payments: values.payments.map((payment) => {
+      payments: values.payments.flatMap((payment) => {
+        const amount = Number.isFinite(payment.monto) ? payment.monto : 0
+        if (amount <= 0) return []
         const reference = payment.referenciaExterna?.trim()
-        return {
-          formaPagoId: payment.formaPagoId,
-          monto: payment.monto,
-          referenciaExterna: reference ? reference : undefined,
-          observaciones: payment.observaciones,
-        }
+        const formaPagoId = payment.formaPagoId ?? ''
+        if (!formaPagoId) return []
+        return [
+          {
+            formaPagoId,
+            monto: amount,
+            referenciaExterna: reference ? reference : undefined,
+            observaciones: payment.observaciones,
+          },
+        ]
       }),
     }
 
@@ -982,7 +1464,7 @@ export function VentasPage() {
                 className="justify-center gap-2 h-9 bg-green-600 hover:bg-green-700 text-white active:scale-95 shadow-md shadow-green-100 rounded-xl transition-all duration-200"
               >
                 <Zap className="h-4 w-4 fill-white/90" />
-                ⚡ Venta rápida
+                Venta rápida
               </Button>
             </div>
           </Card>
@@ -1093,10 +1575,13 @@ export function VentasPage() {
                 <ShoppingBasket className="h-5 w-5" />
               </div>
               <div className="text-left">
-                <p className="text-sm font-semibold text-foreground">🛒 Carrito</p>
+                <div className="flex items-center gap-1.5">
+                  <ShoppingCart className="h-4 w-4 text-foreground/80" />
+                  <p className="text-sm font-semibold text-foreground">Carrito</p>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {cartMetrics.vrCount > 0
-                    ? `Productos: ${cartMetrics.prCount} · ⚡ VR: ${cartMetrics.vrCount} · Total: ${formatCurrency(cartMetrics.total)}`
+                    ? `Productos: ${cartMetrics.prCount} · VR: ${cartMetrics.vrCount} · Total: ${formatCurrency(cartMetrics.total)}`
                     : `Productos: ${cartMetrics.itemCount} · Total: ${formatCurrency(cartMetrics.total)}`}
                 </p>
               </div>
@@ -1381,10 +1866,13 @@ export function VentasPage() {
           >
             <div className="flex items-start justify-between gap-4 border-b bg-popover px-6 py-4">
               <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">🛒 Carrito</p>
+                <div className="flex items-center gap-1.5">
+                  <ShoppingCart className="h-5 w-5 text-foreground/80" />
+                  <p className="text-base font-semibold text-foreground">Carrito</p>
+                </div>
                 <p className="text-sm text-muted-foreground">
                   {cartMetrics.vrCount > 0
-                    ? `Productos: ${cartMetrics.prCount} · ⚡ VR: ${cartMetrics.vrCount} · Total: ${formatCurrency(cartMetrics.total)}`
+                    ? `Productos: ${cartMetrics.prCount} · VR: ${cartMetrics.vrCount} · Total: ${formatCurrency(cartMetrics.total)}`
                     : `Productos: ${cartMetrics.itemCount} · Total: ${formatCurrency(cartMetrics.total)}`}
                 </p>
               </div>
@@ -1423,117 +1911,218 @@ export function VentasPage() {
                         Aún no hay ítems en el carrito
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Agrega productos desde el catálogo o ⚡ ventas rápidas.
+                        Agrega productos desde el catálogo o{' '}
+                        <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
+                          <Zap className="h-3.5 w-3.5" />
+                          ventas rápidas
+                        </span>
+                        .
                       </p>
                     </div>
                   ) : (
                     <div className="mt-4 space-y-3">
-                      {cartItems.map((item) => (
-                        <div key={item.cartKey} className="rounded-lg border p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="truncate font-medium text-foreground">
-                                  {isLocalCartProductoRegistrado(item) ? item.name : item.descripcion}
+                      {cartItems.map((item) => {
+                        const lineGross = Number(
+                          (item.quantity * getCartItemUnitPrice(item)).toFixed(2),
+                        )
+                        const discountAppliedPercent = discountAmountToPercent({
+                          discountAmount: item.discountTotal,
+                          grossAmount: lineGross,
+                        })
+                        const lineFinal = Number((lineGross - item.discountTotal).toFixed(2))
+                        const percentDisabled =
+                          discountCap.admin === false && discountCap.cap <= 0
+
+                        return (
+                          <div key={item.cartKey} className="rounded-lg border p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate font-medium text-foreground">
+                                    {isLocalCartProductoRegistrado(item)
+                                      ? item.name
+                                      : item.descripcion}
+                                  </p>
+                                  {isLocalCartVentaRapida(item) ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="inline-flex items-center gap-1 border-green-200 bg-green-50 text-green-700 text-[11px]"
+                                    >
+                                      <Zap className="h-3 w-3" />
+                                      Venta rápida
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground break-words">
+                                  {formatCurrency(getCartItemUnitPrice(item))} /{' '}
+                                  {isLocalCartProductoRegistrado(item)
+                                    ? item.presentationName ?? item.unitSymbol
+                                    : item.simboloUnidad}
                                 </p>
-                                {isLocalCartVentaRapida(item) ? (
-                                  <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700 text-[11px]">
-                                    ⚡ Venta rápida
-                                  </Badge>
+                                {isLocalCartProductoRegistrado(item) &&
+                                item.presentationOptions.length > 1 ? (
+                                  <div className="mt-2 w-full max-w-[220px]">
+                                    <Select
+                                      value={item.presentationId ?? ''}
+                                      onValueChange={(value) =>
+                                        updateCartPresentation(item.cartKey, value)
+                                      }
+                                    >
+                                      <SelectTrigger className="h-8">
+                                        <SelectValue placeholder="Presentación" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {item.presentationOptions.map((option) => (
+                                          <SelectItem key={option.id} value={option.id}>
+                                            {option.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
                                 ) : null}
                               </div>
-                              <p className="mt-1 text-xs text-muted-foreground break-words">
-                                {formatCurrency(getCartItemUnitPrice(item))} /{' '}
-                                {isLocalCartProductoRegistrado(item)
-                                  ? item.presentationName ?? item.unitSymbol
-                                  : item.simboloUnidad}
-                              </p>
-                              {isLocalCartProductoRegistrado(item) && item.presentationOptions.length > 1 ? (
-                                <div className="mt-2 w-full max-w-[220px]">
-                                  <Select
-                                    value={item.presentationId ?? ''}
-                                    onValueChange={(value) => updateCartPresentation(item.cartKey, value)}
-                                  >
-                                    <SelectTrigger className="h-8">
-                                      <SelectValue placeholder="Presentación" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {item.presentationOptions.map((option) => (
-                                        <SelectItem key={option.id} value={option.id}>
-                                          {option.name}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+
+                              <div className="text-right min-w-[120px]">
+                                <p className="font-medium text-foreground">
+                                  {formatCurrency(lineFinal)}
+                                </p>
+                                {isLocalCartProductoRegistrado(item) ? (
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Lote: {item.suggestedLotCode}
+                                  </p>
+                                ) : null}
+                                <div className="mt-1 space-y-0.5 text-right text-[11px] text-muted-foreground">
+                                  <p className="tabular-nums">
+                                    Bruto: {formatCurrency(lineGross)}
+                                  </p>
+                                  {discountAppliedPercent > 0 || item.discountTotal > 0 ? (
+                                    <p className="tabular-nums text-destructive font-medium">
+                                      Descuento {discountAppliedPercent.toFixed(2)}% (-
+                                      {formatCurrency(item.discountTotal)})
+                                    </p>
+                                  ) : null}
                                 </div>
-                              ) : null}
+                              </div>
                             </div>
 
-                            <div className="text-right">
-                              <p className="font-medium text-foreground">
-                                {formatCurrency(getCartItemLineSubtotal(item))}
-                              </p>
-                              {isLocalCartProductoRegistrado(item) ? (
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Lote: {item.suggestedLotCode}
+                            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-start">
+                              <div className="w-full space-y-1.5">
+                                <Label
+                                  htmlFor={`cart-discount-${item.cartKey}`}
+                                  className="text-xs font-medium"
+                                >
+                                  Descuento por línea
+                                </Label>
+                                <div className="flex items-center gap-2">
+                                  <div className="relative w-full max-w-[240px]">
+                                    <Input
+                                      id={`cart-discount-${item.cartKey}`}
+                                      type="number"
+                                      min={0}
+                                      max={discountCap.admin ? 100 : discountCap.cap}
+                                      step="0.01"
+                                      disabled={percentDisabled}
+                                      defaultValue={discountAppliedPercent}
+                                      onKeyDown={(event) => {
+                                        if (event.key !== 'Enter') return
+                                        const input = event.currentTarget
+                                        const value = Number(input.value)
+                                        applyCartItemDiscountPercent(item.cartKey, value)
+                                      }}
+                                      onBlur={(event) => {
+                                        const value = Number(event.currentTarget.value)
+                                        applyCartItemDiscountPercent(item.cartKey, value)
+                                      }}
+                                      className="h-9 pr-10 text-sm"
+                                    />
+                                    <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground tabular-nums">
+                                      %
+                                    </div>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-9"
+                                    disabled={percentDisabled}
+                                    onClick={() => {
+                                      applyCartItemDiscountPercent(item.cartKey, 0)
+                                      const el = document.getElementById(
+                                        `cart-discount-${item.cartKey}`,
+                                      ) as HTMLInputElement | null
+                                      if (el) el.value = '0'
+                                    }}
+                                  >
+                                    Quitar
+                                  </Button>
+                                </div>
+                                <p
+                                  className={
+                                    'text-[11px] ' +
+                                    (percentDisabled
+                                      ? 'text-destructive'
+                                      : 'text-muted-foreground')
+                                  }
+                                >
+                                  {discountCapLabel(discountCap)}
                                 </p>
-                              ) : null}
-                              {item.discountTotal > 0 ? (
-                                <p className="mt-1 text-xs text-destructive">
-                                  Desc: {formatCurrency(item.discountTotal)}
-                                </p>
-                              ) : null}
+                              </div>
+
+                              <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() =>
+                                      updateCartQuantity(item.cartKey, item.quantity - 1)
+                                    }
+                                  >
+                                    <Minus className="h-4 w-4" />
+                                  </Button>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    max={Math.max(1, getCartItemMax(item))}
+                                    value={item.quantity}
+                                    onChange={(event) =>
+                                      updateCartQuantity(
+                                        item.cartKey,
+                                        Number(event.target.value || item.quantity),
+                                      )
+                                    }
+                                    className="h-8 w-16 text-center"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() =>
+                                      updateCartQuantity(item.cartKey, item.quantity + 1)
+                                    }
+                                    disabled={item.quantity >= getCartItemMax(item)}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                </div>
+
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeFromCart(item.cartKey)}
+                                  className="h-8 px-2"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
-
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => updateCartQuantity(item.cartKey, item.quantity - 1)}
-                              >
-                                <Minus className="h-4 w-4" />
-                              </Button>
-                              <Input
-                                type="number"
-                                min={1}
-                                max={Math.max(1, getCartItemMax(item))}
-                                value={item.quantity}
-                                onChange={(event) =>
-                                  updateCartQuantity(
-                                    item.cartKey,
-                                    Number(event.target.value || item.quantity),
-                                  )
-                                }
-                                className="h-8 w-16 text-center"
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => updateCartQuantity(item.cartKey, item.quantity + 1)}
-                                disabled={item.quantity >= getCartItemMax(item)}
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </div>
-
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeFromCart(item.cartKey)}
-                              className="h-8 px-2"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </Card>
@@ -1561,30 +2150,339 @@ export function VentasPage() {
                   </div>
 
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium">Cliente</label>
-                      <Controller
-                        control={checkoutForm.control}
-                        name="clienteId"
-                        render={({ field }) => (
-                          <Select value={field.value || 'SHOWROOM'} onValueChange={field.onChange}>
-                            <SelectTrigger className="h-9">
-                              <SelectValue placeholder="Venta mostrador" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="SHOWROOM">Venta mostrador</SelectItem>
-                              {options.customers.map((customer) => (
-                                <SelectItem key={customer.id} value={customer.id}>
-                                  {customer.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      />
+                    <div className="space-y-2 md:col-span-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="text-sm font-medium">Cliente</label>
+                        {customerAutoSelectHintShown ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <BadgeCheck className="h-3.5 w-3.5 text-primary" />
+                            Cliente: {selectedCustomer?.name}
+                          </span>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px] text-muted-foreground"
+                          onClick={() =>
+                            setIsClassicCustomerPickerOpen((v) => !v)
+                          }
+                        >
+                          {isClassicCustomerPickerOpen
+                            ? 'Cerrar lista'
+                            : 'Seleccionar de la lista'}
+                        </Button>
+                      </div>
+
+                      <div className="relative w-full">
+                        <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted-foreground">
+                          <Search className="h-4 w-4" />
+                        </div>
+                        <Input
+                          value={customerSearchInput}
+                          onChange={(e) => {
+                            setCustomerSearchInput(e.target.value)
+                            if (customerManualDocType) setCustomerManualDocType('')
+                          }}
+                          placeholder="DNI, RUC o documento..."
+                          className="h-10 pl-9 pr-3 text-sm"
+                          autoComplete="off"
+                        />
+                      </div>
+
+                      {customerSearchClean ? (
+                        <div className="space-y-2">
+                          {detectedCustomerDocType ? (
+                            <div className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              {detectedCustomerDocType === 'RUC' ? (
+                                <Building2 className="h-3.5 w-3.5 text-primary" />
+                              ) : (
+                                <BadgeCheck className="h-3.5 w-3.5 text-green-600" />
+                              )}
+                              <span className="font-medium">
+                                {detectedCustomerDocType === 'RUC' ? 'RUC' : 'DNI'} detectado
+                              </span>
+                            </div>
+                          ) : resolvedCustomerDocType ? (
+                            <div className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              {resolvedCustomerDocType === 'RUC' ? (
+                                <Building2 className="h-3.5 w-3.5 text-primary" />
+                              ) : resolvedCustomerDocType === 'DNI' ? (
+                                <UserRound className="h-3.5 w-3.5 text-primary" />
+                              ) : (
+                                <BadgeCheck className="h-3.5 w-3.5 text-primary" />
+                              )}
+                              <span className="font-medium">
+                                {resolvedCustomerDocType} seleccionado manualmente
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-2.5">
+                              <p className="text-[11px] text-muted-foreground">
+                                Documento no identificado automáticamente.
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Select
+                                  value={customerManualDocType}
+                                  onValueChange={(v) =>
+                                    setCustomerManualDocType(
+                                      v as '' | 'DNI' | 'RUC' | 'CE' | 'PASAPORTE' | 'OTRO',
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue placeholder="Elegir tipo" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="DNI">DNI</SelectItem>
+                                    <SelectItem value="RUC">RUC</SelectItem>
+                                    <SelectItem value="CE">CE</SelectItem>
+                                    <SelectItem value="PASAPORTE">Pasaporte</SelectItem>
+                                    <SelectItem value="OTRO">Otro</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <span className="text-[11px] text-muted-foreground">
+                                  Podrás registrar el cliente después.
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {foundCustomer ? (
+                            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-2.5 sm:p-3">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <div
+                                  className={
+                                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ' +
+                                    (resolvedCustomerDocType === 'RUC'
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'bg-primary/10 text-primary')
+                                  }
+                                >
+                                  {resolvedCustomerDocType === 'RUC' ? (
+                                    <Building2 className="h-5 w-5" />
+                                  ) : (
+                                    <UserRound className="h-5 w-5" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <BadgeCheck className="h-3.5 w-3.5 text-green-600" />
+                                    <p className="truncate text-sm font-medium text-foreground">
+                                      {foundCustomer.name}
+                                    </p>
+                                  </div>
+                                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                    {resolvedCustomerDocType
+                                      ? `${resolvedCustomerDocType} · `
+                                      : ''}
+                                    {foundCustomer.documentNumber ?? 'Sin documento'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {selectedCustomer?.id !== foundCustomer.id ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-8 px-2.5 text-xs"
+                                    onClick={() => {
+                                      checkoutForm.setValue('clienteId', foundCustomer.id, {
+                                        shouldDirty: false,
+                                      })
+                                      toast.success('Cliente seleccionado correctamente.', {
+                                        description: foundCustomer.name,
+                                      })
+                                    }}
+                                  >
+                                    Seleccionar
+                                  </Button>
+                                ) : (
+                                  <Badge variant="success" className="text-[11px] h-6 px-2">
+                                    Seleccionado
+                                  </Badge>
+                                )}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
+                                  onClick={() => {
+                                    setCustomerSearchInput('')
+                                    setCustomerManualDocType('')
+                                  }}
+                                  aria-label="Quitar búsqueda"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ) : customerSearchClean.length >= 6 ? (
+                            <div className="space-y-2">
+                              {customerLookupLoading ? (
+                                <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-2.5 sm:p-3">
+                                  <div className="flex min-w-0 items-center gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                      <Loader2 className="h-5 w-5 animate-spin" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-foreground">
+                                        Consultando documento...
+                                      </p>
+                                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                        Estamos verificando los datos en RENIEC / SUNAT.
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {customerLookupResult?.source === 'api_peru' && customerLookupResult.found ? (
+                                <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-2.5 sm:p-3">
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-600/10 text-green-700">
+                                      {customerLookupResult.cliente.tipoPersona === 'JURIDICA' ? (
+                                        <Building2 className="h-5 w-5" />
+                                      ) : (
+                                        <UserRound className="h-5 w-5" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <BadgeCheck className="h-3.5 w-3.5 text-green-600" />
+                                        <p className="truncate text-sm font-medium text-foreground">
+                                          {customerLookupResult.cliente.tipoPersona === 'JURIDICA'
+                                            ? customerLookupResult.cliente.razonSocial
+                                            : [customerLookupResult.cliente.nombres, customerLookupResult.cliente.apellidos]
+                                                .filter(Boolean)
+                                                .join(' ') || 'Cliente encontrado'}
+                                        </p>
+                                      </div>
+                                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                        {customerLookupResult.cliente.tipoDocumento} ·{' '}
+                                        {customerLookupResult.cliente.numeroDocumento}
+                                      </p>
+                                      {customerLookupResult.cliente.direccion ? (
+                                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                                          {customerLookupResult.cliente.direccion}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 px-2.5 text-xs"
+                                      onClick={() => {
+                                        checkoutForm.setValue('clienteId', 'SHOWROOM', {
+                                          shouldDirty: false,
+                                        })
+                                        toast.info('Venta mostrador seleccionada.')
+                                      }}
+                                    >
+                                      Venta mostrador
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="primary"
+                                      className="h-8 gap-1.5 px-2.5 text-xs"
+                                      onClick={() => openRegisterFromLookup(customerLookupResult.cliente)}
+                                    >
+                                      <UserPlus className="h-3.5 w-3.5" />
+                                      Registrar cliente
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {!customerLookupLoading &&
+                              (!customerLookupResult ||
+                                (customerLookupResult.source === 'api_peru' && !customerLookupResult.found)) ? (
+                                <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-muted-foreground/30 bg-muted/20 p-2.5 sm:p-3">
+                                  <div className="flex min-w-0 items-start gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted-foreground/10 text-muted-foreground">
+                                      <UserRound className="h-5 w-5" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-foreground">
+                                        {customerLookupResult?.reason === 'EXTERNAL_ERROR'
+                                          ? 'No pudimos consultar el documento en este momento.'
+                                          : 'No encontramos este documento.'}
+                                      </p>
+                                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                        Puedes continuar como Venta mostrador o registrar el cliente.
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 px-2.5 text-xs"
+                                      onClick={() => {
+                                        checkoutForm.setValue('clienteId', 'SHOWROOM', {
+                                          shouldDirty: false,
+                                        })
+                                        toast.info('Venta mostrador seleccionada.')
+                                      }}
+                                    >
+                                      Venta mostrador
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="primary"
+                                      className="h-8 gap-1.5 px-2.5 text-xs"
+                                      onClick={openRegisterManualFromLookup}
+                                    >
+                                      <UserPlus className="h-3.5 w-3.5" />
+                                      Registrar cliente
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {isClassicCustomerPickerOpen ? (
+                        <div className="rounded-lg border border-border bg-card p-2">
+                          <Controller
+                            control={checkoutForm.control}
+                            name="clienteId"
+                            render={({ field }) => (
+                              <Select
+                                value={field.value || 'SHOWROOM'}
+                                onValueChange={field.onChange}
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue placeholder="Seleccionar cliente" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="SHOWROOM">Venta mostrador</SelectItem>
+                                  {options.customers.map((customer) => (
+                                    <SelectItem key={customer.id} value={customer.id}>
+                                      {customer.name}
+                                      {customer.documentNumber
+                                        ? ` · ${customer.documentNumber}`
+                                        : ''}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          />
+                        </div>
+                      ) : null}
                     </div>
 
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 md:col-span-1">
                       <label className="text-sm font-medium">Tipo de comprobante</label>
                       <Controller
                         control={checkoutForm.control}
@@ -1726,7 +2624,7 @@ export function VentasPage() {
                               variant="ghost"
                               size="icon"
                               onClick={() => removePayment(index)}
-                              disabled={paymentFields.length === 1}
+                              disabled={paymentFields.length === 1 && requiresFullPayment}
                               className="h-9 w-9"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1900,7 +2798,12 @@ export function VentasPage() {
       >
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Agregar ⚡ Venta rápida</DialogTitle>
+            <DialogTitle>
+              <span className="inline-flex items-center gap-2">
+                <Zap className="h-4 w-4 text-green-700" />
+                Agregar venta rápida
+              </span>
+            </DialogTitle>
             <p className="text-sm text-muted-foreground">
               Ítem ocasional sin catálogo (servicios, delivery, envoltura, etc.). No genera
               movimiento de inventario ni lotes.
@@ -2024,16 +2927,10 @@ export function VentasPage() {
                 <FieldError message={ventaRapidaForm.formState.errors.cantidad?.message} />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="venta-rapida-descuento">Descuento total (opcional)</Label>
-                <Input
-                  id="venta-rapida-descuento"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  className="h-9"
-                  {...ventaRapidaForm.register('descuentoTotal', { valueAsNumber: true })}
+                <VentaRapidaDiscountBlock
+                  form={ventaRapidaForm}
+                  cap={discountCap}
                 />
-                <FieldError message={ventaRapidaForm.formState.errors.descuentoTotal?.message} />
               </div>
             </div>
 
@@ -2062,7 +2959,7 @@ export function VentasPage() {
                 ) : (
                   <>
                     <ShoppingBasket className="h-4 w-4" />
-                    🛒 Agregar al carrito
+                    Agregar al carrito
                   </>
                 )}
               </Button>
@@ -2070,6 +2967,44 @@ export function VentasPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <CustomerFormDialog
+        open={customerRegisterOpen}
+        onOpenChange={(nextOpen) => {
+          setCustomerRegisterOpen(nextOpen)
+          if (!nextOpen) {
+            setCustomerRegisterInitialValues(null)
+          }
+        }}
+        mode="create"
+        initialValues={customerRegisterInitialValues ?? undefined}
+        accessToken={accessToken}
+        tiposDocumento={tiposDocumento}
+        tiposPersona={tiposPersona}
+        onSuccess={async (item) => {
+          const displayName =
+            item.nombreCompleto ??
+            item.razonSocial ??
+            [item.nombres, item.apellidos].filter(Boolean).join(' ') ??
+            'Cliente'
+          const shaped: SalesDashboardResponse['options']['customers'][number] = {
+            id: item.id,
+            name: displayName,
+            documentNumber: item.numeroDocumento,
+            permitirCredito: item.permitirCredito,
+            limiteCredito: item.limiteCredito,
+            saldoPendiente: item.saldoPendiente,
+          }
+          setRecentlyCreatedCustomers((prev) => [...prev, shaped])
+          checkoutForm.setValue('clienteId', item.id, { shouldDirty: false })
+          setCustomerSearchInput('')
+          setCustomerLookupResult(null)
+          setCustomerManualDocType('')
+          toast.success('Cliente registrado correctamente.', {
+            description: displayName,
+          })
+        }}
+      />
 
       <ReceiptDialog
         open={isReceiptDialogOpen}

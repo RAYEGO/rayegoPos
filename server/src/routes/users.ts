@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   createUser,
   createUserSchema,
+  listBranchesForUserModule,
   listUsersForCompany,
   removeOrDeactivateUser,
   updateUser,
@@ -15,6 +16,7 @@ const userIdParamSchema = z.object({
 
 export const usersRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async (request) => listUsersForCompany(request))
+  app.get('/branches', async (request) => listBranchesForUserModule(request))
 
   app.post('/', async (request) => {
     const body = createUserSchema.parse(request.body)

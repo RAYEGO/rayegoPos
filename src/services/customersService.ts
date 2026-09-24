@@ -1,6 +1,7 @@
 import { apiRequest } from '@/services/apiClient'
 import type {
   CreateCustomerPayload,
+  CustomerLookupResponse,
   CustomerStatusFilter,
   CustomerAccountStatementResponse,
   CustomerSalesResponse,
@@ -78,6 +79,14 @@ export const customersService = {
   getAccountStatement(accessToken: string, customerId: string) {
     return apiRequest<CustomerAccountStatementResponse>(
       `/api/customers/${customerId}/account-statement`,
+      { accessToken },
+    )
+  },
+
+  lookupDocument(accessToken: string, documento: string) {
+    const params = new URLSearchParams({ documento })
+    return apiRequest<CustomerLookupResponse>(
+      `/api/customers/lookup-document?${params.toString()}`,
       { accessToken },
     )
   },

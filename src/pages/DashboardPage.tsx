@@ -1041,7 +1041,7 @@ function CompanyDashboardContent({
                 onClick={onNavigateToVentaRapida}
               >
                 <Zap className="h-[18px] w-[18px] shrink-0 fill-white/90 text-white" />
-                <span className="truncate text-sm font-semibold">⚡ Venta rápida</span>
+                <span className="truncate text-sm font-semibold">Venta rápida</span>
               </Button>
 
               <Button

@@ -16,6 +16,20 @@ export type UsersModuleUserRecord = {
   lastAccessAt: string
   mustChangePassword: boolean
   mfaEnabled: boolean
+  empresaId: string | null
+  empresaNombre: string | null
+}
+
+export type UsersBranchRecord = {
+  id: string
+  nombre: string
+  codigo: string
+  direccion: string | null
+  telefono: string | null
+  email: string | null
+  activo: boolean
+  empresaId: string | null
+  empresaNombre: string | null
 }
 
 export type CreateUserPayload = {
@@ -54,6 +68,12 @@ export type RemoveUserResult =
 export const usersService = {
   list(accessToken: string) {
     return apiRequest<UsersModuleUserRecord[]>('/api/users', {
+      accessToken,
+    })
+  },
+
+  listBranches(accessToken: string) {
+    return apiRequest<UsersBranchRecord[]>('/api/users/branches', {
       accessToken,
     })
   },

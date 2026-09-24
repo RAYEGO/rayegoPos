@@ -95,12 +95,12 @@ export const privateRoutes: AppRouteDefinition[] = [
     path: paths.ordenesServicio,
     component: OrdenesServicioPage,
     navLabel: 'Servicio Técnico',
-    navIcon: ClipboardList,
+    navIcon: Wrench,
     navSection: 'Operaciones',
     access: {
       requiresAuth: true,
       allowedPermissions: ['ordenesServicio.read'],
-      moduleCode: 'ordenesServicio',
+      moduleCode: 'servicioTecnico',
     },
   },
   {
@@ -130,9 +130,6 @@ export const privateRoutes: AppRouteDefinition[] = [
   {
     path: paths.tecnicos,
     component: TecnicosPage,
-    navLabel: 'Técnicos',
-    navIcon: Wrench,
-    navSection: 'Operaciones',
     access: {
       requiresAuth: true,
       allowedPermissions: ['tecnicos.read'],
@@ -160,7 +157,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     access: {
       requiresAuth: true,
       allowedPermissions: ['reportes.read'],
-      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'ADMIN_SERVICIO_TECNICO', 'SUPERVISOR_ST'],
       moduleCode: 'reportes',
     },
   },
@@ -173,7 +170,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     access: {
       requiresAuth: true,
       allowedPermissions: ['configuracion.read'],
-      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'ADMIN_SERVICIO_TECNICO'],
       moduleCode: 'configuracion',
     },
   },
@@ -237,7 +234,7 @@ export const privateRoutes: AppRouteDefinition[] = [
     access: {
       requiresAuth: true,
       allowedPermissions: ['usuarios.read', 'sesiones.read', 'auditoria.read'],
-      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'],
+      allowedRoles: ['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'ADMIN_SERVICIO_TECNICO', 'SUPERVISOR_ST'],
       moduleCode: 'usuarios',
     },
   },

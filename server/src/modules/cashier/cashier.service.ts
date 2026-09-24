@@ -8,7 +8,12 @@ import {
 } from '@prisma/client'
 import type { FastifyRequest } from 'fastify'
 import { prisma } from '../../lib/prisma.js'
-import { requireBranchAuthContext, requirePermission } from '../../lib/auth.js'
+import {
+  requireBranchAuthContext,
+  requireCanAdminCajasEstructuralmente,
+  requireCanCloseCashDrawer,
+  requirePermission,
+} from '../../lib/auth.js'
 import { formatDateInTimeZone, isSameDateInTimeZone } from '../../lib/timeZoneDate.js'
 import { classifyPaymentMethod } from '../../shared/payment-catalog.js'
 
@@ -623,7 +628,7 @@ export async function openCashDrawer(
   let cashDrawer = await getDefaultCashDrawerForBranch(targetBranchId)
 
   if (!cashDrawer) {
-    // Create a default cash drawer if none exists
+    await requireCanAdminCajasEstructuralmente(request)
     cashDrawer = await prisma.caja.create({
       data: {
         sucursalId: targetBranchId,
@@ -702,13 +707,19 @@ export async function closeCashDrawer(
     observations?: string
   },
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  await requirePermission(request, 'caja.manage')
+  await requireCanCloseCashDrawer(request)
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
-  // Get the opening
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
       id: data.openingId,
       deletedAt: null,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+        empresaId: companyId,
+      },
     },
     include: {
       conciliaciones: {
@@ -730,7 +741,7 @@ export async function closeCashDrawer(
   }
 
   if (opening.usuarioId !== userId) {
-    throw createHttpError(403, 'No tienes permisos para cerrar esta caja.')
+    throw createHttpError(403, 'Esta caja solo puede ser cerrada por el usuario que la abrió.')
   }
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
@@ -905,6 +916,7 @@ export async function createCashMovement(
   request: FastifyRequest,
   data: CreateCashMovementData,
 ) {
+  await requirePermission(request, 'caja.manage')
   const userId = await getAuthenticatedUserId(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
@@ -1097,12 +1109,17 @@ export async function getCashReconciliationPreview(
   query: CashReconciliationPreviewQuery,
 ) {
   await requirePermission(request, 'caja.read')
-  const userId = await getAuthenticatedUserId(request)
+  const { branchId, companyId } = await requireBranchAuthContext(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
       id: query.openingId,
       deletedAt: null,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+        empresaId: companyId,
+      },
     },
     include: {
       caja: {
@@ -1125,10 +1142,6 @@ export async function getCashReconciliationPreview(
 
   if (!opening) {
     throw createHttpError(404, 'Apertura de caja no encontrada.')
-  }
-
-  if (opening.usuarioId !== userId) {
-    throw createHttpError(403, 'No tienes permisos para conciliar esta caja.')
   }
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
@@ -1217,12 +1230,18 @@ export async function saveCashReconciliation(
   request: FastifyRequest,
   payload: CashReconciliationPayload,
 ) {
-  const userId = await getAuthenticatedUserId(request)
+  await requirePermission(request, 'caja.manage')
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
       id: payload.openingId,
       deletedAt: null,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+        empresaId: companyId,
+      },
     },
     select: {
       id: true,
@@ -1233,10 +1252,6 @@ export async function saveCashReconciliation(
 
   if (!opening) {
     throw createHttpError(404, 'Apertura de caja no encontrada.')
-  }
-
-  if (opening.usuarioId !== userId) {
-    throw createHttpError(403, 'No tienes permisos para conciliar esta caja.')
   }
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
@@ -1321,12 +1336,18 @@ type CashCountsQuery = {
 }
 
 export async function createCashCount(request: FastifyRequest, payload: CashCountPayload) {
-  const userId = await getAuthenticatedUserId(request)
+  await requirePermission(request, 'caja.manage')
+  const { userId, branchId, companyId } = await requireBranchAuthContext(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
       id: payload.openingId,
       deletedAt: null,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+        empresaId: companyId,
+      },
     },
     select: {
       id: true,
@@ -1337,10 +1358,6 @@ export async function createCashCount(request: FastifyRequest, payload: CashCoun
 
   if (!opening) {
     throw createHttpError(404, 'Apertura de caja no encontrada.')
-  }
-
-  if (opening.usuarioId !== userId) {
-    throw createHttpError(403, 'No tienes permisos para registrar arqueo en esta caja.')
   }
 
   if (opening.estado !== EstadoAperturaCaja.ABIERTA) {
@@ -1385,25 +1402,25 @@ export async function createCashCount(request: FastifyRequest, payload: CashCoun
 
 export async function getCashCounts(request: FastifyRequest, query: CashCountsQuery) {
   await requirePermission(request, 'caja.read')
-  const userId = await getAuthenticatedUserId(request)
+  const { branchId, companyId } = await requireBranchAuthContext(request)
 
   const opening = await prisma.aperturaCaja.findFirst({
     where: {
       id: query.openingId,
       deletedAt: null,
+      caja: {
+        deletedAt: null,
+        sucursalId: branchId,
+        empresaId: companyId,
+      },
     },
     select: {
       id: true,
-      usuarioId: true,
     },
   })
 
   if (!opening) {
     throw createHttpError(404, 'Apertura de caja no encontrada.')
-  }
-
-  if (opening.usuarioId !== userId) {
-    throw createHttpError(403, 'No tienes permisos para ver arqueos de esta caja.')
   }
 
   const rows = await prisma.arqueoCaja.findMany({

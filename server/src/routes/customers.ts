@@ -7,6 +7,7 @@ import {
   getCustomerAccountStatement,
   getCustomerSales,
   getCustomersDashboard,
+  lookupDocumentByNumber,
   registerCustomerPayment,
   updateCustomer,
 } from '../modules/customers/customers.service.js'
@@ -14,6 +15,15 @@ import {
 const getCustomersQuerySchema = z.object({
   search: z.string().optional(),
   status: z.enum(['activo', 'inactivo']).optional(),
+})
+
+const lookupDocumentQuerySchema = z.object({
+  documento: z
+    .string()
+    .trim()
+    .min(5, 'Documento demasiado corto.')
+    .max(20, 'Documento demasiado largo.')
+    .regex(/^[A-Za-z0-9\-]+$/, { message: 'Documento inválido.' }),
 })
 
 const createCustomerSchema = z.object({
@@ -55,6 +65,11 @@ const registerCustomerPaymentSchema = z.object({
 })
 
 export default async function customersRoutes(app: FastifyInstance) {
+  app.get('/lookup-document', async (request) => {
+    const query = lookupDocumentQuerySchema.parse(request.query)
+    return lookupDocumentByNumber(query.documento, request)
+  })
+
   app.get('/', async (request) => {
     const query = getCustomersQuerySchema.parse(request.query)
     return getCustomersDashboard(query, request)

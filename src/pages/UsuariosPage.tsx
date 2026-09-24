@@ -4,16 +4,35 @@ import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import {
   Activity,
+  Boxes,
+  ChartNoAxesCombined,
+  Check,
+  CheckCircle2,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  ClipboardList,
+  Cog,
   Edit,
+  Eye,
+  FileText,
+  Gauge,
   MoreVertical,
+  Package,
   Search,
+  Server,
   Settings2,
   ShieldCheck,
+  ShoppingCart,
+  SquareCheckBig,
   Trash2,
+  TriangleAlert,
+  Truck,
   UserPlus,
   Users2,
+  WalletCards,
+  Wrench,
   X,
 } from 'lucide-react'
 import {
@@ -36,6 +55,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -60,12 +84,17 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { permissionDefinitions, roleDefinitions, permissionModules } from '@/config/authorization'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+import { permissionDefinitions, roleDefinitions, permissionModules, SERVICE_TECHNICAL_PERMISSION_CODES } from '@/config/authorization'
 import { useBusinessFeatures } from '@/hooks/useBusinessFeatures'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthorization } from '@/hooks/useAuthorization'
-import { branchesService } from '@/services/branchesService'
 import { auditService, type AuditAction, type AuditListEntry } from '@/services/auditService'
 import {
   usersService,
@@ -102,7 +131,7 @@ const usersFormSchema = z
     username: z.string().min(1, 'Ingresa el usuario.').max(60),
     password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.').or(z.literal('')),
     confirmPassword: z.string().min(8, 'Confirma la contraseña.').or(z.literal('')),
-    role: z.enum(['ADMIN_POS', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'CAJERO', 'ALMACEN', 'TECNICO']),
+    role: z.enum(['ADMIN_POS', 'ADMIN_EMPRESA', 'ADMIN_BOTICA', 'SUPERVISOR_BOTICA', 'CAJERO_BOTICA', 'ALMACEN_BOTICA', 'ADMIN_SERVICIO_TECNICO', 'SUPERVISOR_ST', 'CAJERO_ST', 'TECNICO_ST', 'ADMIN', 'SUPERVISOR', 'CAJERO', 'ALMACEN', 'TECNICO']),
     branchIds: z.array(z.string()),
     isActive: z.boolean(),
     mustChangePassword: z.boolean(),
@@ -156,6 +185,7 @@ export function UsuariosPage() {
   const { can, hasRole } = useAuthorization()
   const { session } = useAuth()
   const accessToken = session?.accessToken ?? ''
+  const { businessType } = useBusinessFeatures()
   const canSeePlatformUsers = hasRole('ADMIN_POS')
   const [filters, setFilters] = useState<UsersFilters>({
     search: '',
@@ -178,7 +208,7 @@ export function UsuariosPage() {
     if (!accessToken) return
     try {
       setLoadingBranches(true)
-      const response = await branchesService.list(accessToken)
+      const response = await usersService.listBranches(accessToken)
       setBranches(Array.isArray(response) ? response : [])
     } catch (error) {
       toast.error('No se pudieron cargar las sucursales.', {
@@ -222,9 +252,36 @@ export function UsuariosPage() {
   )
 
   const visibleRoleDefinitions = useMemo(() => {
-    if (canSeePlatformUsers) return roleDefinitions
-    return roleDefinitions.filter((role) => role.key !== 'ADMIN_POS')
-  }, [canSeePlatformUsers])
+    const exclude = new Set<AuthRole>([
+      'ADMIN',
+      'ADMIN_EMPRESA',
+      'SUPERVISOR',
+      'CAJERO',
+      'ALMACEN',
+      'TECNICO',
+    ])
+    const ROLES_ST = new Set<AuthRole>([
+      'ADMIN_SERVICIO_TECNICO',
+      'SUPERVISOR_ST',
+      'CAJERO_ST',
+      'TECNICO_ST',
+    ])
+    const ROLES_BOTICA = new Set<AuthRole>([
+      'ADMIN_BOTICA',
+      'SUPERVISOR_BOTICA',
+      'CAJERO_BOTICA',
+      'ALMACEN_BOTICA',
+    ])
+    const base = roleDefinitions.filter((r) => {
+      if (exclude.has(r.key)) return false
+      if (!canSeePlatformUsers && r.key === 'ADMIN_POS') return false
+      return true
+    })
+    if (canSeePlatformUsers) return base
+    if (businessType === 'SERVICIO_TECNICO') return base.filter((r) => ROLES_ST.has(r.key))
+    if (businessType === 'BOTICA') return base.filter((r) => ROLES_BOTICA.has(r.key))
+    return base
+  }, [canSeePlatformUsers, businessType])
 
   useEffect(() => {
     if (canSeePlatformUsers) return
@@ -483,7 +540,7 @@ export function UsuariosPage() {
                   La sucursal activa se define en el login. Este módulo solo administra usuarios.
                 </CardDescription>
               </div>
-              {hasRole('ADMIN') || hasRole('ADMIN_EMPRESA') ? (
+              {hasRole('ADMIN') || hasRole('ADMIN_EMPRESA') || hasRole('ADMIN_BOTICA') || hasRole('ADMIN_SERVICIO_TECNICO') ? (
                 <Badge variant="outline">Preparado para roles múltiples</Badge>
               ) : null}
             </div>
@@ -600,6 +657,19 @@ export function UsuariosPage() {
                       </div>
 
                       <div className="mt-4 grid gap-3 rounded-xl bg-muted/30 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Empresa
+                          </span>
+                          <span className="text-right text-small text-foreground">
+                            {user.empresaNombre ?? (
+                              <span className="text-xs italic text-muted-foreground/70">
+                                Plataforma
+                              </span>
+                            )}
+                          </span>
+                        </div>
+
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             Rol principal
@@ -646,6 +716,7 @@ export function UsuariosPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Usuario</TableHead>
+                    <TableHead>Empresa</TableHead>
                     <TableHead>Rol principal</TableHead>
                     <TableHead>Sucursales</TableHead>
                     <TableHead>Estado</TableHead>
@@ -656,7 +727,7 @@ export function UsuariosPage() {
                 <TableBody>
                   {filteredUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                      <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                         No hay usuarios con los filtros actuales.
                       </TableCell>
                     </TableRow>
@@ -674,6 +745,13 @@ export function UsuariosPage() {
                               <p className="font-medium text-foreground">{getUserFullName(user)}</p>
                               <p className="text-small text-muted-foreground">{user.email}</p>
                             </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {user.empresaNombre ?? (
+                              <span className="text-xs italic text-muted-foreground/70">
+                                Plataforma
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap items-center gap-2">
@@ -1158,6 +1236,7 @@ function RolesMatrixSection({
   const [isSaving, setIsSaving] = useState(false)
   const [serverDetail, setServerDetail] = useState<RolePermissionsDetailData | null>(null)
   const [pendingPermissions, setPendingPermissions] = useState<Set<AuthPermission> | null>(null)
+  const [hasSyncedCatalog, setHasSyncedCatalog] = useState(false)
 
   useEffect(() => {
     if (!visibleRoleDefinitions.some((r) => r.key === selectedRole)) {
@@ -1165,8 +1244,21 @@ function RolesMatrixSection({
     }
   }, [selectedRole, visibleRoleDefinitions])
 
+  const currentRole = useMemo(
+    () => roleDefinitions.find((r) => r.key === selectedRole) ?? visibleRoleDefinitions[0],
+    [selectedRole, visibleRoleDefinitions],
+  )
+
+  const isDirty = useMemo(() => {
+    if (!serverDetail || !pendingPermissions) return false
+    const base = new Set(serverDetail.permisos)
+    if (base.size !== pendingPermissions.size) return true
+    for (const p of base) if (!pendingPermissions.has(p)) return true
+    return false
+  }, [serverDetail, pendingPermissions])
+
   const loadRoleDetail = useCallback(
-    async (roleCodigo: AuthRole, opts?: { force?: boolean }) => {
+    async (roleCodigo: AuthRole, _opts?: { force?: boolean }) => {
       if (!accessToken) return
       const fallback = roleDefinitions.find((r) => r.key === roleCodigo) ?? visibleRoleDefinitions[0]
       if (!fallback) return
@@ -1174,9 +1266,8 @@ function RolesMatrixSection({
       try {
         const data = await rolesService.getRolePermissions(accessToken, roleCodigo)
         setServerDetail(data)
-        if (!pendingPermissions || opts?.force) {
-          setPendingPermissions(new Set(data.permisos as AuthPermission[]))
-        }
+        setPendingPermissions(new Set(data.permisos as AuthPermission[]))
+        setHasSyncedCatalog(true)
       } catch (error) {
         console.warn('[Roles] Error cargando permisos desde BD, usando local.', error)
         const fallbackPermisos =
@@ -1200,51 +1291,31 @@ function RolesMatrixSection({
           })),
         }
         setServerDetail(fallbackData)
-        if (!pendingPermissions || opts?.force) {
-          setPendingPermissions(new Set(fallbackPermisos))
-        }
+        setPendingPermissions(new Set(fallbackPermisos))
+        setHasSyncedCatalog(true)
       } finally {
         setIsLoadingDetail(false)
       }
     },
-    [accessToken, pendingPermissions, visibleRoleDefinitions],
+    [accessToken, visibleRoleDefinitions],
   )
 
   useEffect(() => {
+    const roleMatchesCurrent = serverDetail && serverDetail.codigo === selectedRole
+    if (roleMatchesCurrent && pendingPermissions && !isLoadingDetail && !isDirty) return
     void loadRoleDetail(selectedRole)
-  }, [selectedRole, loadRoleDetail])
-
-  const currentRole = useMemo(
-    () => roleDefinitions.find((r) => r.key === selectedRole) ?? visibleRoleDefinitions[0],
-    [selectedRole, visibleRoleDefinitions],
-  )
+  }, [selectedRole, loadRoleDetail, pendingPermissions, isLoadingDetail, isDirty, serverDetail])
 
   const modulesGroupedPermissions = useMemo(() => {
     const allowedModuleLabels = new Set<string>()
     for (const perm of permissionDefinitions) {
       if (!perm.module) continue
-      const isRt =
-        perm.key.startsWith('ordenesServicio') ||
-        perm.key.startsWith('tecnicos') ||
-        perm.key.startsWith('equiposCliente') ||
-        perm.key.startsWith('presupuestosOrdenServicio') ||
-        perm.key.startsWith('pagosOrdenServicio') ||
-        perm.key.startsWith('consumoInventarioRT') ||
-        perm.key.startsWith('garantiasOrdenServicio')
-      if (isRt && !isServicioTecnicoEnabled) continue
+      if (SERVICE_TECHNICAL_PERMISSION_CODES.has(perm.key as AuthPermission) && !isServicioTecnicoEnabled) continue
       if (perm.module === 'Administración POS' && !canSeePlatformUsers) continue
       allowedModuleLabels.add(perm.module)
     }
     return permissionModules.filter((mod) => allowedModuleLabels.has(mod))
   }, [isServicioTecnicoEnabled, canSeePlatformUsers])
-
-  const isDirty = useMemo(() => {
-    if (!serverDetail || !pendingPermissions) return false
-    const base = new Set(serverDetail.permisos)
-    if (base.size !== pendingPermissions.size) return true
-    for (const p of base) if (!pendingPermissions.has(p)) return true
-    return false
-  }, [serverDetail, pendingPermissions])
 
   if (!currentRole) return null
 
@@ -1264,13 +1335,19 @@ function RolesMatrixSection({
               base.add(readKey)
             }
           }
+          if (permissionKey.endsWith('.write')) {
+            const readKey = permissionKey.replace(/\.write$/, '.read') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === readKey)) {
+              base.add(readKey)
+            }
+          }
         } else {
           base.delete(permissionKey)
           if (permissionKey.endsWith('.read')) {
             const manageKey = permissionKey.replace(/\.read$/, '.manage') as AuthPermission
-            if (permissionDefinitions.some((p) => p.key === manageKey)) {
-              base.delete(manageKey)
-            }
+            const writeKey = permissionKey.replace(/\.read$/, '.write') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === manageKey)) base.delete(manageKey)
+            if (permissionDefinitions.some((p) => p.key === writeKey)) base.delete(writeKey)
           }
         }
         return base
@@ -1287,7 +1364,10 @@ function RolesMatrixSection({
     }
     setIsSaving(true)
     try {
-      const permisos = Array.from(pendingPermissions) as AuthPermission[]
+      const codigosBackend = new Set(serverDetail.permisosDisponibles.map((p) => p.codigo))
+      const permisos = (Array.from(pendingPermissions) as AuthPermission[]).filter((p) =>
+        codigosBackend.has(p),
+      )
       const result = await rolesService.updateRolePermissions(accessToken, serverDetail.codigo, permisos)
       await loadRoleDetail(serverDetail.codigo, { force: true })
       toast.success(
@@ -1310,7 +1390,232 @@ function RolesMatrixSection({
     ? 'Vista de la matriz de autorizaciones por módulo. Contacta a un administrador para realizar cambios.'
     : isDirty
       ? 'Tienes cambios pendientes. Presiona Guardar cambios para confirmarlos.'
-      : 'Matriz de autorizaciones por módulo. Los cambios se reflejan inmediatamente para los usuarios afectados.'
+      : 'Configura qué acciones puede realizar cada rol en los módulos del sistema.'
+
+  type ModuleVisualConfig = { icon: typeof Eye; description: string; accent: string }
+  const moduleVisual: Record<string, ModuleVisualConfig> = {
+    General: {
+      icon: Gauge,
+      description: 'Panel principal con los indicadores y accesos rápidos del negocio.',
+      accent: 'bg-primary/10 text-primary',
+    },
+    Ventas: {
+      icon: ShoppingCart,
+      description: 'Gestión de ventas, tickets, caja chica, cobros y venta rápida.',
+      accent: 'bg-[#52B788]/15 text-[#2b8a62]',
+    },
+    Productos: {
+      icon: Package,
+      description: 'Catálogo de productos, precios, lotes, activaciones y duplicados.',
+      accent: 'bg-[#3B82F6]/15 text-[#2563EB]',
+    },
+    Compras: {
+      icon: ClipboardList,
+      description: 'Órdenes de compra, recepción de mercadería y proveedores.',
+      accent: 'bg-[#8B5CF6]/15 text-[#7C3AED]',
+    },
+    Inventario: {
+      icon: Boxes,
+      description: 'Stock por sucursal, movimientos, ajustes y conteo cíclico.',
+      accent: 'bg-[#F59E0B]/15 text-[#B45309]',
+    },
+    Clientes: {
+      icon: Users2,
+      description: 'Padrón de clientes, documentos, contactos y crédito disponible.',
+      accent: 'bg-[#06B6D4]/15 text-[#0891B2]',
+    },
+    Proveedores: {
+      icon: Truck,
+      description: 'Padrón de proveedores, condiciones comerciales y contactos.',
+      accent: 'bg-[#F97316]/15 text-[#C2410C]',
+    },
+    Caja: {
+      icon: WalletCards,
+      description: 'Apertura, cierre, arqueos, movimientos y sesiones de caja.',
+      accent: 'bg-[#10B981]/15 text-[#047857]',
+    },
+    Seguridad: {
+      icon: ShieldCheck,
+      description: 'Usuarios, roles y permisos, sesiones y actividad del sistema.',
+      accent: 'bg-[#6366F1]/15 text-[#4F46E5]',
+    },
+    Reportes: {
+      icon: ChartNoAxesCombined,
+      description: 'Indicadores de ventas, inventario, compras y desempeño.',
+      accent: 'bg-[#EC4899]/15 text-[#BE185D]',
+    },
+    Configuración: {
+      icon: Cog,
+      description: 'Parámetros generales del sistema y preferencias de la empresa.',
+      accent: 'bg-[#64748B]/15 text-[#475569]',
+    },
+    'Administración POS': {
+      icon: Server,
+      description: 'Plataforma: tipos de empresa, empresas y administradores de empresa.',
+      accent: 'bg-[#1A4B6E]/10 text-[#1A4B6E]',
+    },
+    'Servicio Técnico': {
+      icon: Wrench,
+      description: 'Órdenes de servicio, técnicos, equipos cliente y garantías.',
+      accent: 'bg-[#52B788]/12 text-[#2b8a62]',
+    },
+  }
+
+  type PermissionVisualConfig = {
+    label: string
+    key: 'read' | 'manage' | 'revoke' | 'write' | 'cambioEstado'
+    badgeClass: string
+  }
+  const actionVisualForSuffix = (suffix: string): PermissionVisualConfig => {
+    const base: Record<string, PermissionVisualConfig> = {
+      read: {
+        label: 'Ver',
+        key: 'read',
+        badgeClass: 'bg-[#1A4B6E]/10 text-[#1A4B6E]',
+      },
+      manage: {
+        label: 'Crear · Editar · Eliminar',
+        key: 'manage',
+        badgeClass: 'bg-[#52B788]/15 text-[#2b8a62]',
+      },
+      revoke: {
+        label: 'Revocar',
+        key: 'revoke',
+        badgeClass: 'bg-red-100 text-red-700',
+      },
+      write: {
+        label: 'Crear · Editar',
+        key: 'write',
+        badgeClass: 'bg-[#52B788]/15 text-[#2b8a62]',
+      },
+      cambioEstado: {
+        label: 'Cambiar estado',
+        key: 'cambioEstado',
+        badgeClass: 'bg-[#F59E0B]/15 text-[#B45309]',
+      },
+    }
+    return base[suffix] ?? { label: suffix, key: 'manage', badgeClass: 'bg-slate-100 text-slate-700' }
+  }
+
+  const suffixFromPermissionKey = (key: string): string => {
+    if (key.endsWith('.read')) return 'read'
+    if (key.endsWith('.manage')) return 'manage'
+    if (key.endsWith('.revoke')) return 'revoke'
+    if (key.endsWith('.cambioEstado')) return 'cambioEstado'
+    if (key.endsWith('.write')) return 'write'
+    return 'manage'
+  }
+
+  const allSelectableModulePermissionKeys = useMemo(() => {
+    const codigosBackend = new Set(
+      serverDetail?.permisosDisponibles?.map((p) => p.codigo) ?? [],
+    )
+    const out: AuthPermission[] = []
+    for (const modLabel of modulesGroupedPermissions) {
+      for (const perm of permissionDefinitions) {
+        if (perm.module !== modLabel) continue
+        if (SERVICE_TECHNICAL_PERMISSION_CODES.has(perm.key as AuthPermission) && !isServicioTecnicoEnabled) continue
+        if (perm.module === 'Administración POS' && !canSeePlatformUsers) continue
+        if (serverDetail && !codigosBackend.has(perm.key)) continue
+        out.push(perm.key as AuthPermission)
+      }
+    }
+    return out
+  }, [modulesGroupedPermissions, isServicioTecnicoEnabled, canSeePlatformUsers, serverDetail])
+
+  const { permisoKeysMissingInBackend, permisoKeysMissingInFrontend, moduleLabelsWithMissingBackend } = useMemo(() => {
+    const codigosBackend = new Set(
+      serverDetail?.permisosDisponibles?.map((p) => p.codigo) ?? [],
+    )
+    const codigosFrontend = new Set(permissionDefinitions.map((p) => p.key))
+    const missingBackend: AuthPermission[] = permissionDefinitions
+      .map((p) => p.key as AuthPermission)
+      .filter((k) => !codigosBackend.has(k))
+    const missingFrontend: string[] = serverDetail?.permisosDisponibles
+      ?.map((p) => p.codigo)
+      .filter((k) => !codigosFrontend.has(k as any)) ?? []
+    const modulesMissing = Array.from(
+      new Set(
+        permissionDefinitions
+          .filter((p) => missingBackend.includes(p.key as AuthPermission))
+          .map((p) => p.module),
+      ),
+    )
+    return {
+      permisoKeysMissingInBackend: missingBackend,
+      permisoKeysMissingInFrontend: missingFrontend,
+      moduleLabelsWithMissingBackend: modulesMissing,
+    }
+  }, [serverDetail])
+
+  const selectedCount = allSelectableModulePermissionKeys.filter((k) => rolePermissions.has(k)).length
+  const selectedPct =
+    allSelectableModulePermissionKeys.length > 0
+      ? Math.round((selectedCount / allSelectableModulePermissionKeys.length) * 100)
+      : 0
+
+  const toggleAllVisible = (next: boolean) => {
+    if (!canManage) return
+    setPendingPermissions((prev) => {
+      const base = prev ? new Set(prev) : new Set<AuthPermission>(currentRole.permissions)
+      for (const k of allSelectableModulePermissionKeys) {
+        if (next) {
+          base.add(k)
+          if (k.endsWith('.manage')) {
+            const readKey = k.replace(/\.manage$/, '.read') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === readKey)) base.add(readKey)
+          }
+          if (k.endsWith('.write')) {
+            const readKey = k.replace(/\.write$/, '.read') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === readKey)) base.add(readKey)
+          }
+        } else {
+          base.delete(k)
+        }
+      }
+      return base
+    })
+  }
+
+  const toggleModuleAll = (modLabel: string, next: boolean) => {
+    if (!canManage) return
+    const modPerms = permissionDefinitions.filter((p) => p.module === modLabel).map((p) => p.key as AuthPermission)
+    setPendingPermissions((prev) => {
+      const base = prev ? new Set(prev) : new Set<AuthPermission>(currentRole.permissions)
+      for (const k of modPerms) {
+        const isRt =
+          k.startsWith('ordenesServicio') ||
+          k.startsWith('tecnicos') ||
+          k.startsWith('equiposCliente') ||
+          k.startsWith('presupuestosOrdenServicio') ||
+          k.startsWith('pagosOrdenServicio') ||
+          k.startsWith('consumoInventarioRT') ||
+          k.startsWith('garantiasOrdenServicio')
+        if (isRt && !isServicioTecnicoEnabled) continue
+        if ((k.startsWith('tipos_empresa') || k.startsWith('empresas') || k.startsWith('administradores')) && !canSeePlatformUsers) continue
+        if (next) {
+          base.add(k)
+          if (k.endsWith('.manage')) {
+            const readKey = k.replace(/\.manage$/, '.read') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === readKey)) base.add(readKey)
+          }
+          if (k.endsWith('.write')) {
+            const readKey = k.replace(/\.write$/, '.read') as AuthPermission
+            if (permissionDefinitions.some((p) => p.key === readKey)) base.add(readKey)
+          }
+        } else {
+          base.delete(k)
+        }
+      }
+      return base
+    })
+  }
+
+  const disabledForPlatformOnly = serverDetail?.isPlatformOnly && !canSeePlatformUsers
+  const checkDisabled = !canManage || isSaving || isLoadingDetail || disabledForPlatformOnly
+  const allSelectedCurrently =
+    allSelectableModulePermissionKeys.length > 0 &&
+    allSelectableModulePermissionKeys.every((k) => rolePermissions.has(k))
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -1319,11 +1624,33 @@ function RolesMatrixSection({
           <div className="space-y-1">
             <h1 className="text-xl font-bold text-foreground">Roles y permisos</h1>
             <p className="text-small text-muted-foreground">{subtitle}</p>
-            {isDirty && (
-              <Badge variant="warning" className="mt-2">
-                Cambios pendientes
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {isDirty && (
+                <Badge variant="warning">
+                  <CheckSquare className="mr-1 h-3 w-3" /> Cambios pendientes
+                </Badge>
+              )}
+              <Badge variant="outline" className="h-6">
+                <span className="text-xs text-muted-foreground">Asignados</span>
+                <span className="mx-1 font-semibold text-foreground">
+                  {selectedCount}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  / {allSelectableModulePermissionKeys.length}
+                </span>
               </Badge>
-            )}
+              <Badge variant="outline" className="h-6 gap-2">
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#52B788]" />
+                  Permiso asignado
+                </span>
+                <span className="mx-1 text-muted-foreground/30">·</span>
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Circle className="h-3 w-3 text-muted-foreground" strokeWidth={1.5} />
+                  Permiso no asignado
+                </span>
+              </Badge>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {canManage && (
@@ -1370,6 +1697,55 @@ function RolesMatrixSection({
           </div>
         </div>
 
+        {!hasSyncedCatalog && (
+          <div className="flex items-center gap-3 rounded-lg border border-muted bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <div className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-primary" />
+            <span>Cargando permisos…</span>
+          </div>
+        )}
+        {hasSyncedCatalog &&
+          (permisoKeysMissingInBackend.length > 0 || permisoKeysMissingInFrontend.length > 0) && (
+          <Alert variant="warning">
+            <div className="flex items-start gap-3">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <div className="space-y-1">
+                <AlertTitle>Inconsistencia detectada entre permisos de código y base de datos</AlertTitle>
+                <AlertDescription>
+                  {permisoKeysMissingInBackend.length > 0 && (
+                    <div>
+                      <p className="text-xs">
+                        Hay <strong>{permisoKeysMissingInBackend.length} permiso(s)</strong> definidos en el código frontend que aún no existen en la tabla <code className="rounded bg-background px-1">permiso</code> del backend. Por seguridad, estos permisos NO se muestran ni se envían al guardar.
+                      </p>
+                      <p className="mt-1 text-[11px] text-muted-foreground break-words">
+                        Códigos faltantes en BD:{' '}
+                        <span className="font-mono">{permisoKeysMissingInBackend.slice(0, 10).join(', ')}</span>
+                        {permisoKeysMissingInBackend.length > 10 ? ` (+${permisoKeysMissingInBackend.length - 10} más)` : ''}
+                      </p>
+                      {moduleLabelsWithMissingBackend.length > 0 && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Módulos con permisos faltantes: {moduleLabelsWithMissingBackend.join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {permisoKeysMissingInFrontend.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-xs">
+                        Existen <strong>{permisoKeysMissingInFrontend.length} permiso(s)</strong> en la tabla de BD que no están declarados en <code className="rounded bg-background px-1">permissionDefinitions</code>. Estos permisos no se renderizarán en la matriz actual.
+                      </p>
+                      <p className="mt-1 text-[11px] text-muted-foreground break-words">
+                        Códigos sobrantes en BD:{' '}
+                        <span className="font-mono">{permisoKeysMissingInFrontend.slice(0, 10).join(', ')}</span>
+                        {permisoKeysMissingInFrontend.length > 10 ? ` (+${permisoKeysMissingInFrontend.length - 10} más)` : ''}
+                      </p>
+                    </div>
+                  )}
+                </AlertDescription>
+              </div>
+            </div>
+          </Alert>
+        )}
+
         <Card>
           <CardHeader className="gap-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -1379,11 +1755,6 @@ function RolesMatrixSection({
                   <p className="text-sm font-semibold text-foreground">{currentRole.label}</p>
                   <p className="text-xs text-muted-foreground">{currentRole.description}</p>
                 </div>
-                {serverDetail && (
-                  <Badge variant="outline">
-                    {rolePermissions.size} permisos asignados
-                  </Badge>
-                )}
               </div>
               <div className="w-full md:w-72">
                 <Select
@@ -1404,87 +1775,228 @@ function RolesMatrixSection({
                 </Select>
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[200px]">Módulo</TableHead>
-                    <TableHead className="w-[150px] text-center">
-                      Ver
-                      <div className="mt-0.5 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
-                        (permiso read)
-                      </div>
-                    </TableHead>
-                    <TableHead className="w-[180px] text-center">
-                      Gestionar
-                      <div className="mt-0.5 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
-                        (crear · editar · eliminar · anular)
-                      </div>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {modulesGroupedPermissions.map((moduleLabel) => {
-                    const permRead = permissionDefinitions.find(
-                      (p) => p.module === moduleLabel && p.key.endsWith('.read'),
-                    )
-                    const permManage = permissionDefinitions.find(
-                      (p) => p.module === moduleLabel && p.key.endsWith('.manage'),
-                    )
-                    const disabledForPlatformOnly =
-                      serverDetail?.isPlatformOnly && !canSeePlatformUsers
-                    const checkDisabled = !canManage || isSaving || disabledForPlatformOnly
 
-                    return (
-                      <TableRow key={moduleLabel}>
-                        <TableCell className="font-medium text-foreground">{moduleLabel}</TableCell>
-                        <TableCell className="text-center">
-                          {permRead ? (
-                            <Checkbox
-                              disabled={checkDisabled}
-                              checked={rolePermissions.has(permRead.key)}
-                              onCheckedChange={(value) =>
-                                togglePermission(permRead.key as AuthPermission, Boolean(value))
-                              }
-                            />
-                          ) : (
-                            <Badge variant="outline" className="text-[10px]">
-                              N/A
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {permManage ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="inline-flex items-center justify-center">
-                                  <Checkbox
-                                    disabled={checkDisabled}
-                                    checked={rolePermissions.has(permManage.key)}
-                                    onCheckedChange={(value) =>
-                                      togglePermission(permManage.key as AuthPermission, Boolean(value))
-                                    }
-                                  />
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="right" className="max-w-xs text-xs">
-                                {permManage.description}
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px]">
-                              sin manage
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+            <div className="rounded-xl border bg-muted/30 p-3 sm:p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      Resumen de permisos asignados
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="info" className="h-6">
+                        {selectedPct}% habilitado
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-[#1A4B6E] to-[#52B788] transition-all duration-300"
+                      style={{ width: `${selectedPct}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {selectedCount === 0
+                      ? 'Ningún permiso habilitado. Habilita al menos Ver para cada módulo que corresponda.'
+                      : allSelectedCurrently
+                        ? 'Todos los permisos visibles se encuentran habilitados para este rol.'
+                        : `Se han asignado ${selectedCount} permisos de ${allSelectableModulePermissionKeys.length} disponibles en los módulos visibles.`}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 md:w-auto md:min-w-[240px]">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={checkDisabled || allSelectedCurrently}
+                    onClick={() => toggleAllVisible(true)}
+                    className="h-9"
+                  >
+                    <CheckSquare className="h-4 w-4" /> Seleccionar todo
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={checkDisabled || selectedCount === 0}
+                    onClick={() => toggleAllVisible(false)}
+                    className="h-9"
+                  >
+                    <X className="h-4 w-4" /> Quitar todos
+                  </Button>
+                </div>
+              </div>
             </div>
+          </CardHeader>
+
+          <CardContent className="space-y-3 sm:space-y-4">
+            {isLoadingDetail ? (
+              <div className="space-y-3">
+                <div className="h-28 animate-pulse rounded-xl border bg-muted/30" />
+                <div className="h-28 animate-pulse rounded-xl border bg-muted/30" />
+                <div className="h-28 animate-pulse rounded-xl border bg-muted/30" />
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {modulesGroupedPermissions.map((moduleLabel) => {
+                  const permsInModule = permissionDefinitions.filter((p) => p.module === moduleLabel)
+                  const moduleSelectedCount = permsInModule.filter((p) =>
+                    rolePermissions.has(p.key as AuthPermission),
+                  ).length
+                  const moduleAllSelected =
+                    permsInModule.length > 0 && moduleSelectedCount === permsInModule.length
+                  const visual =
+                    moduleVisual[moduleLabel] ??
+                    ({ icon: FileText, description: 'Módulo configurable del sistema.', accent: 'bg-slate-100 text-slate-700' } as const)
+                  const Icon = visual.icon
+                  return (
+                    <Card
+                      key={moduleLabel}
+                      className={cn(
+                        'transition-all duration-150',
+                        moduleAllSelected
+                          ? 'border-[#52B788]/40 ring-1 ring-[#52B788]/20 shadow-softSm'
+                          : moduleSelectedCount > 0
+                            ? 'border-primary/20 shadow-softSm'
+                            : 'border-border/60',
+                      )}
+                    >
+                      <CardHeader className="space-y-3 px-4 py-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-3">
+                            <div
+                              className={cn(
+                                'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                                visual.accent,
+                              )}
+                            >
+                              <Icon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-semibold leading-tight text-foreground">
+                                  {moduleLabel}
+                                </h3>
+                                <Badge variant="outline" className="h-5">
+                                  {moduleSelectedCount}/{permsInModule.length}
+                                </Badge>
+                              </div>
+                              <p className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                                {visual.description}
+                              </p>
+                            </div>
+                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex shrink-0">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2.5 text-[11px]"
+                                  disabled={checkDisabled || moduleAllSelected}
+                                  onClick={() => toggleModuleAll(moduleLabel, true)}
+                                >
+                                  <SquareCheckBig className="h-3.5 w-3.5" /> Todo
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-[11px]">
+                              Habilitar todos los permisos de este módulo
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-2 px-4 pb-4 pt-0">
+                        {permsInModule.length === 0 ? (
+                          <p className="px-2 py-3 text-xs text-muted-foreground">
+                            No hay permisos configurados para este módulo.
+                          </p>
+                        ) : (
+                          permsInModule.map((perm) => {
+                            const suffix = suffixFromPermissionKey(perm.key)
+                            const visualAction = actionVisualForSuffix(suffix)
+                            const isActive = rolePermissions.has(perm.key as AuthPermission)
+                            return (
+                              <Tooltip key={perm.key}>
+                                <TooltipTrigger asChild>
+                                  <div
+                                    className={cn(
+                                      'group flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition-all duration-150 shadow-sm',
+                                      checkDisabled
+                                        ? 'cursor-default opacity-90'
+                                        : 'hover:shadow-md hover:-translate-y-0.5',
+                                      isActive
+                                        ? 'border-[#52B788]/50 bg-[#52B788]/[0.08] shadow-[0_0_0_3px_rgba(82,183,136,0.08)]'
+                                        : 'border-border/70 bg-card hover:border-primary/30 hover:bg-muted/30',
+                                    )}
+                                    onClick={() => {
+                                      if (checkDisabled) return
+                                      togglePermission(perm.key as AuthPermission, !isActive)
+                                    }}
+                                  >
+                                    <div className="min-w-0 flex flex-1 items-center gap-3">
+                                      <div
+                                        className={cn(
+                                          'relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 transition-all duration-150',
+                                          isActive
+                                            ? 'border-[#52B788] bg-[#52B788] text-white'
+                                            : 'border-muted-foreground/35 bg-background text-transparent group-hover:border-primary/50',
+                                        )}
+                                        aria-hidden
+                                      >
+                                        <Check className="h-4 w-4" strokeWidth={3} />
+                                      </div>
+                                      <div className="min-w-0 flex-1 space-y-0.5">
+                                        <p
+                                          className={cn(
+                                            'truncate text-[13px] font-semibold leading-tight',
+                                            isActive ? 'text-foreground' : 'text-muted-foreground',
+                                          )}
+                                        >
+                                          {visualAction.label}
+                                        </p>
+                                        <p className="line-clamp-1 text-[11px] text-muted-foreground/90">
+                                          {perm.description}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="shrink-0">
+                                      <div
+                                        className={cn(
+                                          'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold uppercase tracking-wide',
+                                          isActive
+                                            ? visualAction.badgeClass
+                                            : 'bg-muted text-muted-foreground',
+                                        )}
+                                      >
+                                        {suffix === 'read' ? (
+                                          <Eye className="h-3.5 w-3.5" />
+                                        ) : suffix === 'manage' ? (
+                                          <Edit className="h-3.5 w-3.5" />
+                                        ) : suffix === 'revoke' ? (
+                                          <X className="h-3.5 w-3.5" />
+                                        ) : (
+                                          <ShieldCheck className="h-3.5 w-3.5" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-xs text-[11px]">
+                                  <p className="font-semibold">{perm.label}</p>
+                                  <p className="mt-0.5">{perm.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )
+                          })
+                        )}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

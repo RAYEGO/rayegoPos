@@ -1,18 +1,85 @@
 export type UsoServicioTecnico = 'SOLO_VENTA' | 'SERVICIO_TECNICO' | 'AMBOS'
 export type EstadoOrdenServicio =
+  | 'RECEPCIONADO'
+  | 'EN_DIAGNOSTICO'
+  | 'PRESUPUESTADO'
+  | 'ESPERANDO_AUTORIZACION'
+  | 'EN_REPARACION'
+  | 'TRABAJO_TERMINADO'
+  | 'LISTO_PARA_COBRO'
+  | 'PAGADO'
+  | 'ENTREGADO'
   | 'RECIBIDO'
   | 'DIAGNOSTICO'
   | 'PRESUPUESTO'
   | 'ESPERANDO_APROBACION'
   | 'APROBADO'
-  | 'EN_REPARACION'
   | 'EN_PRUEBAS'
   | 'LISTO_PARA_ENTREGA'
   | 'PENDIENTE_RETIRO'
-  | 'ENTREGADO'
   | 'RECHAZADO'
   | 'CANCELADO'
   | 'EN_GARANTIA'
+
+export const ESTADO_ORDEN_LABEL: Record<EstadoOrdenServicio, string> = {
+  RECEPCIONADO: 'Recepcionado',
+  EN_DIAGNOSTICO: 'En diagnóstico',
+  PRESUPUESTADO: 'Presupuestado',
+  ESPERANDO_AUTORIZACION: 'Esperando autorización',
+  EN_REPARACION: 'En reparación',
+  TRABAJO_TERMINADO: 'Trabajo terminado',
+  LISTO_PARA_COBRO: 'Listo para cobro',
+  PAGADO: 'Pagado',
+  ENTREGADO: 'Entregado',
+  RECIBIDO: 'Recibido (legacy)',
+  DIAGNOSTICO: 'Diagnóstico (legacy)',
+  PRESUPUESTO: 'Presupuesto (legacy)',
+  ESPERANDO_APROBACION: 'Esperando aprobación (legacy)',
+  APROBADO: 'Aprobado (legacy)',
+  EN_PRUEBAS: 'En pruebas (legacy)',
+  LISTO_PARA_ENTREGA: 'Listo para entrega (legacy)',
+  PENDIENTE_RETIRO: 'Pendiente retiro (legacy)',
+  RECHAZADO: 'Rechazado',
+  CANCELADO: 'Cancelado',
+  EN_GARANTIA: 'En garantía',
+}
+
+export type BadgeVariant =
+  | 'default'
+  | 'success'
+  | 'warning'
+  | 'info'
+  | 'destructive'
+  | 'outline'
+
+export function estadoOrdenLabel(e: EstadoOrdenServicio | string): string {
+  return ESTADO_ORDEN_LABEL[e as EstadoOrdenServicio] || String(e)
+}
+
+export function estadoOrdenBadgeVariant(e: EstadoOrdenServicio | string): BadgeVariant {
+  switch (e) {
+    case 'PAGADO':
+    case 'ENTREGADO':
+      return 'success'
+    case 'CANCELADO':
+    case 'RECHAZADO':
+      return 'destructive'
+    case 'ESPERANDO_AUTORIZACION':
+    case 'LISTO_PARA_COBRO':
+    case 'EN_REPARACION':
+    case 'EN_DIAGNOSTICO':
+    case 'TRABAJO_TERMINADO':
+      return 'warning'
+    case 'RECEPCIONADO':
+    case 'PRESUPUESTADO':
+      return 'info'
+    case 'EN_GARANTIA':
+      return 'outline'
+    default:
+      return 'default'
+  }
+}
+
 export type TipoItemOrdenServicio = 'REPUESTO' | 'MANO_OBRA' | 'ACCESORIO_ENTREGADO' | 'SERVICIO_ADICIONAL'
 export type EstadoFisicoEquipo = 'NUEVO' | 'USADO' | 'REPARADO' | 'DE' | 'ROTO' | 'DE_PRESTAMO'
 export type EspecialidadTecnico = 'Celular' | 'PC' | 'Laptop' | 'Impresoras' | 'Audio'

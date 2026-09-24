@@ -24,8 +24,7 @@ const MODULOS_EXCLUSIVOS_BOTICA: readonly string[] = [
 ]
 
 const MODULOS_EXCLUSIVOS_RAYEGOTECH: readonly string[] = [
-  'ordenesServicio',
-  'tecnicos',
+  'servicioTecnico',
 ]
 
 const MODULOS_EXCLUSIVOS_PLATAFORMA: readonly string[] = [
@@ -50,14 +49,12 @@ const BOTICA_PRIORITY: readonly string[] = [
 
 const RAYEGOTECH_PRIORITY: readonly string[] = [
   'dashboard',
-  'ordenesServicio',
+  'servicioTecnico',
   'clientes',
-  'inventario',
   'caja',
   'reportes',
-  'configuracion',
   'usuarios',
-  'tecnicos',
+  'configuracion',
 ]
 
 const PLATAFORMA_PRIORITY: readonly string[] = [
@@ -69,55 +66,6 @@ const PLATAFORMA_PRIORITY: readonly string[] = [
   'reportes',
   'configuracion',
 ]
-
-const BOTICA_PRINCIPALES_COD: readonly string[] = [
-  'dashboard',
-  'ventas',
-  'productos',
-  'compras',
-  'inventario',
-  'caja',
-]
-
-const RAYEGOTECH_PRINCIPALES_COD: readonly string[] = [
-  'dashboard',
-  'ordenesServicio',
-  'clientes',
-  'inventario',
-  'caja',
-  'reportes',
-]
-
-const PLATAFORMA_PRINCIPALES_COD: readonly string[] = [
-  'dashboard',
-  'empresas',
-  'administradores',
-  'tipos_empresa',
-  'usuarios',
-  'reportes',
-  'configuracion',
-]
-
-function getPrincipalesForContext(ctx: CompanyContext): readonly string[] {
-  if (ctx === 'PLATAFORMA') return PLATAFORMA_PRINCIPALES_COD
-  if (ctx === 'RAYEGOTECH') return RAYEGOTECH_PRINCIPALES_COD
-  return BOTICA_PRINCIPALES_COD
-}
-
-export function splitNavItemsByTactical(
-  items: NavItem[],
-  session: AuthSession | null,
-): { mainItems: NavItem[]; moreItems: NavItem[] } {
-  const ctx = detectCompanyContext(session)
-  const principales = new Set(getPrincipalesForContext(ctx))
-  const mainItems: NavItem[] = []
-  const moreItems: NavItem[] = []
-  for (const it of items) {
-    if (!it.moduleCode || principales.has(it.moduleCode)) mainItems.push(it)
-    else moreItems.push(it)
-  }
-  return { mainItems, moreItems }
-}
 
 export type NavItem = {
   label: string
@@ -141,14 +89,19 @@ function detectCompanyContext(session: AuthSession | null): CompanyContext {
 function getModulosPermitidosPorContexto(session: AuthSession | null): Set<string> {
   if (!session) return new Set()
   const ctx = detectCompanyContext(session)
-  const modules = new Set<string>(MODULOS_COMPARTIDOS)
   if (ctx === 'PLATAFORMA') {
+    const modules = new Set<string>(MODULOS_COMPARTIDOS)
     MODULOS_EXCLUSIVOS_PLATAFORMA.forEach((m) => modules.add(m))
-  } else if (ctx === 'BOTICA') {
-    MODULOS_EXCLUSIVOS_BOTICA.forEach((m) => modules.add(m))
-  } else {
-    MODULOS_EXCLUSIVOS_RAYEGOTECH.forEach((m) => modules.add(m))
+    return modules
   }
+  if (ctx === 'BOTICA') {
+    const modules = new Set<string>(MODULOS_COMPARTIDOS)
+    MODULOS_EXCLUSIVOS_BOTICA.forEach((m) => modules.add(m))
+    return modules
+  }
+  const modules = new Set<string>(MODULOS_COMPARTIDOS)
+  for (const m of ['inventario', 'sesiones', 'auditoria', 'lotes', 'kardex']) modules.delete(m)
+  MODULOS_EXCLUSIVOS_RAYEGOTECH.forEach((m) => modules.add(m))
   return modules
 }
 
@@ -164,8 +117,7 @@ function resolveLabel(
   baseLabel: string,
 ): string {
   if (ctx === 'RAYEGOTECH') {
-    if (moduleCode === 'inventario') return 'Inventario técnico'
-    if (moduleCode === 'ordenesServicio') return baseLabel
+    if (moduleCode === 'servicioTecnico') return baseLabel || 'Servicio Técnico'
   }
   return baseLabel
 }

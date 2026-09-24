@@ -38,8 +38,16 @@ export const BUSINESS_FEATURES: FeatureMatrix = {
 } as const
 
 export const MODULE_CODE_TO_FEATURE: Readonly<Record<string, BusinessFeatureKey>> = {
+  servicioTecnico: 'module_ordenes_servicio',
   ordenesServicio: 'module_ordenes_servicio',
+  'ordenes_servicio': 'module_ordenes_servicio',
   tecnicos: 'module_tecnicos',
+  equipos: 'module_ordenes_servicio',
+} as const
+
+export const MODULE_CODE_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  servicioTecnico: ['servicioTecnico', 'ordenesServicio', 'ordenes_servicio', 'diagnostico', 'presupuestos', 'reparaciones', 'entregas', 'equipos'],
+  ordenesServicio: ['ordenesServicio', 'ordenes_servicio'],
 } as const
 
 export function getBusinessType(session: AuthSession | null): BusinessType {

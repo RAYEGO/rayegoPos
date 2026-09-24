@@ -3,6 +3,41 @@ import { prisma } from './prisma.js'
 import { isPlatformAdminRole } from '../modules/auth/auth.permissions.js'
 import type { AuthRole } from '../modules/auth/auth.types.js'
 
+const MODULE_CODE_ALIASES_BACKEND: Readonly<Record<string, readonly string[]>> = {
+  ordenesServicio: ['ordenesServicio', 'ordenes_servicio', 'pagosOrdenServicio'],
+  ordenes_servicio: ['ordenes_servicio', 'ordenesServicio', 'pagosOrdenServicio'],
+  pagosOrdenServicio: ['pagosOrdenServicio', 'ordenesServicio', 'ordenes_servicio'],
+  servicioTecnico: ['servicioTecnico', 'ordenesServicio', 'ordenes_servicio', 'pagosOrdenServicio'],
+  diagnostico: ['diagnostico', 'ordenesServicio', 'ordenes_servicio'],
+  presupuestos: ['presupuestos', 'ordenesServicio', 'ordenes_servicio'],
+  reparaciones: ['reparaciones', 'ordenesServicio', 'ordenes_servicio'],
+  entregas: ['entregas', 'ordenesServicio', 'ordenes_servicio'],
+  equipos: ['equipos', 'ordenesServicio', 'ordenes_servicio'],
+} as const
+
+function resolveModuleCodesCanonical(moduleCode: string): ReadonlySet<string> {
+  const direct = MODULE_CODE_ALIASES_BACKEND[moduleCode]
+  if (Array.isArray(direct) && direct.length > 0) return new Set(direct)
+  return new Set([moduleCode])
+}
+
+function isModuleEnabled(enabledModules: readonly string[], moduleCode: string): boolean {
+  if (!moduleCode) return false
+  const normalizedEnabled = Array.isArray(enabledModules) ? enabledModules : []
+  if (normalizedEnabled.length === 0) return true
+  const accepted = resolveModuleCodesCanonical(moduleCode)
+  for (const code of accepted) {
+    if (normalizedEnabled.includes(code)) return true
+    const inverses = MODULE_CODE_ALIASES_BACKEND[code]
+    if (Array.isArray(inverses)) {
+      for (const alias of inverses) {
+        if (normalizedEnabled.includes(alias)) return true
+      }
+    }
+  }
+  return false
+}
+
 type AuthTokenPayload = {
   sub: string
   email: string
@@ -58,10 +93,19 @@ function normalizeRoles(roles: string[] | undefined): AuthRole[] {
   const valid = new Set<AuthRole>([
     'ADMIN',
     'ADMIN_EMPRESA',
+    'ADMIN_BOTICA',
+    'ADMIN_SERVICIO_TECNICO',
     'ADMIN_POS',
     'SUPERVISOR',
+    'SUPERVISOR_BOTICA',
+    'SUPERVISOR_ST',
     'CAJERO',
+    'CAJERO_BOTICA',
+    'CAJERO_ST',
     'ALMACEN',
+    'ALMACEN_BOTICA',
+    'TECNICO',
+    'TECNICO_ST',
   ])
   return roles.filter((r): r is AuthRole => valid.has(r as AuthRole))
 }
@@ -151,7 +195,7 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
     throw createHttpError(409, 'No hay una empresa activa en la sesión.')
   }
 
-  const [branch, membership, userCompanyMatch, companyType] = await Promise.all([
+  const [branch, membership, userCompanyMatch, companyRaw] = await Promise.all([
     prisma.sucursal.findFirst({
       where: { id: branchId, deletedAt: null, activo: true },
       select: { id: true, empresaId: true, activo: true },
@@ -164,36 +208,24 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
       where: { id: userId, deletedAt: null, activo: true, empresaId: companyId },
       select: { id: true, sucursalId: true, updatedAt: true },
     }),
-    prisma.empresa
-      .findFirst({
-        where: { id: companyId, deletedAt: null, activo: true },
-        select: {
-          tipoEmpresaId: true,
-          tipoEmpresa: {
-            select: {
-              id: true,
-              codigo: true,
-              activo: true,
-              modulos: {
-                where: { activo: true },
-                select: { moduloCodigo: true },
-              },
+    prisma.empresa.findFirst({
+      where: { id: companyId, deletedAt: null },
+      select: {
+        activo: true,
+        tipoEmpresaId: true,
+        tipoEmpresa: {
+          select: {
+            id: true,
+            codigo: true,
+            activo: true,
+            modulos: {
+              where: { activo: true },
+              select: { moduloCodigo: true },
             },
           },
         },
-      })
-      .then((empresa) => {
-        const tipo = empresa?.tipoEmpresa
-        if (!tipo || !tipo.activo) return { companyTypeId: null, companyTypeCode: null, enabledModules: [] as string[] }
-        const enabledModules = Array.isArray(tipo.modulos)
-          ? tipo.modulos.map((m) => (m as { moduloCodigo?: string }).moduloCodigo).filter((m): m is string => Boolean(m))
-          : ([] as string[])
-        return {
-          companyTypeId: tipo.id,
-          companyTypeCode: tipo.codigo,
-          enabledModules,
-        }
-      }),
+      },
+    }),
   ])
 
   if (!branch) {
@@ -202,9 +234,36 @@ export async function getAuthContext(request: FastifyRequest): Promise<AuthConte
   if (branch.empresaId !== companyId) {
     throw createHttpError(409, 'La sucursal seleccionada pertenece a una empresa distinta a la de tu sesión.')
   }
+  if (!companyRaw) {
+    throw createHttpError(409, 'La empresa asociada a la sesión no existe o fue eliminada.')
+  }
+  if (!companyRaw.activo) {
+    throw createHttpError(
+      409,
+      'La empresa se encuentra desactivada. Comunícate con el administrador de plataforma para solicitar su reactivación.',
+      'EMPRESA_INACTIVA',
+    )
+  }
   if (!userCompanyMatch) {
     throw createHttpError(401, 'El usuario no pertenece a la empresa de la sesión.')
   }
+
+  const tipo = companyRaw.tipoEmpresa
+  const companyType =
+    !tipo || !tipo.activo
+      ? { companyTypeId: null, companyTypeCode: null, enabledModules: [] as string[] }
+      : (() => {
+          const enabledModules = Array.isArray(tipo.modulos)
+            ? tipo.modulos
+                .map((m) => (m as { moduloCodigo?: string }).moduloCodigo)
+                .filter((m): m is string => Boolean(m))
+            : ([] as string[])
+          return {
+            companyTypeId: tipo.id,
+            companyTypeCode: tipo.codigo,
+            enabledModules,
+          }
+        })()
 
   if (rawTokenPermissions.length === 0) {
     throw createHttpError(
@@ -291,14 +350,13 @@ export async function requirePermission(request: FastifyRequest, permissionCode:
 
   if (permissionCode === '*') return ctx
   if (ctx.isPlatformAdmin) return ctx
-  if (ctx.roles.includes('ADMIN')) return ctx
 
   const moduleCode = permissionToModuleCode(permissionCode)
   const ctxEnabledModules = Array.isArray(ctx.enabledModules) ? ctx.enabledModules : ([] as string[])
 
   const platform = ctx as PlatformAuthContext
   const platformModules = Array.isArray(platform.enabledModules) ? platform.enabledModules : ([] as string[])
-  if (platformModules.length > 0 && !platformModules.includes(moduleCode)) {
+  if (platformModules.length > 0 && !isModuleEnabled(platformModules, moduleCode)) {
     throw createHttpError(
       403,
       `El módulo "${moduleCode}" no está habilitado para empresas de tipo ${platform.companyTypeCode ?? 'desconocido'}.`,
@@ -307,7 +365,7 @@ export async function requirePermission(request: FastifyRequest, permissionCode:
 
   if (permissionCode.endsWith('.read') || permissionCode.endsWith('.manage') || permissionCode.endsWith('.revoke') || permissionCode.endsWith('.write') || permissionCode.endsWith('.cambioEstado')) {
     if (!ctx.isPlatformAdmin) {
-      if (!ctxEnabledModules.includes(moduleCode) && moduleCode !== permissionCode) {
+      if (!isModuleEnabled(ctxEnabledModules, moduleCode) && moduleCode !== permissionCode) {
         throw createHttpError(403, 'No tienes autorización para usar este módulo.')
       }
     }
@@ -324,6 +382,79 @@ export async function requirePermission(request: FastifyRequest, permissionCode:
     throw createHttpError(
       403,
       `No tienes autorización para realizar esta acción. Requiere ${label}.`,
+    )
+  }
+  return ctx
+}
+
+const ROLES_CIERRE_CAJA_BOTICA: ReadonlySet<AuthRole> = new Set([
+  'ADMIN',
+  'ADMIN_EMPRESA',
+  'ADMIN_POS',
+  'ADMIN_BOTICA',
+  'SUPERVISOR',
+  'SUPERVISOR_BOTICA',
+])
+const ROLES_CIERRE_CAJA_ST: ReadonlySet<AuthRole> = new Set([
+  'ADMIN',
+  'ADMIN_EMPRESA',
+  'ADMIN_POS',
+  'ADMIN_SERVICIO_TECNICO',
+  'SUPERVISOR',
+  'SUPERVISOR_ST',
+])
+const ROLES_ADMIN_CAJAS_ESTRUCTURAL_BOTICA: ReadonlySet<AuthRole> = new Set(['ADMIN_BOTICA'])
+const ROLES_ADMIN_CAJAS_ESTRUCTURAL_ST: ReadonlySet<AuthRole> = new Set(['ADMIN_SERVICIO_TECNICO'])
+
+export async function requireCanCloseCashDrawer(request: FastifyRequest): Promise<AuthContext> {
+  const ctx = await getAuthContext(request)
+  if (ctx.isPlatformAdmin) {
+    throw createHttpError(
+      403,
+      'El administrador de plataforma no opera cajas. Utiliza un rol de empresa para cerrar la caja.',
+      'CIERRE_CAJA_SOLO_ROL_EMPRESA',
+    )
+  }
+  const platformCtx = ctx as PlatformAuthContext
+  const rolesUsuario = platformCtx.roles
+  const tipo = platformCtx.companyTypeCode
+  const esST = tipo === 'SERVICIO_TECNICO'
+  const permitidos = esST ? ROLES_CIERRE_CAJA_ST : ROLES_CIERRE_CAJA_BOTICA
+  const puede = rolesUsuario.some((r) => permitidos.has(r))
+  if (!puede) {
+    throw createHttpError(
+      403,
+      esST
+        ? 'No tienes permisos para cerrar la caja. Contacta al Administrador de Servicio Técnico.'
+        : 'No tienes permisos para cerrar la caja. Contacta al Administrador de Botica o Supervisor.',
+      'CIERRE_CAJA_NO_AUTORIZADO',
+    )
+  }
+  return ctx
+}
+
+export async function requireCanAdminCajasEstructuralmente(request: FastifyRequest): Promise<AuthContext> {
+  const ctx = await getAuthContext(request)
+  if (ctx.isPlatformAdmin) {
+    throw createHttpError(
+      403,
+      'El administrador de plataforma no gestiona cajas operativas. Utiliza un rol de empresa.',
+      'ADMIN_CAJAS_SOLO_ROL_EMPRESA',
+    )
+  }
+  const platformCtx = ctx as PlatformAuthContext
+  const rolesUsuario = platformCtx.roles
+  const tipo = platformCtx.companyTypeCode
+  const esST = tipo === 'SERVICIO_TECNICO'
+  const permitidos = esST ? ROLES_ADMIN_CAJAS_ESTRUCTURAL_ST : ROLES_ADMIN_CAJAS_ESTRUCTURAL_BOTICA
+  const puede = rolesUsuario.some((r) => permitidos.has(r))
+  if (!puede) {
+    throw createHttpError(
+      409,
+      esST
+        ? 'No existen cajas configuradas para esta sucursal. Contacta al Administrador de Servicio Técnico para crear una.'
+        : 'No existen cajas configuradas para esta sucursal. Contacta al Administrador de Botica para crear una.',
+      'CAJA_INEXISTENTE_SIN_PERMISO_CREACION',
     )
   }
   return ctx

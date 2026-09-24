@@ -1,6 +1,7 @@
 import type { AuthPermission, AuthRole, AuthSession } from '@/types/auth'
 import {
   isFeatureEnabled,
+  MODULE_CODE_ALIASES,
   MODULE_CODE_TO_FEATURE,
 } from '@/config/features'
 
@@ -24,6 +25,12 @@ export function permissionToModuleCode(permissionCode: string): string {
   return permissionCode.split('.')[0] ?? permissionCode
 }
 
+function resolveModuleCodes(moduleCode: string): readonly string[] {
+  const aliases = MODULE_CODE_ALIASES[moduleCode]
+  if (aliases?.length) return aliases
+  return [moduleCode]
+}
+
 export function hasEnabledModule(
   session: AuthSession | null,
   moduleCode: string,
@@ -35,7 +42,8 @@ export function hasEnabledModule(
   if (!Array.isArray(enabledModules) || enabledModules.length === 0) {
     return true
   }
-  return enabledModules.includes(moduleCode)
+  const codes = resolveModuleCodes(moduleCode)
+  return codes.some((code) => enabledModules.includes(code))
 }
 
 export function hasPermission(

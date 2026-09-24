@@ -968,3 +968,256 @@ export async function registerCustomerPayment(
 
   return result
 }
+
+// ============================================================
+// Integración API Perú — Bloque 4
+// ============================================================
+
+type LookupApiPeruDNIPayload = { dni: string }
+type LookupApiPeruRUCPayload = { ruc: string }
+type LookupDocumentKind = 'DNI' | 'RUC'
+
+export type LookupApiPeruClientDraft = {
+  numeroDocumento: string
+  tipoDocumento: LookupDocumentKind
+  tipoPersona: TipoPersona
+  nombres?: string
+  apellidoPaterno?: string
+  apellidoMaterno?: string
+  apellidos?: string
+  razonSocial?: string
+  direccion?: string
+  estado?: string
+  condicion?: string
+}
+
+export type LookupDocumentResponse =
+  | { source: 'local'; found: true; cliente: ReturnType<typeof mapCustomer> }
+  | { source: 'local'; found: false }
+  | { source: 'api_peru'; found: true; cliente: LookupApiPeruClientDraft }
+  | {
+      source: 'api_peru'
+      found: false
+      reason?: 'NOT_FOUND' | 'EXTERNAL_ERROR' | 'UNSUPPORTED_DOCUMENT_TYPE'
+    }
+
+function detectDocumentKind(
+  normalized: string,
+): { kind: LookupDocumentKind } | null {
+  if (/^\d{8}$/.test(normalized)) return { kind: 'DNI' }
+  if (/^\d{11}$/.test(normalized)) return { kind: 'RUC' }
+  return null
+}
+
+function pickString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function normalizeApiPeruDNIResponse(
+  documentNumber: string,
+  payload: unknown,
+): LookupApiPeruClientDraft | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const asRecord = payload as Record<string, unknown>
+  const data =
+    asRecord.data && typeof asRecord.data === 'object' && asRecord.data !== null
+      ? (asRecord.data as Record<string, unknown>)
+      : asRecord
+
+  const nombres = pickString(data.nombres ?? data.name ?? data.firstName)
+  const paterno = pickString(
+    data.apellidoPaterno ??
+      data.apellido_paterno ??
+      data.paterno ??
+      data.lastName,
+  )
+  const materno = pickString(
+    data.apellidoMaterno ?? data.apellido_materno ?? data.materno,
+  )
+  const apellidos =
+    paterno && materno ? `${paterno} ${materno}`.trim() : (paterno ?? materno)
+
+  if (!nombres && !apellidos) return null
+
+  return {
+    numeroDocumento: documentNumber,
+    tipoDocumento: 'DNI',
+    tipoPersona: TipoPersona.NATURAL,
+    nombres,
+    apellidoPaterno: paterno,
+    apellidoMaterno: materno,
+    apellidos,
+  }
+}
+
+function normalizeApiPeruRUCResponse(
+  documentNumber: string,
+  payload: unknown,
+): LookupApiPeruClientDraft | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const asRecord = payload as Record<string, unknown>
+  const data =
+    asRecord.data && typeof asRecord.data === 'object' && asRecord.data !== null
+      ? (asRecord.data as Record<string, unknown>)
+      : asRecord
+
+  const razonSocial = pickString(
+    data.nombre_o_razon_social ??
+      data.razonSocial ??
+      data.razon_social ??
+      data.businessName ??
+      data.name,
+  )
+  const direccion = pickString(
+    data.direccion_completa ??
+      data.direccion ??
+      data.domicilioFiscal ??
+      data.address,
+  )
+  const estado = pickString(data.estado ?? data.status)
+  const condicion = pickString(data.condicion ?? data.condition)
+
+  if (!razonSocial) return null
+
+  return {
+    numeroDocumento: documentNumber,
+    tipoDocumento: 'RUC',
+    tipoPersona: TipoPersona.JURIDICA,
+    razonSocial,
+    direccion,
+    estado,
+    condicion,
+  }
+}
+
+async function callApiPeruDNI(
+  documentNumber: string,
+  token: string,
+): Promise<{ found: true; data: LookupApiPeruClientDraft } | { found: false; reason: 'NOT_FOUND' | 'EXTERNAL_ERROR' }> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const payload: LookupApiPeruDNIPayload = { dni: documentNumber }
+    const response = await fetch('https://api.apiperu.pe/dni', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (response.status === 404) return { found: false, reason: 'NOT_FOUND' }
+    if (response.status >= 400) return { found: false, reason: 'EXTERNAL_ERROR' }
+
+    let parsed: unknown
+    try {
+      parsed = await response.json()
+    } catch {
+      return { found: false, reason: 'EXTERNAL_ERROR' }
+    }
+
+    const success = parsed && typeof parsed === 'object' && 'success' in (parsed as Record<string, unknown>)
+      ? (parsed as Record<string, unknown>).success === true
+      : response.status >= 200 && response.status < 300
+
+    if (!success) return { found: false, reason: 'NOT_FOUND' }
+    const normalized = normalizeApiPeruDNIResponse(documentNumber, parsed)
+    if (!normalized) return { found: false, reason: 'NOT_FOUND' }
+    return { found: true, data: normalized }
+  } catch {
+    return { found: false, reason: 'EXTERNAL_ERROR' }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function callApiPeruRUC(
+  documentNumber: string,
+  token: string,
+): Promise<{ found: true; data: LookupApiPeruClientDraft } | { found: false; reason: 'NOT_FOUND' | 'EXTERNAL_ERROR' }> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const payload: LookupApiPeruRUCPayload = { ruc: documentNumber }
+    const response = await fetch('https://api.apiperu.pe/ruc', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (response.status === 404) return { found: false, reason: 'NOT_FOUND' }
+    if (response.status >= 400) return { found: false, reason: 'EXTERNAL_ERROR' }
+
+    let parsed: unknown
+    try {
+      parsed = await response.json()
+    } catch {
+      return { found: false, reason: 'EXTERNAL_ERROR' }
+    }
+
+    const success =
+      parsed && typeof parsed === 'object' && 'success' in (parsed as Record<string, unknown>)
+        ? (parsed as Record<string, unknown>).success === true
+        : response.status >= 200 && response.status < 300
+
+    if (!success) return { found: false, reason: 'NOT_FOUND' }
+    const normalized = normalizeApiPeruRUCResponse(documentNumber, parsed)
+    if (!normalized) return { found: false, reason: 'NOT_FOUND' }
+    return { found: true, data: normalized }
+  } catch {
+    return { found: false, reason: 'EXTERNAL_ERROR' }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export async function lookupDocumentByNumber(
+  documento: string,
+  request: FastifyRequest,
+): Promise<LookupDocumentResponse> {
+  const { companyId } = await requireBranchAuthContext(request)
+  const normalized = documento.trim()
+
+  const localCustomer = await prisma.cliente.findFirst({
+    where: {
+      deletedAt: null,
+      empresaId: companyId,
+      numeroDocumento: normalized,
+    },
+    include: customerInclude,
+  })
+
+  if (localCustomer) {
+    return { source: 'local', found: true, cliente: mapCustomer(localCustomer) }
+  }
+
+  const detected = detectDocumentKind(normalized)
+  if (!detected) {
+    return { source: 'local', found: false }
+  }
+
+  const token = process.env.API_PERU_API_KEY?.trim() ?? ''
+  if (!token) {
+    return { source: 'api_peru', found: false, reason: 'EXTERNAL_ERROR' }
+  }
+
+  if (detected.kind === 'DNI') {
+    const result = await callApiPeruDNI(normalized, token)
+    return result.found
+      ? { source: 'api_peru', found: true, cliente: result.data }
+      : { source: 'api_peru', found: false, reason: result.reason }
+  }
+
+  const result = await callApiPeruRUC(normalized, token)
+  return result.found
+    ? { source: 'api_peru', found: true, cliente: result.data }
+    : { source: 'api_peru', found: false, reason: result.reason }
+}
